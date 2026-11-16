@@ -3,7 +3,96 @@ title: Targets and masking
 description: Separate known information from the answers a model learns to predict.
 ---
 
-import ConceptPage from '../../../components/ConceptPage.astro';
-import { targets } from '../../../data/concepts/targets';
+relflow models use the information in a model tree to predict values within
+that same tree. The leaves we ask a model to predict are called **targets**.
+Masking allows us to hide those values from the model’s inputs while retaining
+their observed answers for learning.
 
-<ConceptPage concept={targets} />
+Targets are defined as part of the model schema. Each target has a
+[leaf type](/concepts/data-types/), which determines how its answer is
+represented and how its predictions are evaluated during training.
+
+## Declaring targets
+
+Set `mask=True` on a leaf to make it a supervised prediction target.
+
+```python
+import relflow as rf
+
+
+class Claim(rf.Branch):
+    """One submitted claim and its settled outcomes."""
+
+    amount = rf.Number
+    paid_amount = rf.Number(mask=True)
+    is_fraudulent = rf.Boolean(mask=True)
+
+
+class ClaimsModel(rf.Model):
+    """A policy and the claims submitted against it."""
+
+    policy_type = rf.Category
+    claims = Claim
+```
+
+In this model, `policy_type` and each claim’s `amount` provide context.
+`paid_amount` and `is_fraudulent` are the answers to learn. The numeric target
+learns a payout amount; the Boolean target learns the probability of fraud.
+Both draw on the context available within the model tree.
+
+The `mask=True` shorthand combines two choices: the leaf is excluded from
+input embedding, and its observed values supply a reconstruction objective.
+Its full declaration is `rf.Mask(skip=True, dropout=False, reconstruct=True)`.
+
+## Learning from hidden answers
+
+Historical training records include the target values alongside their context.
+For the claims model, each settled claim includes its actual payout and fraud
+outcome. relflow retains those answers separately from the visible inputs, so
+the model can be trained against values it has not been allowed to see.
+
+Validation and test records also include observed answers. These are hidden in
+the same way and used to evaluate the model. New prediction requests supply
+the context and may omit the target fields; the fitted model returns its
+predictions under the names and nesting declared in the schema.
+
+The source records still define what information is available at prediction
+time. For example, a final investigation report may establish a fraud label,
+but it would not have been available when the claim was submitted. Keep that
+prediction boundary consistent when preparing historical observations.
+
+## Multiple and nested targets
+
+A model can learn several targets together, including targets with different
+types. Each target leaf supplies its own learning objective. This allows numeric,
+categorical, and other supported prediction tasks to share context within one
+model, while retaining their own output representations and evaluation metrics.
+
+A target’s position in the tree determines which record its answer describes.
+A target at the root describes the complete observation. A target inside a
+[context branch](/concepts/branches/) describes each retained record in that
+collection. In the schema above, `/claims/paid_amount` and
+`/claims/is_fraudulent` belong to each individual claim, rather than the policy
+as a whole.
+
+The prediction output follows these same relationships. A policy with several
+claims receives a corresponding collection of claim predictions, with both
+answers attached to the claim they describe. The supplied records define the
+collection; these targets predict their values rather than creating new claims.
+
+## Masking known inputs
+
+Masking can also hide values which would ordinarily be available as context.
+For example, `rf.Number(mask=0.1)` randomly hides input values during training.
+This input dropout encourages the model to work with incomplete context,
+without adding a reconstruction objective for that leaf. It is disabled during
+validation, testing, and prediction.
+
+To teach the model to reconstruct a sampled portion of an observed field, use
+an explicit policy such as `rf.Mask(rate=0.1, reconstruct=True)`. Here, selected
+values provide their own training answers. This is useful for learning from
+existing data before adding a supervised business target.
+
+See [Masking and pretraining](/advanced/masking-and-pretraining/) for sampled
+reconstruction, source-driven selection, and branch-level policies. Continue to
+[Runtime](/concepts/runtime/) for fitting, evaluating, and using the model.

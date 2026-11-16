@@ -1,12 +1,5 @@
+import type { Value } from '../values/types';
 import type { Dataset } from '../datasets/types';
-
-export type ExampleValue =
-  | string
-  | number
-  | boolean
-  | null
-  | ExampleValue[]
-  | { [key: string]: ExampleValue };
 
 export interface TypeExample {
   id: string;
@@ -16,16 +9,16 @@ export interface TypeExample {
   description: string;
   dataset: Dataset;
   schema: string;
-  inputs: Record<string, ExampleValue>;
-  answers: Record<string, ExampleValue>;
+  inputs: Record<string, Value>;
+  answers: Record<string, Value>;
   answerNote?: string;
   /** One illustrative row from model.predict(...). */
-  output: Record<string, ExampleValue>;
+  output: Record<string, Value>;
   outputNote: string;
   takeaway: string;
 }
 
-export function prediction(content: ExampleValue): Record<string, ExampleValue> {
+export function prediction(content: Value): Record<string, Value> {
   return {
     state: { valued: 0.96, null: 0.01, padded: 0.01, masked: 0.01, other: 0.01 },
     content,

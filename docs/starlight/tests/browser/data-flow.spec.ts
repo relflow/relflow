@@ -28,6 +28,12 @@ async function phase(root: Locator, caseId: string, mode: FlowMode, id: FlowStag
   await expect(root).toHaveAttribute('data-flow-mode', mode);
   await expect(root).toHaveAttribute('data-flow-stage', id);
   await expect(stage(root, caseId, id)).toHaveAttribute('data-flow-active', '');
+  await expect(stage(root, caseId, id)).toBeVisible();
+  await expect(root.locator('details[data-flow-stage]:visible')).toHaveCount(1);
+  await expect(root.locator(`[data-case="${caseId}"] [data-flow-select="${id}"]`)).toHaveAttribute(
+    'aria-current',
+    'step',
+  );
 }
 
 test('all six cases expose seven ordered stages per path and navigate forward, backward, and into another batch', async ({
@@ -46,11 +52,11 @@ test('all six cases expose seven ordered stages per path and navigate forward, b
       const path = flowPaths[mode];
       await root.locator(`[data-flow-mode-select="${mode}"]`).click();
       await phase(root, caseId, mode, 'load');
-      const visible = root.locator(`[data-case="${caseId}"] details[data-flow-stage]:visible`);
-      await expect(visible).toHaveCount(7);
+      const steps = root.locator(`[data-case="${caseId}"] [data-flow-select]:visible`);
+      await expect(steps).toHaveCount(7);
       expect(
-        await visible.evaluateAll((nodes) =>
-          nodes.map((node) => node.getAttribute('data-flow-stage')),
+        await steps.evaluateAll((nodes) =>
+          nodes.map((node) => node.getAttribute('data-flow-select')),
         ),
       ).toEqual([...path]);
       await expect(root.locator(`[data-flow-mode-select="${mode}"]`)).toHaveAttribute(
@@ -137,6 +143,9 @@ test('nested disclosures stay inside their phase and prediction controls retain 
   const root = page.locator('[data-data-flow]');
   await expect(root).toHaveAttribute('data-flow-ready', '');
   const model = stage(root, 'claims', 'model');
+  await model.locator(':scope > summary').click();
+  await expect(model).toHaveJSProperty('open', true);
+  await phase(root, 'claims', 'predict', 'model');
   const branch = model.locator('[data-tree] details').first();
   await expect(branch).toHaveJSProperty('open', true);
   await branch.locator(':scope > summary').click();
@@ -153,7 +162,7 @@ test('nested disclosures stay inside their phase and prediction controls retain 
   await expect(code).toHaveJSProperty('open', false);
   await phase(root, 'claims', 'predict', 'model');
 
-  await stage(root, 'claims', 'result').locator(':scope > summary').click();
+  await root.locator('[data-case="claims"] [data-flow-select="result"]').click();
   await phase(root, 'claims', 'predict', 'result');
   const tree = stage(root, 'claims', 'result').locator('[data-value-tree]');
   await tree.locator('[data-tree-collapse]').click();
@@ -175,7 +184,42 @@ test('nested disclosures stay inside their phase and prediction controls retain 
   await phase(root, 'claims', 'predict', 'result');
 });
 
-test('without JavaScript all six cases and both labelled paths remain readable through native disclosures', async ({
+test('stage links support direct selection and keyboard navigation along the active path', async ({
+  page,
+}) => {
+  await page.goto('/concepts/data-flow/?case=claims&mode=predict#flow-claims-load');
+  const root = page.locator('[data-data-flow]');
+  await expect(root).toHaveAttribute('data-flow-ready', '');
+  const link = (id: FlowStageId) => root.locator(`[data-case="claims"] [data-flow-select="${id}"]`);
+
+  await link('prepare').click();
+  await phase(root, 'claims', 'predict', 'prepare');
+  await link('prepare').focus();
+  await page.keyboard.press('ArrowDown');
+  await phase(root, 'claims', 'predict', 'model');
+  await expect(link('model')).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await phase(root, 'claims', 'predict', 'prepare');
+  await expect(link('prepare')).toBeFocused();
+  await page.keyboard.press('End');
+  await phase(root, 'claims', 'predict', 'result');
+  await expect(link('result')).toBeFocused();
+  await page.keyboard.press('Home');
+  await phase(root, 'claims', 'predict', 'load');
+  await expect(link('load')).toBeFocused();
+
+  await root.locator('[data-flow-mode-select="train"]').click();
+  await link('model').click();
+  await link('model').focus();
+  await page.keyboard.press('ArrowDown');
+  await phase(root, 'claims', 'train', 'loss');
+  await expect(link('loss')).toBeFocused();
+  await page.keyboard.press('End');
+  await phase(root, 'claims', 'train', 'update');
+  await expect(link('update')).toBeFocused();
+});
+
+test('without JavaScript all six cases and both paths remain readable through native disclosures', async ({
   browser,
   baseURL,
   page,
@@ -191,13 +235,17 @@ test('without JavaScript all six cases and both labelled paths remain readable t
     await expect(root.locator('[data-case]:visible')).toHaveCount(6);
     for (const caseId of caseIds) {
       const panel = root.locator(`[data-case="${caseId}"]`);
-      for (const mode of ['predict', 'train'] as const) {
-        const path = panel.locator(`[data-flow-path="${mode}"]`);
-        await expect(path).toBeVisible();
-        await expect(path.locator(':scope > h4')).toHaveText(
-          mode === 'train' ? 'Training path' : 'Prediction path',
+      await expect(panel.locator('details[data-flow-stage]:visible')).toHaveCount(10);
+      await expect(panel.locator('details[data-flow-stage][open]')).toHaveCount(10);
+      for (const id of flowPaths.predict.slice(0, 4))
+        await expect(stage(root, caseId, id).locator('summary [data-flow-stage-mode]')).toHaveText(
+          'Shared stages',
         );
-      }
+      for (const mode of ['predict', 'train'] as const)
+        for (const id of flowPaths[mode].slice(4))
+          await expect(
+            stage(root, caseId, id).locator('summary [data-flow-stage-mode]'),
+          ).toHaveText(mode === 'train' ? 'Training path' : 'Prediction path');
       expect(
         await panel
           .locator('details[data-flow-stage]:visible')
@@ -277,8 +325,9 @@ test('the requested mode, path, and stage keep their first-paint geometry while 
     await expect(root).toHaveAttribute('data-flow-initial-stage', 'loss');
     await expect(root.locator('[data-case]:visible')).toHaveCount(1);
     await expect(root.locator('[data-case="claims"] details[data-flow-stage]:visible')).toHaveCount(
-      7,
+      1,
     );
+    await expect(root.locator('[data-case="claims"] [data-flow-select]:visible')).toHaveCount(7);
     await expect(root.locator('[data-case="claims"] .df-stage-body:visible')).toHaveCount(1);
     const geometry = () =>
       root.evaluate((element) => {
@@ -294,7 +343,8 @@ test('the requested mode, path, and stage keep their first-paint geometry while 
         return {
           cases: box('.case-picker'),
           modes: box('.df-mode-picker'),
-          summary: box('#flow-claims-loss > summary'),
+          selected: box('[data-case="claims"] [data-flow-select="loss"]'),
+          stage: box('#flow-claims-loss'),
         };
       });
     const before = await geometry();
@@ -312,7 +362,7 @@ test('the requested mode, path, and stage keep their first-paint geometry while 
     await phase(root, 'claims', 'train', 'loss');
     await expect(stage(root, 'claims', 'loss')).toHaveJSProperty('open', true);
     const after = await geometry();
-    for (const control of ['cases', 'modes', 'summary'] as const)
+    for (const control of ['cases', 'modes', 'selected', 'stage'] as const)
       for (const dimension of ['x', 'y', 'width', 'height'] as const)
         expect(
           Math.abs(after[control][dimension] - before[control][dimension]),

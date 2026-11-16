@@ -3,13 +3,12 @@ import test from 'node:test';
 import { checkSections } from '../src/datatypes/page.ts';
 
 const contract = [
-  ['inputs', 'Inputs'],
-  ['predictions', 'Predictions'],
-  ['options', 'Options'],
-  ['request-methods', 'Request Methods'],
-  ['footguns', 'Footguns'],
-  ['related-types', 'Related types'],
-  ['evidence', 'Evidence'],
+  ['input-values', 'Input values'],
+  ['standardization-and-processor-pipelines', 'Standardization and processor pipelines'],
+  ['how-is-this-leaf-trained', 'How is this leaf trained?'],
+  ['leaf-specific-parameters', 'Leaf-specific parameters'],
+  ['errors-raised', 'Errors raised'],
+  ['relevant-evidence', 'Relevant evidence'],
 ];
 
 function section(id, title) {
@@ -41,7 +40,7 @@ test('missing or reordered sections fail with page identity and the observed con
     .join('');
   assert.throws(
     () => checkSections(missing, 'duration-examples'),
-    /duration-examples.*Inputs.*received Predictions/,
+    /duration-examples.*Input values.*received Standardization/,
   );
   const swapped = [...contract];
   [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
@@ -55,11 +54,11 @@ test('missing or reordered sections fail with page identity and the observed con
 test('duplicate sections, extra sections, changed titles, and broken deep-link IDs are rejected', () => {
   const body = contract.map(([id, title]) => section(id, title)).join('');
   for (const changed of [
-    body + section('evidence', 'Evidence'),
+    body + section('relevant-evidence', 'Relevant evidence'),
     body + section('extra', 'Additional section'),
-    body.replace('>Request Methods</h2>', '>Requests</h2>'),
-    body.replace('id="related-types"', 'id="related"'),
-    body.replace(' id="inputs"', ''),
+    body.replace('>Input values</h2>', '>Inputs</h2>'),
+    body.replace('id="errors-raised"', 'id="errors"'),
+    body.replace(' id="input-values"', ''),
   ])
     assert.throws(() => checkSections(changed, 'category-examples'), /must provide/);
 });
@@ -68,7 +67,7 @@ test('section titles retain inline Markdown text while requiring actual level-tw
   const body = contract.map(([id, title]) => section(id, title)).join('');
   assert.doesNotThrow(() =>
     checkSections(
-      body.replace('>Request Methods</h2>', '>Request <em>Methods</em></h2>'),
+      body.replace('>Input values</h2>', '>Input <em>values</em></h2>'),
       'set-examples',
     ),
   );

@@ -1,4 +1,7 @@
 ---
+import EvidenceTypes from './EvidenceTypes.astro';
+import { comparison } from '../evidence/comparison';
+import { leafTypes, question, typesFor } from '../evidence/catalog';
 import { evidenceEntries, selection } from '../evidence/data';
 import { experimentURL, formatValue, recordDate, status } from '../evidence/presentation';
 
@@ -17,7 +20,13 @@ const familyLabels: Record<string, string> = {
   Temporal: 'Dates and time',
   Vocabulary: 'Labels and vocabularies',
 };
-const entries = evidenceEntries.map((entry) => ({ ...entry, state: status(entry) }));
+const entries = evidenceEntries.map((entry) => ({
+  ...entry,
+  state: status(entry),
+  question: question(entry),
+  types: typesFor(entry.id),
+  primary: comparison(entry),
+}));
 const families = [...new Set(entries.map((entry) => entry.family))]
   .map((id) => ({ id, label: familyLabels[id] || id }))
   .sort((a, b) => a.label.localeCompare(b.label));
@@ -77,21 +86,24 @@ const lastRecorded = recorded
         <p class="selection-description">{selectionReason}</p>
       )
     }
-    <div class="selection-links">
-      <a href="/evidence/selected.json" download>Results JSON ↓</a>
-      {selection.report.release && <a href={selection.report.release}>Execution archive ↗</a>}
-      {
-        selection.report.github_run?.html_url && (
-          <a href={selection.report.github_run.html_url}>CI run ↗</a>
-        )
-      }
-    </div>
-    <dl class="library-summary">
-      <div><dt>Experiments shown</dt><dd>{entries.length}</dd></div>
-      <div><dt>Full learning runs</dt><dd>{fullRuns}</dd></div>
-      <div><dt>Runs with checks met</dt><dd>{stateCount('met')}</dd></div>
-      <div><dt>Runs with unmet checks</dt><dd>{stateCount('not_met')}</dd></div>
-    </dl>
+    <details class="selection-details">
+      <summary>Publication details and downloads</summary>
+      <div class="selection-links">
+        <a href="/evidence/selected.json" download>Results JSON ↓</a>
+        {selection.report.release && <a href={selection.report.release}>Execution archive ↗</a>}
+        {
+          selection.report.github_run?.html_url && (
+            <a href={selection.report.github_run.html_url}>CI run ↗</a>
+          )
+        }
+      </div>
+      <dl class="library-summary">
+        <div><dt>Experiments shown</dt><dd>{entries.length}</dd></div>
+        <div><dt>Full learning runs</dt><dd>{fullRuns}</dd></div>
+        <div><dt>Runs with checks met</dt><dd>{stateCount('met')}</dd></div>
+        <div><dt>Runs with unmet checks</dt><dd>{stateCount('not_met')}</dd></div>
+      </dl>
+    </details>
   </header>
 
   <div class="library-controls">
@@ -111,6 +123,17 @@ const lastRecorded = recorded
       <select data-library-family aria-controls="evidence-results">
         <option value="">All capabilities</option>
         {families.map((family) => <option value={family.id}>{family.label}</option>)}
+      </select>
+    </label>
+    <label
+      >Leaf type
+      <select data-library-type aria-controls="evidence-results">
+        <option value="">All leaf types</option>
+        {
+          leafTypes
+            .filter((type) => entries.some((entry) => entry.types.includes(type)))
+            .map((type) => <option value={type}>{type}</option>)
+        }
       </select>
     </label>
     <label
@@ -142,9 +165,7 @@ const lastRecorded = recorded
         const result = entry.result;
         const measured = entry.state.id === 'met' || entry.state.id === 'not_met';
         const checks = measured && result ? Object.values(result.checks) : [];
-        const readouts = measured
-          ? entry.readouts.filter((readout) => readout.value !== null).slice(0, 3)
-          : [];
+        const readouts = entry.primary.available ? entry.primary.points : [];
         const family = familyLabels[entry.family] || entry.family;
         return (
           <li
@@ -152,7 +173,8 @@ const lastRecorded = recorded
             data-evidence-entry
             data-family={entry.family}
             data-status={entry.state.id}
-            data-search={`${entry.id} ${entry.family} ${family} ${entry.title} ${entry.description} ${entry.lane} ${entry.archived ? 'archived' : ''} ${entry.requirements.join(' ')}`.toLowerCase()}
+            data-types={entry.types.join(' ')}
+            data-search={`${entry.id} ${entry.family} ${family} ${entry.question} ${entry.title} ${entry.types.join(' ')} ${entry.description} ${entry.lane} ${entry.archived ? 'archived' : ''} ${entry.requirements.join(' ')}`.toLowerCase()}
           >
             <article aria-labelledby={`${entry.id}-title`}>
               <div class="entry-labels">
@@ -162,8 +184,9 @@ const lastRecorded = recorded
                 {entry.archived && <span>Archived experiment</span>}
               </div>
               <h3 id={`${entry.id}-title`}>
-                <a href={experimentURL(entry.id)}>{entry.title}</a>
+                <a href={experimentURL(entry.id)}>{entry.question}</a>
               </h3>
+              <EvidenceTypes id={entry.id} />
               <p class="entry-description">{entry.description}</p>
               {readouts.length > 0 && (
                 <dl class="readouts">
@@ -171,10 +194,7 @@ const lastRecorded = recorded
                     <div>
                       <dt>{readout.label}</dt>
                       <dd>{formatValue(readout.value, readout.format)}</dd>
-                      {readout.format === 'auc' && <span class="readout-format">AUC</span>}
-                      {readout.format === 'error' && (
-                        <span class="readout-format">Error ratio</span>
-                      )}
+                      <span class="readout-format">{entry.primary.metric}</span>
                     </div>
                   ))}
                 </dl>
@@ -211,6 +231,7 @@ const lastRecorded = recorded
     const search = root.querySelector<HTMLInputElement>('[data-library-search]')!;
     const family = root.querySelector<HTMLSelectElement>('[data-library-family]')!;
     const status = root.querySelector<HTMLSelectElement>('[data-library-status]')!;
+    const type = root.querySelector<HTMLSelectElement>('[data-library-type]')!;
     const reset = root.querySelector<HTMLButtonElement>('[data-library-reset]')!;
     const count = root.querySelector<HTMLElement>('[data-library-count]')!;
     const empty = root.querySelector<HTMLElement>('[data-library-empty]')!;
@@ -221,8 +242,10 @@ const lastRecorded = recorded
       search.value = params.get('q') || '';
       family.value = params.get('family') || '';
       status.value = params.get('status') || '';
+      type.value = params.get('type') || '';
       if (family.selectedIndex < 0) family.value = '';
       if (status.selectedIndex < 0) status.value = '';
+      if (type.selectedIndex < 0) type.value = '';
     }
 
     function filter(updateURL = true) {
@@ -232,19 +255,21 @@ const lastRecorded = recorded
         const match =
           words.every((word) => entry.dataset.search!.includes(word)) &&
           (!family.value || family.value === entry.dataset.family) &&
-          (!status.value || status.value === entry.dataset.status);
+          (!status.value || status.value === entry.dataset.status) &&
+          (!type.value || entry.dataset.types!.split(' ').includes(type.value));
         entry.hidden = !match;
         if (match) visible++;
       }
       count.textContent = `Showing ${visible} of ${entries.length} experiments.`;
       empty.hidden = visible !== 0;
-      reset.disabled = !search.value && !family.value && !status.value;
+      reset.disabled = !search.value && !family.value && !status.value && !type.value;
       if (!updateURL) return;
       const url = new URL(location.href);
       for (const [key, value] of [
         ['q', search.value],
         ['family', family.value],
         ['status', status.value],
+        ['type', type.value],
       ]) {
         if (value) url.searchParams.set(key, value);
         else url.searchParams.delete(key);
@@ -261,6 +286,7 @@ const lastRecorded = recorded
         search.value = '';
         family.value = '';
         status.value = '';
+        type.value = '';
         filter();
       }
       requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
@@ -269,10 +295,12 @@ const lastRecorded = recorded
     search.addEventListener('input', () => filter());
     family.addEventListener('change', () => filter());
     status.addEventListener('change', () => filter());
+    type.addEventListener('change', () => filter());
     reset.addEventListener('click', () => {
       search.value = '';
       family.value = '';
       status.value = '';
+      type.value = '';
       filter();
       search.focus();
     });
@@ -357,10 +385,21 @@ const lastRecorded = recorded
   }
   .library-controls {
     display: none;
-    grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 0.95fr) auto;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
     align-items: end;
     gap: 0.7rem;
     margin-block: 1.75rem 1rem;
+  }
+  .library-controls > label:first-child {
+    grid-column: 1 / -1;
+  }
+  .selection-details {
+    margin-top: 1rem;
+    font-size: 0.8rem;
+  }
+  .selection-details summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
   }
   [data-ready] .library-controls {
     display: grid;
@@ -487,7 +526,7 @@ const lastRecorded = recorded
   }
   .readouts {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 0.65rem;
     margin: 1rem 0;
   }

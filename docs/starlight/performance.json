@@ -3,15 +3,65 @@
   "cssGzipKiB": 32,
   "javascriptAssetGzipKiB": 32,
   "pages": [
-    { "route": "/", "htmlKiB": 180, "htmlGzipKiB": 26, "elements": 2100 },
-    { "route": "/installation/", "htmlKiB": 110, "htmlGzipKiB": 20, "elements": 1300 },
-    { "route": "/concepts/models/", "htmlKiB": 560, "htmlGzipKiB": 78, "elements": 4900 },
-    { "route": "/concepts/data-flow/", "htmlKiB": 720, "htmlGzipKiB": 82, "elements": 11000 },
-    { "route": "/concepts/runtime/", "htmlKiB": 350, "htmlGzipKiB": 48, "elements": 4300 },
-    { "route": "/advanced/embeddings/", "htmlKiB": 390, "htmlGzipKiB": 50, "elements": 4800 },
-    { "route": "/data-types/group/", "htmlKiB": 225, "htmlGzipKiB": 34, "elements": 2500 },
-    { "route": "/evidence/P047/", "htmlKiB": 430, "htmlGzipKiB": 44, "elements": 7300 },
-    { "route": "/evidence/P048/", "htmlKiB": 425, "htmlGzipKiB": 44, "elements": 7000 },
-    { "route": "/api-map/", "htmlKiB": 185, "htmlGzipKiB": 25, "elements": 2100 }
+    {
+      "route": "/",
+      "htmlKiB": 450,
+      "htmlGzipKiB": 50,
+      "elements": 4700
+    },
+    {
+      "route": "/installation/",
+      "htmlKiB": 110,
+      "htmlGzipKiB": 20,
+      "elements": 1300
+    },
+    {
+      "route": "/concepts/models/",
+      "htmlKiB": 560,
+      "htmlGzipKiB": 78,
+      "elements": 4900
+    },
+    {
+      "route": "/concepts/data-flow/",
+      "htmlKiB": 970,
+      "htmlGzipKiB": 101,
+      "elements": 13500
+    },
+    {
+      "route": "/concepts/runtime/",
+      "htmlKiB": 560,
+      "htmlGzipKiB": 66,
+      "elements": 6400
+    },
+    {
+      "route": "/advanced/embeddings/",
+      "htmlKiB": 550,
+      "htmlGzipKiB": 64,
+      "elements": 6200
+    },
+    {
+      "route": "/data-types/group/",
+      "htmlKiB": 225,
+      "htmlGzipKiB": 34,
+      "elements": 2500
+    },
+    {
+      "route": "/evidence/P047/",
+      "htmlKiB": 430,
+      "htmlGzipKiB": 44,
+      "elements": 7300
+    },
+    {
+      "route": "/evidence/P048/",
+      "htmlKiB": 425,
+      "htmlGzipKiB": 44,
+      "elements": 7000
+    },
+    {
+      "route": "/api-map/",
+      "htmlKiB": 185,
+      "htmlGzipKiB": 25,
+      "elements": 2100
+    }
   ]
 }

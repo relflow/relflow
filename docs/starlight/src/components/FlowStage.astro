@@ -1,22 +1,22 @@
 ---
 import { Code } from '@astrojs/starlight/components';
 import { stringify } from 'yaml';
-import { flowPaths, type FlowStage } from '../data-flow/types';
+import { flowPaths, flowTransitions, type FlowStage } from '../data-flow/types';
 import type { CaseId } from '../data/concepts/types';
-import DataExplorer from './DataExplorer.astro';
+import DataViews from './DataViews.astro';
 import Tree from './Tree.astro';
 import ValueTree from './ValueTree.astro';
 
 interface Props {
   caseId: CaseId;
   stage: FlowStage;
-  stages: readonly FlowStage[];
   number: number;
 }
 
-const { caseId, stage, stages, number } = Astro.props;
+const { caseId, stage, number } = Astro.props;
 const id = `flow-${caseId}-${stage.id}`;
 const modeNames = { predict: 'Prediction', train: 'Training' };
+const transition = flowTransitions[stage.id];
 const code = stage.code || [];
 const codeModes = [
   ...new Set(code.flatMap((item) => (item.mode ? [item.mode] : ['predict', 'train']))),
@@ -25,7 +25,6 @@ const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
   const path = flowPaths[mode];
   const position = path.indexOf(stage.id);
   if (position < 0) return [];
-  const following = path[position + 1] || 'load';
   return [
     {
       mode,
@@ -34,23 +33,48 @@ const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
           ? mode === 'train'
             ? 'Next batch'
             : 'Back to data'
-          : `Next: ${stages.find((item) => item.id === following)!.title}`,
+          : 'Continue →',
     },
   ];
 });
 ---
 
-<details class="df-stage" id={id} data-flow-stage={stage.id} open>
+<details class="df-stage" id={id} data-flow-stage={stage.id} data-flow-only-mode={stage.mode} open>
   <summary>
-    <span class="df-number"><span class="df-sr-only">Step </span>{number}</span>
     <span class="df-stage-heading">
-      <strong>{stage.title}</strong>
-      <span class="df-summary">{stage.summary}</span>
+      <span class="df-eyebrow">Step {number} / 7</span>
+      <strong role="heading" aria-level="4">{stage.title}</strong>
+      <span class="df-stage-path" data-flow-stage-mode>
+        {stage.mode ? `${modeNames[stage.mode]} path` : 'Shared stages'}
+      </span>
     </span>
     {stage.optional && <span class="df-badge">Optional</span>}
-    <span class="df-chevron" aria-hidden="true">⌄</span>
   </summary>
+  <nav
+    class="df-stage-controls"
+    data-flow-stage-controls
+    aria-label={`${stage.title} navigation`}
+    hidden
+  >
+    <button type="button" data-flow-previous disabled={number === 1} aria-label="Previous stage"
+      >← Back</button
+    >
+    <button type="button" data-flow-next>
+      {nextLabels.map((next) => <span data-flow-next-mode={next.mode}>{next.label}</span>)}
+    </button>
+  </nav>
   <div class="df-stage-body">
+    <div class="df-handoff" role="group" aria-label="Data at this stage">
+      <dl>
+        <dt>Arrives as</dt>
+        <dd>{transition.input}</dd>
+      </dl>
+      <span class="df-handoff-arrow" aria-hidden="true">→</span>
+      <dl>
+        <dt>{stage.id === 'result' ? 'Returns' : 'Passes on as'}</dt>
+        <dd>{transition.output}</dd>
+      </dl>
+    </div>
     <p class="df-description">{stage.description}</p>
     <div class="df-views">
       {
@@ -61,20 +85,25 @@ const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
             data-flow-view-mode={view.mode}
             aria-labelledby={`${id}-view-${index}-title`}
           >
-            <h5 id={`${id}-view-${index}-title`}>
-              {view.mode && <span class="df-view-mode">{modeNames[view.mode]} · </span>}
-              {view.label}
-            </h5>
+            {view.kind !== 'records' && <h5 id={`${id}-view-${index}-title`}>{view.label}</h5>}
             {view.kind === 'dataset' ? (
-              <DataExplorer id={`${id}-view-${index}`} dataset={view.dataset} headingLevel={6} />
-            ) : view.kind === 'records' ? (
-              <Code
-                code={stringify(view.value, { indent: 2, lineWidth: 0 })}
-                lang="yaml"
-                wrap
-                preserveIndent={false}
-                hangingIndent={2}
+              <DataViews
+                id={`${id}-view-${index}`}
+                dataset={view.dataset}
+                schema={view.schema}
+                headingLevel={6}
               />
+            ) : view.kind === 'records' ? (
+              <details class="df-records">
+                <summary id={`${id}-view-${index}-title`}>{view.label}</summary>
+                <Code
+                  code={stringify(view.value, { indent: 2, lineWidth: 0 })}
+                  lang="yaml"
+                  wrap
+                  preserveIndent={false}
+                  hangingIndent={2}
+                />
+              </details>
             ) : view.kind === 'tree' ? (
               <Tree label={view.label} nodes={view.nodes} />
             ) : view.kind === 'prediction' ? (
@@ -92,6 +121,11 @@ const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
         ))
       }
     </div>
+    {
+      stage.id === 'update' && (
+        <p class="df-loop">↳ The next batch follows the same path with the updated model.</p>
+      )
+    }
     {stage.note && <p class="df-note">{stage.note}</p>}
     {
       code.length > 0 && (
@@ -109,16 +143,5 @@ const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
         </details>
       )
     }
-    <nav
-      class="df-stage-controls"
-      data-flow-stage-controls
-      aria-label={`${stage.title} navigation`}
-      hidden
-    >
-      <button type="button" data-flow-previous disabled={number === 1}>Previous stage</button>
-      <button type="button" data-flow-next>
-        {nextLabels.map((next) => <span data-flow-next-mode={next.mode}>{next.label}</span>)}
-      </button>
-    </nav>
   </div>
 </details>

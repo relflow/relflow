@@ -4,27 +4,54 @@ description: Represent true or false values and predict the probability of an ou
 ---
 
 import DataTypePage from '../../../components/DataTypePage.astro';
-import { booleanExamples } from '../../../data/examples/boolean';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
 
 Use `rf.Boolean` for a true-or-false fact: whether an account is active,
 whether a customer returns, or whether an item needs review. As a prediction
 target, it learns the probability of `True`.
 
-<DataTypePage id="boolean-examples" examples={booleanExamples}>
+<DataTypePage name="Boolean">
 
-## Inputs
+## Input values
 
 Supply Boolean values (`True` or `False`) or nulls. `False` is a known value;
 null has a separate state. Convert source labels such as `"yes"` and `"no"`
 to Booleans in a preprocessor, or use [Enum](/data-types/enum/) for named labels.
 
-## Predictions
+## Standardization and processor pipelines
+
+Boolean uses a fixed content representation for `True` and `False`,
+combined with a learned state embedding. It does not build a vocabulary or fit
+a numeric normalizer. Training counters track state and class exposure;
+nulls remain separate from either Boolean answer.
+
+## How is this leaf trained?
+
+Selected reconstruction targets train the state head with weighted
+cross-entropy. Valued Boolean answers train the content logit with
+counter-weighted binary cross-entropy. A sigmoid turns that logit into the
+probability of `True`.
+
+The `threshold` option changes decision metrics, not this loss or the returned
+probability.
+
+### Predictions
 
 For a decoded target, `content.probability` is the predicted probability of
 `True`. relflow returns a score that your application can use to rank customers
 or apply a decision threshold. See [Runtime](/concepts/runtime/).
 
-## Options
+<ValueTree
+  id="boolean-predictions"
+  {...outputs.boolean}
+  predictions
+  heading="Illustrative prediction output"
+  label="Boolean prediction output"
+/>
+
+## Leaf-specific parameters
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -36,10 +63,10 @@ thresholds in `[0, 1]` configures decision metrics such as precision and recall.
 The prediction output continues to contain a probability; this setting does
 not turn it into a Boolean decision. Repeated thresholds are deduplicated.
 
-## Request Methods
+### Request Methods
 
 Call these helpers on `rf.Boolean` with a model and the field's absolute
-schema address. For a trained model from the first example, inspect the known
+schema address. For a trained model, inspect the known
 subscription input:
 
 | Method | Returns | Purpose |
@@ -58,7 +85,15 @@ Counts describe accumulated training exposure, rather than prediction
 probabilities or a count of distinct customers. Changing the returned
 dictionary does not change the model.
 
-## Footguns
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| A threshold outside `[0, 1]` or an empty threshold list | Configuration validation rejects the threshold. | Supply one valid threshold or a nonempty list of valid thresholds. |
+| Strings or other non-Boolean source values | The source family does not satisfy the Boolean input contract. | Convert source labels to Booleans in preprocessing, or use Enum. |
+| An invalid address passed to `counts` | `KeyError` for an absent field; `TypeError` for the wrong model or leaf type. | Use a Boolean leaf’s absolute schema address. |
+
+### Footguns
 
 - **Turning an unresolved outcome into `False`.** That supplies a known
   negative label. Keep unknown outcomes distinct and wait for the complete
@@ -79,17 +114,14 @@ dictionary does not change the model.
   beyond fitting. The recorded 0.4.2 [P017 signal/noise task](/evidence/#P017)
   uses independent held-out rows to separate those cases.
 
-## Related types
+## Relevant evidence
+
+<LeafEvidence type="Boolean" />
+
+### Related types
 
 - [Category](/data-types/category/) learns one label from a vocabulary discovered during training.
 - [Enum](/data-types/enum/) chooses one label from a fixed declaration.
 - [Set](/data-types/set/) predicts several labels that can apply together.
-
-## Evidence
-
-[Can it learn a signal without inventing one?](/evidence/#P017) compares
-Boolean targets with informative and unrelated inputs. The library retains
-the recorded relflow 0.4.2 run at revision `7dec5e8`; this is a controlled
-task, rather than a measurement on your application.
 
 </DataTypePage>

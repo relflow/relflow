@@ -8,18 +8,23 @@ const { id } = Astro.props;
 
 <div class="erd-toggle">
   <fieldset class="erd-controls">
-    <legend class="sr-only">ERD view</legend>
+    <legend class="sr-only">View</legend>
     <label>
       <input type="radio" name={`${id}-view`} value="data" checked />
-      <span>Data ERD</span>
+      <span>Data</span>
     </label>
     <label>
       <input type="radio" name={`${id}-view`} value="model" />
-      <span>Model ERD</span>
+      <span>Model</span>
+    </label>
+    <label>
+      <input type="radio" name={`${id}-view`} value="schema" />
+      <span>Schema</span>
     </label>
   </fieldset>
-  <section class="erd-pane erd-data" aria-label="Data ERD"><slot name="data" /></section>
-  <section class="erd-pane erd-model" aria-label="Model ERD"><slot name="model" /></section>
+  <section class="erd-pane erd-data" aria-label="Data"><slot name="data" /></section>
+  <section class="erd-pane erd-model" aria-label="Model"><slot name="model" /></section>
+  <section class="erd-pane erd-schema" aria-label="Schema"><slot name="schema" /></section>
 </div>
 
 <style>
@@ -65,8 +70,9 @@ const { id } = Astro.props;
     outline: 2px solid var(--sl-color-text-accent);
     outline-offset: 2px;
   }
-  .erd-toggle:has(.erd-controls input[value='data']:checked) .erd-model,
-  .erd-toggle:has(.erd-controls input[value='model']:checked) .erd-data {
+  .erd-toggle:has(.erd-controls input[value='data']:checked) > .erd-pane:not(.erd-data),
+  .erd-toggle:has(.erd-controls input[value='model']:checked) > .erd-pane:not(.erd-model),
+  .erd-toggle:has(.erd-controls input[value='schema']:checked) > .erd-pane:not(.erd-schema) {
     display: none;
   }
   .sr-only {

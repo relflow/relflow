@@ -1,4 +1,4 @@
-import type { ExampleValue } from '../type-example.ts';
+import type { Value } from '../../values/types';
 import type { FlowCase, FlowMode } from '../../data-flow/types.ts';
 import type { TreeNode } from '../../tree/types.ts';
 import { parseSchema, type ModelNode } from '../../model-explainer/schema.ts';
@@ -6,7 +6,7 @@ import { scenarios } from './scenarios.ts';
 import { predictions } from './predictions.ts';
 
 /** Attach historical answers without changing the shared inputs or their record alignment. */
-function labeled(input: ExampleValue, answers: ExampleValue): ExampleValue {
+function labeled(input: Value, answers: Value): Value {
   if (Array.isArray(answers)) {
     if (!Array.isArray(input) || input.length !== answers.length)
       throw new Error('Data Flow training answers must align with their supplied record collection.');
@@ -109,7 +109,7 @@ export const flowCases: FlowCase[] = scenarios.map((scenario) => {
         summary: 'Read observations while preserving their nested records.',
         description: 'A data module reads source chunks from prepared Parquet files. The flow follows one observation within that stream. Prediction records contain known context; historical training records also contain settled answers.',
         views: [
-          { kind: 'dataset', label: 'Observation contract', dataset: scenario.dataset },
+          { kind: 'dataset', label: 'Observation contract', dataset: scenario.dataset, schema: scenario.schema },
           { kind: 'records', label: 'Known source values', mode: 'predict', value: scenario.inputs },
           { kind: 'records', label: 'Context and historical answers', mode: 'train', value: training },
         ],

@@ -1,3 +1,4 @@
+import { metricAt } from './metrics.ts';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -492,17 +493,11 @@ function readouts(metadata: Header, record: EvidenceRecord | null): Readout[] {
     ) {
       throw new Error('Evidence readouts require a label, metric path, and supported format.');
     }
-    let value: unknown = record?.metrics;
-    for (const part of selection.metric)
-      value =
-        object(value) || Array.isArray(value)
-          ? (value as Record<string | number, unknown>)[part]
-          : undefined;
     return {
       label: selection.label,
       metric: selection.metric as (string | number)[],
       format: selection.format,
-      value: typeof value === 'number' && Number.isFinite(value) ? value : null,
+      value: metricAt(record?.metrics, selection.metric as (string | number)[]),
     };
   });
 }

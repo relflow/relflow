@@ -1,5 +1,6 @@
 import { test as base, expect } from '@playwright/test';
-import { booleanExamples } from '../../src/data/examples/boolean';
+import { scenarios } from '../../src/data/concepts/scenarios';
+import { predictions } from '../../src/data/concepts/predictions';
 
 const test = base.extend({
   page: async ({ page }, use) => {
@@ -35,15 +36,13 @@ test('a selected use case follows native links and explicit URLs take precedence
   await expect(first).toHaveAttribute('aria-pressed', 'true');
 });
 
-test('the homepage switches among six dataset diagrams without schema code or prediction trees', async ({
-  page,
-}) => {
+test('the homepage switches among six shared data, model, and schema viewers', async ({ page }) => {
   await page.goto('/?case=tickets');
   const cases = page.locator('[data-use-cases]');
   await expect(cases).toHaveAttribute('data-ready', '');
   await expect(cases.locator('[data-case-select]')).toHaveCount(6);
-  await expect(cases.locator('[data-data-explorer]')).toHaveCount(6);
-  await expect(cases.locator('pre, .expressive-code, [data-value-tree]')).toHaveCount(0);
+  await expect(cases.locator('[data-data-views]')).toHaveCount(6);
+  await expect(cases.locator('[data-value-tree]')).toHaveCount(0);
 
   for (const id of ['tickets', 'churn', 'demand', 'credit', 'maintenance', 'claims']) {
     const choice = cases.locator(`[data-case-select="${id}"]`);
@@ -52,8 +51,8 @@ test('the homepage switches among six dataset diagrams without schema code or pr
     await expect(cases.locator('[data-case]:visible')).toHaveCount(1);
     const selected = cases.locator(`[data-case="${id}"]`);
     await expect(selected).toBeVisible();
-    await expect(selected.locator('[data-data-explorer]')).toBeVisible();
-    const diagram = selected.locator('[data-erd]');
+    await expect(selected.locator('[data-data-views]')).toBeVisible();
+    const diagram = selected.locator('.erd-data [data-erd]');
     await diagram.scrollIntoViewIfNeeded();
     await expect(diagram).toHaveAttribute('data-erd-ready', '');
     await expect(diagram.locator('[data-entity]').first()).toBeVisible();
@@ -70,24 +69,25 @@ test('the homepage switches among six dataset diagrams without schema code or pr
   }
 });
 
-test('scenario deep links select the matching example and copying keeps exact source', async ({
+test('use-case deep links select the matching schema and copying keeps exact source', async ({
   page,
   context,
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.goto('/data-types/boolean/');
-  const buttons = page.locator('[data-example-select]');
-  await buttons.nth(1).click();
-  const example = page.locator('[data-type-example][aria-hidden="false"]');
-  await expect(example).toHaveAttribute('id', /-items$/);
-  await example.locator('.schema-pane .copy button').click();
+  await page.goto('/concepts/runtime/?case=tickets');
+  const choice = page.locator('[data-case-select="churn"]');
+  await choice.click();
+  const example = page.locator('[data-case="churn"]');
+  await expect(example).toBeVisible();
+  await example.getByRole('radio', { name: 'Schema', exact: true }).check();
+  await example.locator('.erd-schema .copy button').click();
   await expect
     .poll(() => page.evaluate(() => navigator.clipboard.readText()))
-    .toBe(booleanExamples[1].schema);
-  await example.getByRole('link', { name: 'Link to example: Every item', exact: true }).click();
+    .toBe(scenarios.find((scenario) => scenario.id === 'churn')!.schema);
+  await example.locator('[data-case-permalink]').click();
   await page.reload();
-  await expect(example).toHaveAttribute('id', /-items$/);
-  await expect(buttons.nth(1)).toHaveAttribute('aria-pressed', 'true');
+  await expect(example).toBeVisible();
+  await expect(choice).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('tree controls include returned metadata, preserve other instances, and copy the full row', async ({
@@ -95,13 +95,12 @@ test('tree controls include returned metadata, preserve other instances, and cop
   context,
 }) => {
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
-  await page.goto('/data-types/boolean/');
-  const other = page.locator('[data-value-tree]').first();
+  await page.goto('/concepts/runtime/?case=tickets');
+  const other = page.locator('[data-case="churn"] [data-value-tree]');
   const initial = await other
     .locator('details')
     .evaluateAll((nodes) => nodes.map((node) => (node as HTMLDetailsElement).open));
-  await page.locator('[data-example-select="1"]').click();
-  const tree = page.locator('[data-type-example][aria-hidden="false"] [data-value-tree]');
+  const tree = page.locator('[data-case="tickets"] [data-value-tree]');
   await tree.getByRole('button', { name: 'Collapse all', exact: true }).click();
   await expect(tree.locator('details[open]')).toHaveCount(0);
   const expand = tree.getByRole('button', { name: 'Expand all', exact: true });
@@ -116,7 +115,10 @@ test('tree controls include returned metadata, preserve other instances, and cop
   ).toEqual(initial);
   await tree.getByRole('button', { name: 'Copy JSON', exact: true }).click();
   const copied = JSON.parse(await page.evaluate(() => navigator.clipboard.readText()));
-  expect(copied).toEqual(booleanExamples[1].output);
+  const block = predictions.examples
+    .find((example) => example.caseId === 'tickets')!
+    .blocks.find((block) => block.kind === 'prediction')!;
+  expect(copied).toEqual(block.value);
   expect(copied).not.toHaveProperty('inputs');
 });
 
@@ -129,13 +131,13 @@ test('opening a column note dismisses a sidebar note even while its link keeps f
   const example = page.locator('[data-case][aria-hidden="false"]');
   const column = example.locator('.erd-column').first();
   await column.scrollIntoViewIfNeeded();
-  await expect(example.locator('[data-erd]')).toHaveAttribute('data-erd-ready', '');
+  await expect(example.locator('.erd-data [data-erd]')).toHaveAttribute('data-erd-ready', '');
   const staticDescription = await column.getAttribute('aria-describedby');
   const link = page.locator('.sidebar-content a').first();
   await link.focus();
   await expect(page.locator('#rf-sidebar-tooltip')).toBeVisible();
   await column.hover();
-  const datasetNote = example.locator('[data-erd-tooltip]');
+  const datasetNote = example.locator('.erd-data [data-erd-tooltip]');
   await expect(datasetNote).toBeVisible();
   await expect(page.locator('#rf-sidebar-tooltip')).toBeHidden();
   await expect(link).toBeFocused();
@@ -149,18 +151,22 @@ test('column and code notes coordinate hover, focus, tap, and Escape', async ({
   page,
   isMobile,
 }) => {
-  await page.goto('/data-types/boolean/');
-  const example = page.locator('[data-type-example][aria-hidden="false"]');
+  await page.goto('/concepts/runtime/?case=tickets');
+  const example = page.locator('[data-case="tickets"]');
   const column = example.locator('.erd-column').first();
-  const datasetNote = example.locator('[data-erd-tooltip]');
+  const datasetNote = example.locator('.erd-data [data-erd-tooltip]');
   const staticDescription = await column.getAttribute('aria-describedby');
-  await column.click();
+  await column.scrollIntoViewIfNeeded();
+  await expect(example.locator('.erd-data [data-erd]')).toHaveAttribute('data-erd-ready', '');
+  if (isMobile) await column.tap();
+  else await column.focus();
   await expect(datasetNote).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(datasetNote).toBeHidden();
   await expect(column).toHaveAttribute('aria-describedby', staticDescription!);
 
-  const note = example.locator('.schema-pane .rf-code-note').first();
+  await example.getByRole('radio', { name: 'Schema', exact: true }).check();
+  const note = example.locator('.erd-schema .rf-code-note').first();
   await note.scrollIntoViewIfNeeded();
   if (isMobile) {
     await note.tap();
@@ -178,6 +184,7 @@ test('column and code notes coordinate hover, focus, tap, and Escape', async ({
     await page.waitForTimeout(250);
     await expect(popup).toBeHidden();
     await expect(note).toBeFocused();
+    await example.getByRole('radio', { name: 'Data', exact: true }).check();
     await column.hover();
     await expect(datasetNote).toBeVisible();
     await expect(popup).toBeHidden();
@@ -212,6 +219,8 @@ test('diagram overflow hints update after the canvas stops shrinking', async ({
   test.skip(isMobile, 'Exercise the desktop-to-mobile resize path in desktop contexts.');
   await page.goto('/featureless/?case=churn');
   const diagram = page.locator('[data-case="churn"] .erd-data [data-erd]');
+  await diagram.scrollIntoViewIfNeeded();
+  await expect(diagram).toHaveAttribute('data-erd-ready', '');
   for (const width of [1440, 900, 800, 700, 650, 635, 620, 601, 600, 599, 390]) {
     await page.setViewportSize({ width, height: 1000 });
     await expect
@@ -238,7 +247,7 @@ test('all cases, native trees, and descriptions stay readable without JavaScript
     const cases = page.locator('[data-use-cases]');
     await expect(cases.locator('[data-case]:visible')).toHaveCount(6);
     await expect(cases.locator('[data-erd]:visible')).toHaveCount(6);
-    await expect(cases.locator('pre, .expressive-code, [data-value-tree]')).toHaveCount(0);
+    await expect(cases.locator('[data-value-tree]')).toHaveCount(0);
     for (const example of await cases.locator('[data-case]').all()) {
       const column = example.locator('.erd-column').first();
       const description = await column.getAttribute('title');
@@ -248,9 +257,7 @@ test('all cases, native trees, and descriptions stay readable without JavaScript
       await expect(page.locator(`[id="${descriptionId}"]`)).toHaveText(description!);
     }
     await page.goto(`${baseURL}/data-types/boolean/`);
-    await expect(page.locator('[data-type-example]:visible')).toHaveCount(3);
-    const column = page.locator('.erd-column').first();
-    await expect(column).toHaveAttribute('title', /.+/);
+    await expect(page.locator('[data-type-showcase], [data-data-explorer]')).toHaveCount(0);
     const tree = page.locator('[data-value-tree]').first();
     await expect(tree).toBeVisible();
     await tree.locator('details').first().locator(':scope > summary').click();

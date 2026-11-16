@@ -5,10 +5,10 @@ interface Props {
 
 const { id = 'feature-flow' } = Astro.props;
 const traditional = [
-  { title: 'Feature engineering' },
-  { title: 'HPO', detail: 'Hyperparameter optimization' },
-  { title: 'Feature selection' },
-  { title: 'Model validation' },
+  'Feature engineering',
+  'Hyperparameter optimization',
+  'Feature selection',
+  'Model validation',
 ];
 ---
 
@@ -32,42 +32,84 @@ const traditional = [
               {
                 traditional.map((step) => (
                   <li class="ff-node">
-                    <strong>{step.title}</strong>
-                    {step.detail && <p>{step.detail}</p>}
+                    <strong>{step}</strong>
                   </li>
                 ))
               }
             </ol>
-            <svg
-              class="ff-return"
-              viewBox="0 0 100 28"
-              preserveAspectRatio="none"
-              aria-hidden="true"
-            >
-              <path d="M88 1V12Q88 20 80 20H20Q12 20 12 12V1M9 5L12 1L15 5"></path>
-            </svg>
+            <div class="ff-loops" role="group" aria-label="Nested feedback loops">
+              <p class="ff-return ff-return-tune">
+                <span
+                  >Tune<span class="ff-sr-only">: repeat hyperparameter optimization.</span></span
+                >
+              </p>
+              <p class="ff-return ff-return-select">
+                <span
+                  >Reselect and retune<span class="ff-sr-only"
+                    >: feature selection returns to hyperparameter optimization.</span
+                  ></span
+                >
+              </p>
+              <p class="ff-return ff-return-engineer">
+                <span
+                  >Re-engineer features<span class="ff-sr-only"
+                    >: model validation returns to feature engineering.</span
+                  ></span
+                >
+              </p>
+            </div>
             <p class="ff-feedback">Iterate: engineer, tune, select, validate</p>
           </div>
           <span class="ff-route-arrow" aria-hidden="true">→</span>
-          <div class="ff-node ff-deployment">
-            <strong>Real-time deployment</strong>
-            <p>
-              Engineer and validate infrastructure to mirror feature engineering, where possible.
-            </p>
+          <div class="ff-node ff-deployment" aria-describedby={`${id}-deployment-note`}>
+            <strong>
+              Real-time deployment<sup
+                ><a href={`#${id}-icl-note`} aria-label="ICL real-time serving caveat">*</a></sup
+              >
+            </strong>
           </div>
+        </div>
+        <div class="ff-deployment-note">
+          <p id={`${id}-deployment-note`}>
+            Engineer and validate infrastructure to mirror feature engineering, where possible.
+          </p>
+          <p class="ff-icl-note" id={`${id}-icl-note`}>
+            * ICL can be too slow or costly for tight real-time budgets, especially with large
+            contexts. Caching and hardware affect feasibility.{' '}
+            <a href="https://github.com/PriorLabs/TabPFN#usage-tips">Inference guidance</a>.
+          </p>
         </div>
       </section>
       <section class="ff-workflow ff-relflow" aria-labelledby={`${id}-relflow`}>
         <h3 id={`${id}-relflow`}>relflow</h3>
-        <ol class="ff-steps">
-          <li class="ff-node">
-            <strong>Declare the model schema</strong>
-            <p>Choose what data to include and what to predict.</p>
-          </li>
-          <li class="ff-node">
-            <strong>Train the model</strong>
-          </li>
-        </ol>
+        <div
+          class="ff-model-boundary"
+          role="group"
+          aria-label="One model from schema to real-time serving"
+        >
+          <ol class="ff-steps">
+            <li class="ff-node">
+              <strong>Declare the model schema</strong>
+              <p>Choose what data to include and what to predict.</p>
+            </li>
+            <li class="ff-node">
+              <strong>Train the model</strong>
+            </li>
+            <li class="ff-node ff-serving">
+              <a
+                class="ff-serving-link"
+                href="/advanced/inference-and-deployment/#serve-the-trained-artifact"
+              >
+                <span class="ff-badge">Built in</span>
+                <strong>Serve real-time predictions</strong>
+              </a>
+            </li>
+          </ol>
+        </div>
+        <p class="ff-serving-note">
+          Train and serve the same model—including its learned encoders, vocabularies, and
+          normalizers.
+        </p>
       </section>
     </div>
   </div>
@@ -75,12 +117,15 @@ const traditional = [
 
 <style>
   .feature-flow {
+    --ff-gap: 1.25rem;
+    --ff-node-height: 6rem;
     margin: var(--rf-section-gap) 0;
     min-width: 0;
     color: var(--rf-ink);
     scroll-margin-top: 6rem;
   }
   .ff-scroll {
+    container-type: inline-size;
     max-width: 100%;
     overflow-x: auto;
     border: 1px solid var(--rf-border);
@@ -93,10 +138,11 @@ const traditional = [
     outline-offset: 3px;
   }
   .ff-canvas {
-    min-width: 46rem;
+    min-width: 47rem;
   }
   .ff-workflow {
     padding: var(--rf-panel-padding);
+    text-align: center;
   }
   .ff-workflow + .ff-workflow {
     border-top: 1px solid var(--rf-border);
@@ -108,15 +154,26 @@ const traditional = [
     line-height: 1.45;
     letter-spacing: -0.02em;
   }
+  .ff-workflow h3,
+  .ff-deployment-note,
+  .ff-serving-note {
+    position: sticky;
+    left: var(--rf-panel-padding);
+    width: calc(100cqw - 2 * var(--rf-panel-padding));
+  }
   .ff-traditional-route {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 1.5rem 9rem;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    column-gap: var(--ff-gap);
     align-items: start;
+  }
+  .ff-iteration {
+    grid-column: 1 / span 4;
   }
   .ff-steps {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1.5rem;
+    gap: var(--ff-gap);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -126,9 +183,10 @@ const traditional = [
     display: flex;
     flex-direction: column;
     justify-content: center;
+    align-items: center;
     min-width: 0;
-    min-height: 6rem;
-    padding: 0.75rem;
+    min-height: var(--ff-node-height);
+    padding: 0.625rem;
     border: 1px solid var(--rf-border);
     border-radius: 0.35rem;
     background: var(--sl-color-bg);
@@ -137,61 +195,195 @@ const traditional = [
     content: '→';
     position: absolute;
     top: 50%;
-    right: -1.5rem;
-    width: 1.5rem;
+    right: calc(-1 * var(--ff-gap));
+    width: var(--ff-gap);
     transform: translateY(-50%);
     color: var(--rf-muted);
     font-size: 1rem;
     line-height: 1.5;
     text-align: center;
   }
-  .ff-node > strong {
+  .ff-node > strong,
+  .ff-serving-link > strong {
     font-size: 0.8rem;
     line-height: 1.45;
+    max-width: 100%;
+    overflow-wrap: normal;
+    word-break: normal;
   }
   .ff-node p {
     margin: 0.4rem 0 0;
     color: var(--rf-muted);
-    font-size: 0.73rem;
+    font-size: 0.75rem;
     line-height: 1.55;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  .ff-loops {
+    --ff-card-width: calc((100% - 3 * var(--ff-gap)) / 4);
+    position: relative;
+    height: 4.75rem;
+    margin-top: 0.2rem;
   }
   .ff-return {
-    display: block;
-    width: 100%;
-    height: 2rem;
-    overflow: visible;
-    fill: none;
-    stroke: var(--rf-muted);
-    stroke-width: 1.25;
+    position: absolute;
+    top: 0;
+    margin: 0;
+    border: 1px solid var(--rf-muted);
+    border-top: 0;
+    border-radius: 0 0 0.6rem 0.6rem;
   }
-  .ff-return path {
-    vector-effect: non-scaling-stroke;
+  .ff-return-tune {
+    left: calc(1.25 * var(--ff-card-width) + var(--ff-gap));
+    right: calc(2.25 * var(--ff-card-width) + 2 * var(--ff-gap));
+    height: 1.25rem;
+  }
+  .ff-return-select {
+    left: calc(1.125 * var(--ff-card-width) + var(--ff-gap));
+    right: calc(1.5 * var(--ff-card-width) + var(--ff-gap));
+    height: 2.75rem;
+  }
+  .ff-return-engineer {
+    left: calc(0.5 * var(--ff-card-width));
+    right: calc(0.5 * var(--ff-card-width));
+    height: 4.25rem;
+  }
+  .ff-return::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 0.4rem;
+    height: 0.4rem;
+    border-top: 1px solid var(--rf-muted);
+    border-left: 1px solid var(--rf-muted);
+    transform: translateX(-50%) rotate(45deg);
+  }
+  .ff-return > span {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    padding: 0 0.4rem;
+    transform: translate(-50%, 50%);
+    background: var(--rf-card);
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+  .ff-sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
   .ff-feedback {
-    margin: 0;
+    margin: 0.4rem 0 0;
     color: var(--rf-muted);
-    font-size: 0.73rem;
+    font-size: 0.75rem;
     line-height: 1.55;
     text-align: center;
   }
   .ff-route-arrow {
+    grid-column: 5;
+    grid-row: 1;
+    justify-self: start;
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 6rem;
+    min-height: var(--ff-node-height);
+    width: var(--ff-gap);
+    transform: translateX(-100%);
     color: var(--rf-muted);
     font-size: 1rem;
   }
   .ff-deployment {
+    grid-column: 5;
+    grid-row: 1;
     border-style: dashed;
+  }
+  .ff-deployment-note {
+    margin: 0.9rem 0 0;
+    padding-top: 0.75rem;
+    border-top: 1px dashed var(--rf-border);
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+    line-height: 1.55;
+  }
+  .ff-deployment-note > p {
+    margin: 0;
+  }
+  .ff-deployment-note > p + p {
+    margin-top: 0.6rem;
+  }
+  .ff-icl-note {
+    scroll-margin-top: 6rem;
+  }
+  .ff-deployment a,
+  .ff-icl-note a {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
   }
   .ff-relflow h3 {
     color: var(--sl-color-text-accent);
   }
   .ff-relflow .ff-steps {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .ff-relflow .ff-node {
     border-color: var(--sl-color-text-accent);
+  }
+  .ff-model-boundary {
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--sl-color-text-accent);
+    border-radius: 0.5rem;
+  }
+  .ff-serving {
+    padding: 0;
+  }
+  .ff-serving-link {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 0.4rem;
+    width: 100%;
+    min-height: calc(var(--ff-node-height) - 2px);
+    padding: 0.625rem;
+    border-radius: inherit;
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+  }
+  .ff-serving-link > strong {
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .ff-serving-link:hover {
+    background: var(--sl-color-accent-low);
+  }
+  .ff-serving-link:focus-visible,
+  .ff-deployment a:focus-visible,
+  .ff-icl-note a:focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+  .ff-badge {
+    padding: 0.1rem 0.5rem;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    background: var(--sl-color-accent-low);
+    font-size: 0.6875rem;
+    font-weight: 650;
+    line-height: 1.4;
+  }
+  .ff-serving-note {
+    margin: 0.9rem 0 0;
+    color: var(--rf-ink);
+    font-size: 0.75rem;
+    line-height: 1.55;
   }
 </style>

@@ -3,7 +3,8 @@ title: Custom data modules
 description: Connect restartable sources, adapt mapping datasets, and understand the encoded-batch contract before replacing the loader.
 ---
 
-import DataExplorer from '../../../components/DataExplorer.astro';
+import DataViews from '../../../components/DataViews.astro';
+import { repeatPurchaseSchema } from '../../../data/schema-examples';
 import { repeatPurchase } from '../../../data/observations';
 
 Customize how observations reach the model while preserving their structure,
@@ -37,7 +38,7 @@ For repeat purchases, the decision is whether a customer buys again within
 cutoff. Training and validation records also contain the completed outcome;
 prediction records omit it.
 
-<DataExplorer id="custom-module-purchase-data" dataset={repeatPurchase} />
+<DataViews id="custom-module-purchase-data" dataset={repeatPurchase} schema={repeatPurchaseSchema} />
 
 Neither an ingress chunk nor a training batch changes this observation boundary.
 Do not split the orders into independent customers when grouping source rows.

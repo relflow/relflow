@@ -31,11 +31,6 @@ for (const item of [
     root: '[data-use-cases]',
     panel: 'featureless-maintenance',
   },
-  {
-    route: '/data-types/boolean/#boolean-examples-items',
-    root: '[data-type-showcase]',
-    panel: 'boolean-examples-items',
-  },
 ]) {
   test(`initial selection and geometry survive delayed enhancement: ${item.route}`, async ({
     page,
@@ -142,7 +137,7 @@ test('inactive cases have no per-trigger listeners or initialized diagrams', asy
     };
   });
   await page.goto('/concepts/models/?case=churn');
-  const diagram = page.locator('[data-case="churn"] [data-erd]');
+  const diagram = page.locator('[data-case="churn"] .erd-data [data-erd]');
   await diagram.scrollIntoViewIfNeeded();
   await expect(diagram).toHaveAttribute('data-erd-ready', '');
   await expect(page.locator('[data-case]:not([data-case="churn"]) [data-erd-ready]')).toHaveCount(
@@ -157,7 +152,7 @@ test('inactive cases have no per-trigger listeners or initialized diagrams', asy
     ),
   ).toBe(true);
   await page.locator('[data-case-select="claims"]').click();
-  const next = page.locator('[data-case="claims"] [data-erd]');
+  const next = page.locator('[data-case="claims"] .erd-data [data-erd]');
   await next.scrollIntoViewIfNeeded();
   await expect(next).toHaveAttribute('data-erd-ready', '');
   expect(await page.evaluate(() => window.docsTriggerListeners.length)).toBe(0);
@@ -185,6 +180,7 @@ test('compact Evidence JSON remains complete, copyable, and readable without Jav
   expect(response.ok()).toBe(true);
   const expected = await response.json();
   await page.goto('/evidence/P047/');
+  await page.locator('.report-details > summary').click();
   await page.locator('.raw-record > summary').click();
   const record = page.locator('[data-json-record]');
   expect(JSON.parse((await record.locator('code').textContent())!)).toEqual(expected);
@@ -195,6 +191,7 @@ test('compact Evidence JSON remains complete, copyable, and readable without Jav
   try {
     const fallback = await withoutScripts.newPage();
     await fallback.goto(`${baseURL}/evidence/P047/`);
+    await fallback.locator('.report-details > summary').click();
     await fallback.locator('.raw-record > summary').click();
     await expect(fallback.locator('[data-json-record] pre')).toBeVisible();
     expect(JSON.parse((await fallback.locator('[data-json-record] code').textContent())!)).toEqual(

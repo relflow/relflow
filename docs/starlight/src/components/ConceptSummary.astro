@@ -1,0 +1,50 @@
+---
+import type { Concept } from '../data/concepts/types';
+
+interface Props {
+  concept: Pick<Concept, 'id' | 'principles' | 'takeaway' | 'links'>;
+}
+
+const { concept } = Astro.props;
+---
+
+<section class="concept-principles" aria-labelledby={`${concept.id}-principles`}>
+  <h2 id={`${concept.id}-principles`}>How it fits together</h2>
+  {
+    concept.principles.map((principle) => (
+      <section>
+        <h3>{principle.title}</h3>
+        <p>{principle.text}</p>
+      </section>
+    ))
+  }
+</section>
+<p class="concept-takeaway">{concept.takeaway}</p>
+<nav class="concept-links" aria-label="Related explanations and reference">
+  {concept.links.map((link) => <a href={link.href}>{link.label} →</a>)}
+</nav>
+
+<style>
+  .concept-principles > section {
+    margin-block: 1.4rem;
+  }
+  .concept-principles h3 {
+    font-size: 1.15rem;
+  }
+  .concept-takeaway {
+    border-left: 2px solid var(--sl-color-text-accent);
+    padding-left: 1rem;
+    margin-block: 1.75rem;
+  }
+  .concept-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    margin-block: 1.5rem;
+    font-size: 0.85rem;
+  }
+  .concept-links a {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
+  }
+</style>

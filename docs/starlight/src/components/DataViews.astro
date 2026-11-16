@@ -1,0 +1,32 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import type { Dataset } from '../datasets/types';
+import DataExplorer from './DataExplorer.astro';
+import ModelDiagram from './ModelDiagram.astro';
+import ErdToggle from './ErdToggle.astro';
+
+interface Props {
+  id: string;
+  dataset: Dataset;
+  schema: string;
+  headingLevel?: 3 | 4 | 5 | 6;
+  showObservation?: boolean;
+  leaves?: Record<string, string>;
+}
+
+const { id, dataset, schema, headingLevel = 3, showObservation = true, leaves } = Astro.props;
+---
+
+<div class="data-views not-content" data-data-views>
+  <ErdToggle {id}>
+    <DataExplorer slot="data" id={`${id}-data`} {dataset} {headingLevel} {showObservation} />
+    <ModelDiagram slot="model" id={`${id}-model`} {schema} {leaves} {headingLevel} />
+    <Code slot="schema" code={schema} lang="python" meta='contract="schema"' />
+  </ErdToggle>
+</div>
+
+<style>
+  .data-views {
+    min-width: 0;
+  }
+</style>

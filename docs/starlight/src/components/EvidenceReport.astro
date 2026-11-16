@@ -6,6 +6,9 @@ import { experimentURL, formatValue, recordDate, status } from '../evidence/pres
 import EvidenceMetrics from './EvidenceMetrics.astro';
 import EvidenceProse from './EvidenceProse.astro';
 import JsonRecord from './JsonRecord.astro';
+import EvidenceComparison from './EvidenceComparison.astro';
+import EvidenceTypes from './EvidenceTypes.astro';
+import { modeling, question } from '../evidence/catalog';
 
 interface Props {
   entry: EvidenceEntry;
@@ -74,21 +77,37 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
     }
   </header>
 
-  {
-    entry.requirements.length > 0 && (
-      <div class="requirements">
-        <strong>Required resources</strong>
-        <ul>
-          {entry.requirements.map((requirement) => (
-            <li>{requirement}</li>
-          ))}
-        </ul>
-      </div>
-    )
-  }
+  <EvidenceTypes id={entry.id} />
+
+  <section aria-labelledby="modeling-title">
+    <h2 id="modeling-title">How is the question modeled?</h2>
+    {
+      hasSource ? (
+        <>
+          <EvidenceProse text={modeling(entry)} />
+          <details class="illustrative-record">
+            <summary>See an illustrative record</summary>
+            <EvidenceProse text={entry.sections.example} />
+            {entry.diagram.alt && <p class="scope-note">{entry.diagram.alt}</p>}
+          </details>
+        </>
+      ) : (
+        <p class="scope-note">
+          The exact source for this selected execution is unavailable in this checkout.{' '}
+          <a href={entry.sourceUrl}>Inspect the recorded source revision ↗</a> for its task and
+          method.
+        </p>
+      )
+    }
+  </section>
+
+  <section aria-labelledby="comparison-title">
+    <h2 id="comparison-title">Primary comparison</h2>
+    <EvidenceComparison entry={entry} />
+  </section>
 
   <section class="checks-section" aria-labelledby="checks-title">
-    <h2 id="checks-title">Behavioral checks</h2>
+    <h2 id="checks-title">What did the checks establish?</h2>
     {
       run ? (
         <>
@@ -105,7 +124,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
           )}
           {typeof run.error === 'string' && <pre class="execution-error">{run.error}</pre>}
           {checks.length > 0 && (
-            <details class="check-disclosure" open={met !== checks.length}>
+            <details class="check-disclosure">
               <summary>Inspect every criterion</summary>
               <div class="checks-table">
                 <table>
@@ -139,95 +158,65 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
     }
   </section>
 
-  {
-    hasSource ? (
-      <>
-        {entry.sections.intro && <EvidenceProse text={entry.sections.intro} />}
-        <section aria-labelledby="example-title">
-          <div class="section-heading">
-            <>
-              <h2 id="example-title">Example</h2>
-              <span>Illustrative record</span>
-            </>
-          </div>
-          <EvidenceProse text={entry.sections.example} />
-          {entry.diagram.alt && (
-            <details class="structure-note">
-              <summary>Record structure from the source diagram</summary>
-              <p>{entry.diagram.alt}</p>
-            </details>
-          )}
-        </section>
-        <section aria-labelledby="comparison-title">
-          <h2 id="comparison-title">Comparison</h2>
-          <EvidenceProse text={entry.sections.comparison} />
-        </section>
-      </>
-    ) : (
-      <p class="scope-note">
-        The exact source for this selected execution is not available in this checkout.{' '}
-        <a href={entry.sourceUrl}>Inspect the recorded source revision ↗</a> for its task and
-        method.
-      </p>
-    )
-  }
-
-  <section aria-labelledby="result-title">
-    <h2 id="result-title">Recorded result</h2>
-    {
-      run ? (
-        <>
-          <p>
-            These values come from the selected CI record. Checks describe the criteria for this
-            particular experiment.
-          </p>
-          {entry.readouts.length > 0 && (
-            <dl class="readouts">
-              {entry.readouts.map((readout) => (
-                <div data-readout-path={readout.metric.join('.')}>
-                  <dt>{readout.label}</dt>
-                  <dd data-raw-value={JSON.stringify(readout.value)}>
-                    {formatValue(readout.value, readout.format)}
-                  </dd>
-                  <span>
-                    {readout.format === 'auc'
-                      ? 'AUC'
-                      : readout.format === 'error'
-                        ? 'Error ratio'
-                        : readout.format === 'percent'
-                          ? 'Percentage'
-                          : 'Recorded value'}
-                  </span>
-                </div>
-              ))}
-            </dl>
-          )}
-          {entry.readouts.some((item) => item.format === 'auc') && (
-            <p class="scope-note">
-              AUC measures ranking: 0.5 is chance and 1 is perfect separation. It is not the
-              percentage of correct answers.
-            </p>
-          )}
-          {entry.readouts.some((item) => item.format === 'error') && (
-            <p class="scope-note">
-              Error ratios retain their recorded scale. The method specifies the reference and error
-              calculation; lower values indicate lower error.
-            </p>
-          )}
-        </>
-      ) : (
-        <p>
-          No result is claimed for this experiment in the selected publication. Proposed criteria
-          and examples do not substitute for a measured run.
-        </p>
-      )
-    }
-  </section>
-
-  <section class="report-details" aria-labelledby="details-title">
-    <h2 id="details-title">Inspect this experiment</h2>
+  <details class="report-details">
+    <summary>Measurements, method, and reproduction</summary>
+    <p class="detail-intro">
+      Secondary metrics, all source readouts, exact code, and the complete CI record.
+    </p>
     <Tabs>
       <TabItem label="Measurements">
+        <section aria-labelledby="result-title">
+          <h3 id="result-title">Source-declared readouts</h3>
+          {
+            run ? (
+              <>
+                <p>
+                  These values come from the selected CI record. Checks describe the criteria for
+                  this particular experiment.
+                </p>
+                {entry.readouts.length > 0 && (
+                  <dl class="readouts">
+                    {entry.readouts.map((readout) => (
+                      <div data-readout-path={readout.metric.join('.')}>
+                        <dt>{readout.label}</dt>
+                        <dd data-raw-value={JSON.stringify(readout.value)}>
+                          {formatValue(readout.value, readout.format)}
+                        </dd>
+                        <span>
+                          {readout.format === 'auc'
+                            ? 'AUC'
+                            : readout.format === 'error'
+                              ? 'Error ratio'
+                              : readout.format === 'percent'
+                                ? 'Percentage'
+                                : 'Recorded value'}
+                        </span>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {entry.readouts.some((item) => item.format === 'auc') && (
+                  <p class="scope-note">
+                    AUC measures ranking: 0.5 is chance and 1 is perfect separation. It is not the
+                    percentage of correct answers.
+                  </p>
+                )}
+                {entry.readouts.some((item) => item.format === 'error') && (
+                  <p class="scope-note">
+                    Error ratios retain their recorded scale. The method specifies the reference and
+                    error calculation; lower values indicate lower error.
+                  </p>
+                )}
+              </>
+            ) : (
+              <p>
+                No result is claimed for this experiment in the selected publication. Proposed
+                criteria and examples do not substitute for a measured run.
+              </p>
+            )
+          }
+        </section>
+
         {
           run ? (
             <>
@@ -258,7 +247,16 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
         }
       </TabItem>
       <TabItem label="Method">
-        {hasSource && <EvidenceProse text={entry.sections.method} />}
+        {
+          hasSource && (
+            <>
+              {entry.sections.intro && <EvidenceProse text={entry.sections.intro} />}
+              <h3>Complete comparison framing</h3>
+              <EvidenceProse text={entry.sections.comparison} />
+              <EvidenceProse text={entry.sections.method} />
+            </>
+          )
+        }
         {
           hasSource && entry.sections.result && (
             <details class="source-commentary">
@@ -310,6 +308,20 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
         }
       </TabItem>
       <TabItem label="Reproduce">
+        {
+          entry.requirements.length > 0 && (
+            <div class="requirements">
+              <>
+                <strong>Required resources</strong>
+                <ul>
+                  {entry.requirements.map((requirement) => (
+                    <li>{requirement}</li>
+                  ))}
+                </ul>
+              </>
+            </div>
+          )
+        }
         <p class="detail-intro">
           Use a checkout of the <a
             href={`https://github.com/relflow/relflow/tree/${entry.sourceRevision}`}
@@ -393,7 +405,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
         }
       </TabItem>
     </Tabs>
-  </section>
+  </details>
 
   <footer class="report-footer">
     <p>
@@ -413,7 +425,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
         previous && (
           <a href={experimentURL(previous.id)}>
             <span>Previous · {previous.id}</span>
-            {previous.title}
+            {question(previous)}
           </a>
         )
       }
@@ -421,7 +433,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
         next && (
           <a href={experimentURL(next.id)}>
             <span>Next · {next.id}</span>
-            {next.title}
+            {question(next)}
           </a>
         )
       }
@@ -500,20 +512,6 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
     margin-block: 1.5rem 0.6rem;
     color: var(--rf-ink);
   }
-  .section-heading {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0.35rem 0.8rem;
-    margin-bottom: 0.65rem;
-  }
-  .section-heading h2 {
-    margin: 0;
-  }
-  .section-heading > span {
-    color: var(--rf-muted);
-    font-size: 0.72rem;
-  }
   .checks-section {
     border-block: 1px solid var(--rf-border);
     padding-block: 1.2rem;
@@ -581,13 +579,6 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
     margin: 0.3rem 0;
     padding-left: 1.25rem;
   }
-  .structure-note {
-    margin-top: 0.8rem;
-    color: var(--rf-muted);
-  }
-  .structure-note p {
-    margin-block: 0.65rem;
-  }
   .readouts {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
@@ -624,6 +615,18 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
     font-size: 0.84rem;
     line-height: 1.75;
     margin-block: 0.8rem 1rem;
+  }
+  .report-details {
+    border: 1px solid var(--rf-border);
+    border-radius: 0.4rem;
+    padding: var(--rf-panel-padding);
+    margin-block: 2rem;
+  }
+  .report-details > summary {
+    font-weight: 600;
+  }
+  .illustrative-record {
+    margin-top: 1rem;
   }
   .raw-record,
   .source-commentary,

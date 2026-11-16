@@ -1,4 +1,13 @@
 /* Pine Needle: neutral surfaces, readable code, native controls. */
+@font-face {
+  font-family: 'relflow wordmark';
+  src: url('../assets/branding/wordmark.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  unicode-range: U+0065-0066, U+006C, U+006F, U+0072, U+0077;
+}
+
 :root {
   --sl-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --sl-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -74,6 +83,21 @@
 
 body {
   -webkit-font-smoothing: antialiased;
+}
+.rf-wordmark {
+  color: var(--sl-color-text-accent);
+  font-family: 'relflow wordmark', Georgia, serif;
+  font-size: 1.12em;
+  font-weight: 600;
+  font-style: normal;
+  font-variant-ligatures: none;
+  letter-spacing: 0.015em;
+  line-height: 0;
+  white-space: nowrap;
+}
+a .rf-wordmark,
+button .rf-wordmark {
+  color: inherit;
 }
 .site-title {
   font-family: var(--sl-font);

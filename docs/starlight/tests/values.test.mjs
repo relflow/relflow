@@ -217,6 +217,32 @@ test('unrecognized extension content and extra returned fields remain lossless',
   });
 });
 
+test('standalone tree notes follow JSON Pointer paths without changing returned or copied values', () => {
+  const row = {
+    predictions: { 'a/b~c': rich(42.5) },
+    representations: [{ embedding: [0.1, -0.2] }],
+  };
+  const before = JSON.stringify(row);
+  const root = tree(row, {
+    id: 'reference',
+    predictions: true,
+    notes: {
+      '/predictions/a~1b~0c': 'Source-unit numeric output.',
+      '/predictions/a~1b~0c/state': 'Field states, not answer confidence.',
+      '/representations/0/embedding': 'A fixed-width learned vector.',
+    },
+  });
+  const leaf = root.children[0].children[0];
+  assert.equal(leaf.note, 'Source-unit numeric output.');
+  assert.equal(
+    leaf.returned.find((node) => node.name === 'state').note,
+    'Field states, not answer confidence.',
+  );
+  assert.equal(root.children[1].children[0].children[0].note, 'A fixed-width learned vector.');
+  assert.deepEqual(restore(root), row);
+  assert.equal(JSON.stringify(row), before);
+});
+
 test('input context follows nested record positions without becoming returned predictions', () => {
   const inputs = {
     groups: [

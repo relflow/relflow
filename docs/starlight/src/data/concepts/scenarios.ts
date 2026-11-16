@@ -1,12 +1,12 @@
+import type { Value } from '../../values/types';
 import originalCases from '../use-cases.json' with { type: 'json' };
-import type { ExampleValue } from '../type-example';
 import type { CaseId } from './types';
 import { observationDatasets } from '../observations.ts';
 
 interface ScenarioDetails {
   modelClass: string;
-  inputs: Record<string, ExampleValue>;
-  answers: Record<string, ExampleValue>;
+  inputs: Record<string, Value>;
+  answers: Record<string, Value>;
   /** Absolute schema addresses; targets inside branches refer to each supplied record. */
   primaryBranch: string;
   primaryTarget: string;

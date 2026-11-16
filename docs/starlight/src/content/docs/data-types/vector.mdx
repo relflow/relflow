@@ -4,15 +4,17 @@ description: Use fixed-width numeric coordinates as inputs or prediction targets
 ---
 
 import DataTypePage from '../../../components/DataTypePage.astro';
-import { vectorExamples } from '../../../data/examples/vector';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
 
 Use `rf.Vector` when a field already contains a fixed-width numeric vector:
 a precomputed embedding, a sensor signature, or a set of coordinates with a
 consistent meaning and order.
 
-<DataTypePage id="vector-examples" examples={vectorExamples}>
+<DataTypePage name="Vector">
 
-## Inputs
+## Input values
 
 `n_dim` is required and must be positive. Every valued vector has that width;
 the meaning of coordinate positions should remain consistent across records.
@@ -23,18 +25,39 @@ may be null, but its individual elements must be non-null numbers. Wrong
 lengths and null elements raise errors. A vector containing NaN or infinity
 takes the `other` state.
 
-## Predictions
+## Standardization and processor pipelines
+
+Vector stores the supplied coordinates as float32 without fitting a
+normalizer. A learned linear projection and GELU map the full coordinate
+vector into model space, where it is combined with the field’s state
+embedding.
+
+Training jitter perturbs eligible finite input coordinates in their supplied
+units while preserving the original reconstruction target. Coordinate
+order and scale remain part of the data contract.
+
+## How is this leaf trained?
+
+The state head uses cross-entropy. Valued target vectors use mean
+squared coordinate error with `objective="l2"`, or mean absolute coordinate
+error with `objective="l1"`.
+
+The loss averages across coordinates without learning a coordinate
+normalizer. Coordinate scales therefore affect their contribution to the
+objective. The decoder reconstructs exactly `n_dim` coordinates.
+
+### Predictions
 
 A Vector can be an input or a supervised target. With `mask=True`, supply known
 target vectors during training and omit them from prediction requests. Its
 rich result contains `state`, a `content` array of exactly `n_dim` coordinates,
-and `inferred`. In the position example, `predictions.next_position_m.content`
+and `inferred`. For a field named `next_position_m`, `predictions.next_position_m.content`
 contains x, y, and z in metres. It is one vector result with one state
 distribution, rather than a separate rich result for each coordinate.
 
 A vector target inside a branch gets one fixed-width array per retained
-record. The stock example has a variable list of products, each with a
-three-coordinate sales vector and a separate Boolean target. These fields
+record. A variable list of products can carry a three-coordinate sales vector and a
+separate Boolean target per product. These fields
 retain their own output contracts. See [Runtime](/concepts/runtime/).
 
 The writer fills coordinates with zeros when the most likely predicted state
@@ -47,7 +70,15 @@ lists for those coordinates. PyArrow Parquet cannot round-trip fixed-size lists
 below null containers; use Arrow IPC when writing sparse vector results.
 relflow's writer rejects affected Parquet batches before writing them.
 
-## Options
+<ValueTree
+  id="vector-predictions"
+  {...outputs.vector}
+  predictions
+  heading="Illustrative prediction output"
+  label="Vector prediction output"
+/>
+
+## Leaf-specific parameters
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -57,11 +88,19 @@ relflow's writer rejects affected Parquet batches before writing them.
 
 Neither objective normalizes the coordinates or changes their units.
 
-## Request Methods
+### Request Methods
 
 This type has no type-specific request methods.
 
-## Footguns
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| A missing or nonpositive `n_dim` | Configuration validation rejects the width. | Declare the positive fixed width of every valued vector. |
+| A non-list value or a vector with the wrong length | `ValueError` identifies the expected list or width. | Validate all source vector lengths before fitting or prediction. |
+| Null or nonnumeric vector elements | `ValueError` rejects incomplete or nonnumeric coordinates. | Use a whole-vector null for missing content; supply non-null numeric coordinates otherwise. |
+
+### Footguns
 
 These limits follow the input, output, and storage contracts.
 
@@ -84,17 +123,18 @@ These limits follow the input, output, and storage contracts.
   those batches. Use Arrow IPC for that output.
   [Sparse-output rejection test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/inference/test_callback.py#L258-L274)
 
-## Related types
+## Relevant evidence
+
+<LeafEvidence type="Vector" />
+
+The [Vector leaf type tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_vector.py)
+cover dimensionality, reconstruction objectives, numeric validity, and Arrow
+output. These are API checks rather than measured application-quality results.
+
+### Related types
 
 - [Number](/data-types/number/) represents individually named numeric measurements with learned normalization.
 - [Text](/data-types/text/) encodes strings with a frozen text encoder.
 - [Context branches](/concepts/branches/) explains collections of related records. Use a branch when the collection's length varies.
-
-## Evidence
-
-The current learning library has no dedicated Vector experiment. The
-[Vector leaf type tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_vector.py)
-cover dimensionality, reconstruction objectives, numeric validity, and Arrow
-output. These are API checks rather than measured application-quality results.
 
 </DataTypePage>

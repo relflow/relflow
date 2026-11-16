@@ -4,7 +4,6 @@ description: Organize related records into collections, nest them within one ano
 ---
 
 import ConceptPage from '../../../components/ConceptPage.astro';
-import BranchShapes from '../../../components/BranchShapes.astro';
 import { branches } from '../../../data/concepts/branches';
 
 relflow models are powerful because they allow related data to be studied by a model dynamically constructed to mirror a dataset’s natural relations. This is largely possible because of our unique application of context windows through the `branch` construct.
@@ -15,8 +14,6 @@ For branches with multiple data entries (either as child leafs or as child branc
 - Datapoints across different observations when packed into a branch
 
 As with all user-facing constructs in relflow, branches are defined with great user extensibility in both the length of a branch (the context-window), as well as what elements of ingested data fills the content of a branch. These aspects are discussed in greater technical depth in our [API map](/api-map/).
-
-<BranchShapes />
 
 ## Information Reductions
 

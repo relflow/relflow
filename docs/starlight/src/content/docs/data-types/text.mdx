@@ -4,15 +4,17 @@ description: Use the meaning of prose as context for a predictive model.
 ---
 
 import DataTypePage from '../../../components/DataTypePage.astro';
-import { textExamples } from '../../../data/examples/text';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
 
 Use `rf.Text` for messages, descriptions, and other prose whose meaning should
 help a prediction. A frozen text encoder turns each string into a vector;
 relflow learns how to use that vector alongside the rest of the record.
 
-<DataTypePage id="text-examples" examples={textExamples}>
+<DataTypePage name="Text">
 
-## Inputs
+## Input values
 
 Pass the text itself in the matching field, such as
 `"I was charged twice for the same order."`. You do not need to prepare token IDs
@@ -28,14 +30,50 @@ tokenizer must be available at runtime; the first use of a remote model can
 download them. Set `model` to a compatible Hugging Face model name or a local
 model directory to choose another encoder.
 
-## Predictions
+## Standardization and processor pipelines
+
+The tokenizer truncates each supplied string to `max_length` tokens.
+A frozen encoder produces token vectors; `encoder_pooling` selects the
+string-level vector. A field-specific learned projection places that vector
+in model space and combines it with the field’s state embedding.
+
+The text encoder stays frozen. Training jitter perturbs the pooled input
+representation after pristine frozen vectors have been prepared, while
+reconstruction targets retain the pristine vectors.
+
+Caching is automatic across training, validation, and prediction. Loader workers
+send compact text IDs to a shared local cache; tokenization and frozen encoding
+are reused when their inputs and settings match. Fields can share frozen
+vectors while retaining their own learned task projections.
+
+The cache distinguishes encoder weights, tokenizer configuration, pooling,
+device type, and precision. It stores pristine values before training jitter,
+independently of task labels. RAM and device hot entries are bounded; disk
+entries persist across runs without a built-in size limit. A configured
+`store` controls their location; it is not required to enable persistence.
+
+Use `cache=4096` for an additional hot-entry cap, or `cache=False` to tokenize
+and encode directly without any cache tier. Fields sharing one directory within
+a process must use the same `memory` and hot-entry cap settings. The saved model
+retains the configuration, while encoder assets and cached data remain external
+runtime resources.
+
+## How is this leaf trained?
+
+The state head uses weighted cross-entropy. A reconstructing mask
+trains a decoder against the pristine frozen encoder vector: mean squared
+coordinate error for `objective="l2"`, or mean absolute coordinate error
+for `"l1"`.
+
+Downstream targets train the field’s task projection while the pretrained
+encoder remains frozen. Reconstruction predicts a vector, not token IDs,
+strings, or a generated completion.
+
+### Predictions
 
 A text input can support [Boolean](/data-types/boolean/),
 [categorical](/data-types/category/), or [numeric](/data-types/number/) answers
 elsewhere in the schema.
-
-The examples declare Boolean and Number targets explicitly, including answers
-inside supplied candidate records and several answers from shared context.
 
 `embed=True` exports the field's learned representation in the prediction
 table's `representations` column. It does not create a training objective.
@@ -44,7 +82,15 @@ A reconstructing mask on `Text` trains against the frozen encoder's vector,
 using `objective="l2"` by default or `"l1"`. This is representation
 reconstruction; the field does not produce generated strings or completions.
 
-## Options
+<ValueTree
+  id="text-predictions"
+  {...outputs.text}
+  predictions
+  heading="Illustrative prediction output"
+  label="Text prediction output"
+/>
+
+## Leaf-specific parameters
 
 ```python
 message = rf.Text(
@@ -69,45 +115,35 @@ message = rf.Text(
 | `memory` | `None` | Budget the store's shared RAM cache payload in MiB. `None` uses 64 MiB; process overhead and the OS file cache are additional. |
 | `resident` | `None` | Budget device cache tables and replacement workspace in MiB. CUDA defaults to one eighth of free memory, up to 512 MiB; other devices default to `0`. Set `0` to disable the device tier. |
 | `objective` | `"l2"` | Choose `"l1"` or `"l2"` error for a reconstruction objective. |
+| `jitter` | `rf.Jitter()` | Perturb pooled training representations after pristine frozen vectors have been cached; reconstruction targets stay unchanged. |
 
-Caching is automatic across training, validation, and prediction. Loader workers
-send compact text IDs to a shared local cache; tokenization and frozen encoding
-are reused when their inputs and settings match. Fields can share frozen
-vectors while retaining their own learned task projections.
-
-The cache distinguishes encoder weights, tokenizer configuration, pooling,
-device type, and precision. It stores pristine values before training jitter,
-independently of task labels. RAM and device hot entries are bounded; disk
-entries persist across runs without a built-in size limit. A configured
-`store` controls their location; it is not required to enable persistence.
-
-Use `cache=4096` for an additional hot-entry cap, or `cache=False` to tokenize
-and encode directly without any cache tier. Fields sharing one directory within
-a process must use the same `memory` and hot-entry cap settings. The saved model
-retains the configuration, while encoder assets and cached data remain external
-runtime resources.
-
-## Request Methods
+### Request Methods
 
 This type has no type-specific request methods.
 
-## Footguns
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| Missing optional dependencies or unavailable encoder assets | Field construction or encoder loading fails. | Install the text extra and provision the selected encoder/tokenizer in the runtime environment. |
+| An encoder without the selected pooling output or required metadata | `ValueError` identifies the missing hidden size, token output, or pooler output. | Choose a compatible encoder and pooling mode. |
+| Warming a field with `cache=False` | `ValueError`: caching must be enabled before warming. | Enable caching before calling `embedder.warm(strings)`. |
+
+### Footguns
 
 - **Expecting fitting to fine-tune the text encoder.** The [encoder is frozen](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/text.py#L130); relflow learns how its representations support your declared targets. Choose an encoder suited to your language and domain, then evaluate the downstream task. Text reconstruction does not generate a reply or completion.
 - **Counting characters instead of tokens.** `max_length` bounds tokenized input, and [tokenization truncates longer strings](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/text_cache/context.py#L155). Check tokenized lengths so decisive information survives, and choose a limit supported by the encoder.
 - **Treating cache budgets as the entire resource footprint.** `memory` bounds shared hot payloads and `resident` budgets device cache tables; encoder/model memory, process overhead, and the OS file cache are additional. Disk entries persist without a built-in size limit. Set appropriate budgets and manage the writable store separately; the [cache contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/text.py#L173) distinguishes these resources.
 - **Assuming the saved model contains every text resource.** Frozen encoder weights are [excluded from the field's state dictionary](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_text.py#L682), and cache contents are not checkpoint state. Provision the encoder and tokenizer in the prediction environment, make the selected store available for persistent reuse, then check loading and prediction there.
 
-## Related types
+## Relevant evidence
+
+<LeafEvidence type="Text" />
+
+### Related types
 
 - [Category](/data-types/category/) learns a vocabulary of exact labels, such as ticket queues.
 - [Enum](/data-types/enum/) uses a declared list of allowed labels.
 - [Vector](/data-types/vector/) accepts fixed-width embeddings prepared by an upstream system.
-
-## Evidence
-
-The declared research experiment [P092](/evidence/#P092) explores transfer to
-unfamiliar phrases. It has no selected measurement in the retained Evidence
-snapshot; the library keeps that distinction visible.
 
 </DataTypePage>

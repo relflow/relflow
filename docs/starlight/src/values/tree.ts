@@ -1,14 +1,14 @@
-import type { ExampleValue } from '../data/type-example';
+import type { Value, ValueNotes } from './types';
 
 export interface Candidate {
-  value: ExampleValue;
+  value: Value;
   probability: number;
 }
 
 export type PredictionView =
-  | { kind: 'scalar'; value: ExampleValue }
+  | { kind: 'scalar'; value: Value }
   | { kind: 'probability'; probability: number }
-  | { kind: 'category'; value: ExampleValue; probability: number; candidates: Candidate[] }
+  | { kind: 'category'; value: Value; probability: number; candidates: Candidate[] }
   | { kind: 'memberships'; candidates: Candidate[] }
   | { kind: 'vector'; values: number[] }
   | { kind: 'empty' }
@@ -19,8 +19,9 @@ export interface ValueNodeData {
   name: string;
   field?: string;
   context?: string;
+  note?: string;
   kind: 'record' | 'list' | 'value' | 'prediction';
-  value?: ExampleValue;
+  value?: Value;
   children: ValueNodeData[];
   view?: PredictionView;
   returned?: ValueNodeData[];
@@ -29,23 +30,24 @@ export interface ValueNodeData {
 interface TreeOptions {
   id: string;
   predictions?: boolean;
-  inputs?: Record<string, ExampleValue>;
+  inputs?: Record<string, Value>;
+  notes?: ValueNotes;
 }
 
-function record(value: ExampleValue | undefined): value is Record<string, ExampleValue> {
+function record(value: Value | undefined): value is Record<string, Value> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
-function probability(value: ExampleValue | undefined): value is number {
+function probability(value: Value | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
 }
 
-function candidate(value: ExampleValue): value is Record<string, ExampleValue> & Candidate {
+function candidate(value: Value): value is Record<string, Value> & Candidate {
   return record(value) && 'value' in value && probability(value.probability);
 }
 
 /** Recognize only the public content shapes; unknown outputs retain their full value tree. */
-export function predictionView(content: ExampleValue): PredictionView {
+export function predictionView(content: Value): PredictionView {
   if (content === null || typeof content !== 'object') return { kind: 'scalar', value: content };
   if (Array.isArray(content)) {
     if (!content.length) return { kind: 'empty' };
@@ -74,7 +76,7 @@ export function predictionView(content: ExampleValue): PredictionView {
 }
 
 /** Strings stay quoted so decoded codes, empty strings, booleans, and null are distinct. */
-export function formatValue(value: ExampleValue): string {
+export function formatValue(value: Value): string {
   return JSON.stringify(value);
 }
 
@@ -90,15 +92,15 @@ export function magnitudes(values: readonly number[]): number[] {
 }
 
 /** A lossless display projection; the original values are never normalized or mutated. */
-export function tree(value: ExampleValue, options: TreeOptions): ValueNodeData {
+export function tree(value: Value, options: TreeOptions): ValueNodeData {
   if (!options.id || /\s/.test(options.id))
     throw new Error('ValueTree needs a page-unique id without whitespace.');
   let ordinal = 0;
   function visit(
-    current: ExampleValue,
+    current: Value,
     name: string,
     path: (string | number)[],
-    input?: ExampleValue,
+    input?: Value,
     raw = false,
   ): ValueNodeData {
     const node: ValueNodeData = {
@@ -107,6 +109,9 @@ export function tree(value: ExampleValue, options: TreeOptions): ValueNodeData {
       kind: 'value',
       value: current,
       children: [],
+      note: options.notes?.[
+        path.map((part) => `/${String(part).replaceAll('~', '~0').replaceAll('/', '~1')}`).join('')
+      ],
     };
     const part = path.at(-1);
     if (typeof part === 'string' && !['predictions', 'representations', 'inputs'].includes(part))

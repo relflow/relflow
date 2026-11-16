@@ -17,10 +17,9 @@ const choices = flowCases.map((item) => ({
   label: item.label,
   summary: item.structure,
 }));
-const common = flowPaths.predict.slice(0, 4);
 const modes = [
-  { id: 'predict' as const, label: 'Prediction path' },
-  { id: 'train' as const, label: 'Training path' },
+  { id: 'predict' as const, label: 'Predict' },
+  { id: 'train' as const, label: 'Train' },
 ];
 ---
 
@@ -56,13 +55,12 @@ const modes = [
       root.dataset.flowInitialStage = stage;
       const style = document.createElement('style');
       const selector = `#${CSS.escape(root.id)}[data-prepared]:not([data-flow-ready])`;
-      style.textContent = `${selector} [data-flow-stage]:not([data-flow-stage="${stage}"]) > .df-stage-body { display: none; } ${selector} [data-flow-stage]:not([data-flow-stage="${stage}"]) > summary .df-chevron { transform: none; }`;
+      style.textContent = `${selector} details[data-flow-stage]:not([data-flow-stage="${stage}"]) { display: none; } ${selector} [data-flow-select="${stage}"] { color: var(--sl-color-text-accent); } ${selector} [data-flow-select="${stage}"] .df-stop { background: var(--sl-color-text-accent); color: var(--sl-color-bg); border-color: var(--sl-color-text-accent); }`;
       document.head.append(style);
     })();
   </script>
-  <header class="df-intro">
-    <h2 id={`${id}-title`}>Explore the data flow</h2>
-    <p>Choose a use case, then follow prediction or training one stage at a time.</p>
+  <header class="df-intro df-sr-only">
+    <h2 id={`${id}-title`}>Follow the data</h2>
   </header>
   <CasePicker choices={choices} />
   <div class="df-mode-picker" role="group" aria-label="Choose prediction or training">
@@ -75,7 +73,7 @@ const modes = [
           aria-controls={`${id}-cases`}
           disabled
         >
-          {mode.id === 'predict' ? 'Predict' : 'Train'}
+          {mode.label}
         </button>
       ))
     }
@@ -92,45 +90,57 @@ const modes = [
           aria-labelledby={`flow-${item.id}-title`}
         >
           <header class="df-case-heading">
+            <span class="df-eyebrow">The observation we’re following</span>
             <h3 id={`flow-${item.id}-title`}>{item.title}</h3>
             <p>{item.description}</p>
           </header>
-          <section class="df-path df-common" aria-labelledby={`flow-${item.id}-common-title`}>
-            <h4 id={`flow-${item.id}-common-title`}>Shared stages</h4>
-            <ol role="list">
-              {common.map((stageId, index) => (
-                <li>
-                  <FlowStage
-                    caseId={item.id}
-                    stage={item.stages.find((stage) => stage.id === stageId)!}
-                    stages={item.stages}
-                    number={index + 1}
-                  />
-                </li>
-              ))}
-            </ol>
-          </section>
-          {modes.map((mode) => (
-            <section
-              class="df-path"
-              data-flow-path={mode.id}
-              aria-labelledby={`flow-${item.id}-${mode.id}-title`}
+          <div class="df-walkthrough">
+            <nav
+              class="df-rail"
+              aria-label={`${item.label} pipeline stages`}
+              aria-describedby={`flow-${item.id}-navigation-help`}
             >
-              <h4 id={`flow-${item.id}-${mode.id}-title`}>{mode.label}</h4>
-              <ol role="list" start={5}>
-                {flowPaths[mode.id].slice(4).map((stageId, index) => (
-                  <li>
-                    <FlowStage
-                      caseId={item.id}
-                      stage={item.stages.find((stage) => stage.id === stageId)!}
-                      stages={item.stages}
-                      number={index + 5}
-                    />
-                  </li>
-                ))}
+              <p class="df-sr-only" id={`flow-${item.id}-navigation-help`}>
+                Use the up and down arrow keys to follow the stages. Home returns to the first
+                stage; End opens the last.
+              </p>
+              <ol role="list">
+                {item.stages.map((stage) => {
+                  const path = flowPaths[stage.mode || 'predict'];
+                  const position = path.indexOf(stage.id);
+                  return (
+                    <li data-flow-only-mode={stage.mode}>
+                      <a
+                        href={`#flow-${item.id}-${stage.id}`}
+                        data-flow-select={stage.id}
+                        aria-controls={`flow-${item.id}-${stage.id}`}
+                        aria-label={`Step ${position + 1}: ${stage.title}`}
+                        title={stage.title}
+                      >
+                        <span class="df-stop" aria-hidden="true">
+                          {position + 1}
+                        </span>
+                        <span class="df-stop-label">
+                          <span class="df-sr-only">Step {position + 1}: </span>
+                          {stage.title}
+                          {stage.optional && <small>Optional</small>}
+                        </span>
+                      </a>
+                    </li>
+                  );
+                })}
               </ol>
-            </section>
-          ))}
+            </nav>
+            <div class="df-workspace">
+              {item.stages.map((stage) => (
+                <FlowStage
+                  caseId={item.id}
+                  stage={stage}
+                  number={flowPaths[stage.mode || 'predict'].indexOf(stage.id) + 1}
+                />
+              ))}
+            </div>
+          </div>
         </article>
       ))
     }

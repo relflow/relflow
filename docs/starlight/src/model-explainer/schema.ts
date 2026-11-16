@@ -34,19 +34,62 @@ export interface ParsedSchema {
   nodes: ModelNode[];
 }
 
+/** Keep grouped field declarations together while preserving their original text and line. */
+function statements(source: string): [number, string][] {
+  const context = pythonContext(source);
+  const result: [number, string][] = [];
+  const stack: string[] = [];
+  const closes: Record<string, string> = { ')': '(', ']': '[', '}': '{' };
+  let offset = 0;
+  let start = 0;
+  let pending: string[] = [];
+  for (const [index, line] of source.split('\n').entries()) {
+    if (!pending.length) start = index;
+    pending.push(line);
+    for (let cursor = 0; cursor < line.length; cursor++) {
+      const token = line[cursor];
+      if (!context.isCode(offset + cursor)) continue;
+      if ('([{'.includes(token)) stack.push(token);
+      else if (token in closes && stack.pop() !== closes[token])
+        throw new Error(`Schema has mismatched grouping at line ${index + 1}.`);
+    }
+    offset += line.length + 1;
+    if (!stack.length) {
+      result.push([start, pending.join('\n')]);
+      pending = [];
+    } else if (!/^    [A-Za-z_]\w* = /.test(pending[0]))
+      throw new Error(`Schema only supports grouped field declarations at line ${start + 1}.`);
+  }
+  if (pending.length) throw new Error(`Schema field at line ${start + 1} has unclosed grouping.`);
+  return result;
+}
+
 /** Parse only the explicit class declarations used by the authored showcase. */
-export function parseSchema(source: string): ParsedSchema {
+export function parseSchema(
+  source: string,
+  options: { leaves?: readonly string[] } = {},
+): ParsedSchema {
+  const optionsLeaves = new Set(options.leaves);
   const classes: ClassDeclaration[] = [];
   let current: ClassDeclaration | undefined;
   let guarded = false;
   let constructed = '';
   let imported = false;
-  for (const [index, line] of source.split('\n').entries()) {
+  for (const [index, line] of statements(source)) {
     if (!line.trim()) continue;
+    // Literal labels and configuration names remain visible in the original schema.
+    if (!classes.length && /^[A-Z][A-Z0-9_]* = /.test(line)) continue;
     if (line === 'import relflow as rf' && !classes.length && !imported) {
       imported = true;
       continue;
     }
+    const external = /^from [\w.]+ import ([\w, ]+)$/.exec(line);
+    if (
+      external &&
+      !classes.length &&
+      external[1].split(',').every((name) => options.leaves?.includes(name.trim()))
+    )
+      continue;
     const declaration = /^class ([A-Za-z_]\w*)\(rf\.(Model|Branch)\):$/.exec(line);
     if (declaration && !guarded) {
       current = {
@@ -75,7 +118,7 @@ export function parseSchema(source: string): ParsedSchema {
       current.docstring = docstring[1];
       continue;
     }
-    const field = /^    ([A-Za-z_]\w*) = (.+)$/.exec(line);
+    const field = /^    ([A-Za-z_]\w*) = ([\s\S]+)$/.exec(line);
     if (current && field) {
       if (current.fields.some((item) => item.name === field[1]))
         throw new Error(`Schema field ${current.name}.${field[1]} is declared twice.`);
@@ -83,13 +126,13 @@ export function parseSchema(source: string): ParsedSchema {
       continue;
     }
     throw new Error(
-      `Model explainer cannot describe schema line ${index + 1}: ${line}. Use explicit Model/Branch classes and one-line field declarations.`,
+      `Model explainer cannot describe schema line ${index + 1}: ${line}. Use explicit Model/Branch classes and field declarations.`,
     );
   }
   const roots = classes.filter((item) => item.kind === 'Model');
-  if (!imported || roots.length !== 1 || constructed !== roots[0]?.name)
+  if (!imported || roots.length !== 1 || (guarded && constructed !== roots[0]?.name))
     throw new Error(
-      'Model explainer needs one Model class and its guarded small-preset constructor.',
+      'Schema needs one Model class; an optional main guard must construct that class with the small preset.',
     );
   for (const item of classes) {
     if (!item.docstring || !item.fields.length)
@@ -104,21 +147,21 @@ export function parseSchema(source: string): ParsedSchema {
       throw new Error(`Model explainer cannot expand recursive branch class ${owner.name}.`);
     const parents = new Set([...ancestors, owner.name]);
     return owner.fields.map(({ name, declaration }) => {
-      const call = /^(rf\.)?([A-Za-z_]\w*)(?:\((.*)\))?$/.exec(declaration);
+      const call = /^(rf\.)?([A-Za-z_]\w*)(?:\(([\s\S]*)\))?$/.exec(declaration);
       if (!call)
         throw new Error(
           `Schema field ${owner.name}.${name} must use a direct field or declared branch constructor.`,
         );
       const [, namespace, type, options = ''] = call;
       const context = pythonContext(options);
-      for (let index = 0; index < options.length; index++) {
-        if (['(', ')'].includes(options[index]) && context.isCode(index))
+      for (const call of options.matchAll(/(?<![\w.])([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)\s*\(/g)) {
+        if (context.isCode(call.index) && !call[1].startsWith('rf.'))
           throw new Error(
             `Schema field ${owner.name}.${name} has nested configuration calls outside this explainer's literal schema contract.`,
           );
       }
       const path = `${prefix}/${name}`;
-      if (namespace) {
+      if (namespace || (!definitions.has(type) && optionsLeaves.has(type))) {
         if (['Model', 'Branch', 'Struct'].includes(type))
           throw new Error(`Schema field ${path} needs a declared Branch class.`);
         const target = [...options.matchAll(/\bmask\s*=\s*True\b/g)].some((match) =>

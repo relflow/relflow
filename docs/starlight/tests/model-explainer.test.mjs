@@ -5,6 +5,7 @@ import { explainerCases, explainerByCase } from '../src/data/model-explainer.ts'
 import { scenarios } from '../src/data/concepts/scenarios.ts';
 import { flatten, parseSchema, projectSchema } from '../src/model-explainer/schema.ts';
 import { layout } from '../src/datasets/types.ts';
+import { bearingSchema, repeatPurchaseSchema } from '../src/data/schema-examples.ts';
 
 const originals = JSON.parse(
   readFileSync(new URL('../src/data/use-cases.json', import.meta.url), 'utf8'),
@@ -212,4 +213,51 @@ test('unsupported class bodies, recursive branches, and unknown references fail 
     ),
   ])
     assert.throws(() => parseSchema(malformed), /Schema|schema|branch/);
+});
+
+test('declaration-only schemas render without constructing a model', () => {
+  const parsed = parseSchema(repeatPurchaseSchema);
+  assert.equal(parsed.modelClass, 'Customer');
+  assert.deepEqual(
+    flatten(parsed.nodes)
+      .filter((node) => node.target)
+      .map((node) => node.path),
+    ['/returns_in_30d'],
+  );
+});
+
+test('custom leaf names require explicit declarations and remain distinct from branches', () => {
+  assert.throws(() => parseSchema(bearingSchema), /schema line/);
+  const parsed = parseSchema(bearingSchema, { leaves: ['Bearing'] });
+  assert.equal(parsed.nodes[0].type, 'Bearing');
+  assert.equal(parsed.nodes[0].kind, 'field');
+  assert.equal(parsed.nodes[0].target, false);
+  assert.equal(parsed.nodes.at(-1).target, true);
+});
+
+test('all retained leaf example schemas can supply the shared model view', async () => {
+  const types = [
+    'number',
+    'quantile',
+    'vector',
+    'ordinal',
+    'category',
+    'boolean',
+    'enum',
+    'hash',
+    'set',
+    'group',
+    'period',
+    'duration',
+    'text',
+  ];
+  let count = 0;
+  for (const type of types) {
+    const module = await import(`../src/data/examples/${type}.ts`);
+    for (const example of module[`${type}Examples`]) {
+      assert.ok(parseSchema(example.schema).nodes.length, `${type}/${example.id}`);
+      count++;
+    }
+  }
+  assert.equal(count, 39);
 });

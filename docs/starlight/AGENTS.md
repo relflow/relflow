@@ -47,6 +47,15 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Libertinus Serif Semibold wordmark. Prepared SVGs live in `src/assets/branding/`;
   regeneration and source provenance are documented in `branding/README.md`.
   Keep both theme variants, accessible home-link text, and mobile sizing intact.
+- Standalone lowercase `relflow` mentions in page prose use an inline serif
+  wordmark. Keep authored text plain: `src/middleware.ts` applies the server-only
+  `src/site/brand.mjs` HTML transform in dev and static prerendering. Code,
+  commands, URLs, identifiers, exact data viewers, and metadata stay untouched;
+  `data-no-brand` opts an element and its descendants out. Preserve original
+  text and attributes, heading anchors, selection, and copying. Style the shared
+  `.rf-wordmark` in `src/styles/site.css`; the prepared, licensed font subset and
+  regeneration command are documented in `branding/README.md`. Do not add
+  browser text-replacement scripts or manually wrap each authored mention.
 - The palette lab explores accent variations of the current neutral theme.
   Keep surfaces, body text, and semantic string/number colors identical across
   its options; vary only accent and keyword colors. The lab remains a preview.
@@ -66,18 +75,20 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   source definition and an existing guide when available. Preserve the documented
   source scopes, optional serving requirements, search/filter URLs, entry anchors,
   and full content without JavaScript. Never import the Python runtime to build it.
-- The homepage highlights six use cases through entity relationship diagrams,
-  showing their records, relationships, and prediction targets. Use `DataExplorer`
-  with the canonical datasets from `src/data/datasets.ts`; keep schemas, record
-  snippets, prediction outputs, and code tabs out of this component. Keep all
-  six choices visible, with natural-height diagram panels, column descriptions,
-  and accessible keyboard selection. The shared class schemas remain available
-  to Core Concepts and other guides.
+- The homepage highlights six use cases using `DataViews` with canonical
+  datasets from `src/data/datasets.ts` and schemas from `src/data/use-cases.json`.
+  Each use case offers Data, Model, and Schema. Keep all six choices visible,
+  natural panel heights, column notes, and accessible keyboard selection.
+  Prediction output trees remain separate from the homepage views.
   Shared `ExampleSelection.astro` resolves the initial panel before parsing it.
   Reserve the picker's natural space before enhancement; do not insert it later
   or impose a shared height on example panels. Preserve all-case no-JS content.
-- Use `DataExplorer.astro` as the standard dataset description in authored guides
-  and examples. Supply a page-unique `id` and an authored `Dataset` from
+- Use `DataViews.astro` as the standard dataset description in authored guides
+  and examples. It composes Data, Model, and Schema using one dataset and its
+  matching class schema. `DataExplorer.astro` remains the internal diagram
+  renderer; do not embed a standalone source diagram in authored pages.
+  Explicit custom `leaves` map extension names to their descriptions.
+  Supply a page-unique `id` and an authored `Dataset` from
   `src/datasets/types.ts`; the renderer does not infer a schema from sample values.
   Keep column descriptions, source types, nested record boundaries, and historical
   target roles accurate. Collections of records get related entities; scalar
@@ -90,8 +101,8 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   add illustrative joins; nested examples do not need extra PK/FK fields.
   Source descriptions explain field meaning, units, timing, and relationships,
   without model configuration or encoding details. Model ERDs use shared
-  representation descriptions and their declarations instead; set `view="model"`
-  for model-input and prediction-target labels.
+  representation descriptions and declarations. The shared viewer sets
+  `view="model"` internally for model-input and prediction-target labels.
   `src/datasets/` owns shared layout, measured SVG connectors, and column notes.
   Keep instance IDs unique, tooltips independent, both themes, keyboard/touch use,
   Escape, no-JavaScript descriptions, and shared use-case selection working.
@@ -103,7 +114,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   lanes. Keep the steps left-to-right on narrow screens with local scrolling.
   `FeaturelessExamples` switches between the six canonical source ERDs and model
   ERDs in one viewer using `ErdToggle` and the same `DataExplorer` presentation.
-  Keep the Data ERD / Model ERD control usable with the keyboard and without JavaScript.
+  Keep the Data / Model / Schema controls usable with the keyboard and without JavaScript.
   Source-only join keys stay on the data side; model ERDs show the declared
   fields, types, branches, and targets. Preserve the Google Doc's page copy and use its
   visual notes as implementation instructions.
@@ -114,7 +125,9 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   optimizer, architecture, batch-size, or training-budget settings. Architecture
   and fit presets are independent; `small` and `medium` are alternative recipes,
   not an ascending model-size ladder.
-  Every Core Concepts page supports all six original homepage use cases. The
+  Model trees, Context branches, Data flow, and Runtime support all six original
+  homepage use cases. Targets and masking uses authored prose with one focused
+  class schema instead of a use-case explorer. The
   shared scenario records live in `src/data/concepts/scenarios.ts` and reuse the
   canonical homepage schemas. Each concept owns six focused examples in
   `src/data/concepts/<topic>.ts`. Keep shared field names, labels, nesting, and
@@ -127,23 +140,31 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Discrete data, Calendar data, Multimodal data, and Other data groups. Keep
   extension guidance visible under Other data; list implemented leaf types and
   retain their actual API names and source paths.
-- `DataFlow.astro` follows the six canonical observations through connected,
-  expandable stages. `src/data/concepts/data-flow.ts` owns the authored views;
-  `src/data-flow/types.ts` owns prediction/training stage order. Keep the four
+  The Core Concepts Leaf Types page keeps its contracts, states, addresses, and
+  `ConceptSummary` explanation without a per-type catalog or use-case explorer.
+- `DataFlow.astro` follows the six canonical observations in one workspace with
+  a connected vertical stage rail. The rail selects a stage; Back/Continue move
+  through the same path, and arrow keys, Home, and End navigate the rail.
+  `src/data/concepts/data-flow.ts` owns the authored views;
+  `src/data-flow/types.ts` owns prediction/training stage order and the shared
+  representation handoffs between stages. Keep the four
   common stages, the prediction output path, and the loss/backward/update path
   distinct. Historical answers align with their supplied records and remain
   hidden from input embedding. Reuse existing prediction illustrations; tensors,
-  gradients, and loss values stay schematic. Preserve native disclosures,
+  gradients, and loss values stay schematic. Keep one active stage visible after
+  enhancement, with source records and configuration in native disclosures.
+  Preserve native stage disclosures as the no-JavaScript fallback,
   stage deep links, case/mode navigation, exact code copying, and both paths
   without JavaScript. Keep fixture data out of client bundles.
-- The Model trees page uses `ModelExplainer.astro` and `src/data/model-explainer.ts`
-  to derive three steps from all six canonical schemas: one answer, added
-  context, and another answer. Keep additional targets' historical-label
-  requirements explicit and their dataset columns aligned. Validate projections
-  and source-line/path bindings through `src/model-explainer/`; each case shares
-  one highlighted `Code` block, with exact selected-step copying. Preserve
-  complete schemas and readable no-JavaScript explanations. The explainer is
-  static and executes no model or training code; it creates no learning evidence.
+- The Model trees page follows the Google Doc’s tree definition, linked
+  Branches/Leaves bullets, and Model Presets section with its benchmark callout.
+  Keep **Explore a use case** visible and reuse `FeaturelessExamples.astro` with
+  `id="models"` for all six canonical cases. Its existing `ErdToggle`
+  switches among Data, Model, and Schema everywhere. Diagram views use
+  `DataExplorer` column notes; Schema uses the shared `Code` renderer
+  with contextual tooltips and exact copying. The schema slot uses the same native radio/CSS controls without JavaScript. Do not substitute the three-step `ModelExplainer`
+  inspector or add another concept summary. The same comparison remains on the
+  Featureless Modeling page, using its default `featureless` ID prefix.
 - Follow the current shared [Google Doc](https://docs.google.com/document/d/1q04H63KEJnykRBGzkKQo86DohyOmMO-4OThlyrFn4ig/edit)
   page by page. Refresh it before starting the next page and keep content review
   incremental. Preserve its intended content, emphasis, and page boundaries.
@@ -177,23 +198,39 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Delegate trigger events rather than binding handlers per token. Initialize
   diagrams near the viewport, pause hidden/offscreen resize work, and batch
   geometry reads separately from SVG writes.
-- Every individual leaf type page follows one contract: a short introduction,
-  then `Example`, `Inputs`, `Predictions`, `Options`, `Request Methods`,
-  `Footguns`, `Related types`, and `Evidence`, in that exact order. Options tables use
-  `Option`, `Default`, and `Purpose` columns. Examples use class schemas with
-  a one-line docstring.
+- Every individual leaf type page follows the shared Google Doc's Number page:
+  a short introduction followed by `Input values`,
+  `Standardization and processor pipelines`, `How is this leaf trained?`,
+  `Leaf-specific parameters`, `Errors raised`, and `Relevant evidence`, in that
+  exact order. Keep `Predictions` under training, `Request Methods` under
+  parameters, `Footguns` under errors, and `Related types` under evidence as
+  level-three subsections. Options tables use
+  `Option`, `Default`, and `Purpose` columns.
   Explain when to choose the type, accepted values and missingness, output
   semantics, and verified evidence scope. The type-selection overview is separate.
-  Use `DataTypePage` with the existing example ID and typed examples. It owns
-  the Example heading and example composition; keep the remaining seven sections
-  as ordinary Markdown in its body. The build checks their labels, anchors, and
-  order. Do not recreate this layout or introduce a separate slot for each section.
+  Use `DataTypePage` with the leaf name; keep the six reference sections
+  as ordinary Markdown in its body. Predictions retains the authored output
+  explanation and adds a standalone `ValueTree` fed by
+  `src/datatypes/predictions.ts`, without datasets, schemas,
+  or scenario selectors. Keep output values illustrative and field names generic.
+  Keep the explanation as prose; use optional display-only tree notes for field
+  details. Copied JSON must remain the actual output shape. Hash, Text, and Period
+  show requested representations rather than fabricated decoded identifiers,
+  text, or dates. The build checks section labels, anchors, and order. Do not
+  recreate this layout or introduce a separate slot for each section.
   Request methods tables use `Method`, `Returns`, and `Purpose`, followed by
   short examples calling `rf.Type.method(model, "/field")` with absolute paths.
   Include explicit Python type annotations on result assignments in every
   Request Methods snippet, matching the helper contract and example label types.
   Describe only intended type-specific helpers; exclude validation hooks and
   inherited schema machinery. State explicitly when a type has no such helpers.
+  Explain each type's input representation, decoder/readout, and actual content
+  loss without executing it. Number, Duration, and Ordinal share raw/log numeric
+  modeling; other types own their different normalization and loss behavior.
+  Use `LeafEvidence type="Number"` (or another canonical type) for the three-column proof,
+  hypothesis, and release-status table. The selected publication owns every
+  status; do not copy measured outcomes or versions into these tables. A missing
+  run remains missing and a declaration is not a measurement.
 - Footguns use concise bullets: a bold, specific mistake, its consequence, an
   actionable check or remedy, and an inline supporting link. Prefer three or
   four useful pitfalls over generic warnings. Draw empirical lessons from the
@@ -201,16 +238,18 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   a passing limitation check is not proof that the model overcame it. Keep
   documented API constraints distinct from measured learning results, and never
   present unmeasured declarations or historical implementations as current proof.
-- Every type page uses the shared `TypeExamples.astro` showcase with three
-  scenarios in `src/data/examples/<type>.ts`. The shared example contract and
-  rich-result helper live in `src/data/type-example.ts`.
+- Leaf reference pages do not embed `TypeExamples.astro`. Its existing scenarios
+  in `src/data/examples/<type>.ts` remain available for focused guides; preserve
+  their authored records. The shared example contract and rich-result helper
+  live in `src/data/type-example.ts`. Generic nested values and display notes
+  are typed in `src/values/types.ts`, independent of example records.
   Keep all choices visible and panel heights natural.
   Schema, known inputs, hidden training answers, and results switch together.
   Six-case views use the shared `CasePicker` and `ExampleSelection` primitives;
-  preserve the separate six-case persistence and leaf-type scenario controllers.
+  preserve six-case persistence and the standalone showcase controller when used.
   Each `TypeExample` owns a required `dataset` matching its input and answer
-  source fields. Show the explorer first, the model schema next, exact source
-  records in a disclosure, and complete prediction output below.
+  source fields. Show `DataViews` first, exact source records in a disclosure, and complete
+  prediction output below. The schema lives in its Schema view.
   Show output as a complete prediction row through `ValueTree.astro` with
   `predictions` enabled. Keep actual field names, branch lists, and source-record
   alignment. Visualize Boolean event probabilities, category candidates, independent
@@ -254,6 +293,18 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   declaration catalog require exact archived source bytes, a matching script
   digest and ID, and their recorded original path/lane identity; reject unknown
   identities rather than silently omitting measurements or reusing another proof.
+  `src/evidence/catalog.ts` owns interrogative display titles, neutral modeling summaries,
+  and primary leaf-type tags. The tags drive catalog filters and `LeafEvidence`
+  reverse links; do not tag retired Cluster proofs as current Group evidence.
+  Lead each report with how the synthetic task is modeled, then one primary
+  comparison using `EvidenceComparison`. `src/evidence/comparison.ts` selects
+  metric paths, conditions, and units; every plotted number still comes from the
+  selected record. Prefer recorded raw RMSE/MAE/MSE over normalized error when
+  the same raw quantity exists for all compared arms. Distinguish controlled
+  comparisons, baseline references, before/after runs, and recorded conditions;
+  never invent a control for a proof that lacks one. Keep check totals and unmet
+  verdicts visible, with every criterion, secondary metric, and the complete
+  investigation closed by default. Charts must remain readable without scripts.
   Display authored interpretation separately from the CI-derived verdict. Exact
   archived scripts keep their own API and source hashes. Run `npm test` for the input-driven
   adapter checks as well as the normal type check and build.

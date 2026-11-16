@@ -14,7 +14,7 @@ const lessons: Record<CaseId, { title: string; description: string; fields: stri
     title: 'Give each history its own collection',
     description: 'Monthly usage and support tickets have different record shapes and lengths. Their positions do not imply a one-to-one match across the two collections.',
     fields: ['monthly_usage', 'support_tickets'],
-    note: 'Monthly usage and support tickets each retain their own history. The two usage rows below and the single support ticket belong to separate collections.',
+    note: 'Monthly usage and support tickets each retain their own history. The two usage records and the single support ticket belong to separate collections.',
     takeaway: 'Branches preserve relationships within a record and expose each collection as context for the parent. Cross-history joins remain an explicit data-preparation decision.',
   },
   demand: {
@@ -65,8 +65,7 @@ export const branches: Concept = {
       title: lesson.title,
       description: lesson.description,
       blocks: [
-        { label: 'Branches in the class schema', lang: 'python' as const, code: scenario.schema, note: lesson.note },
-        { label: 'The supplied record collections', lang: 'yaml' as const, records: true, code: stringify(input, { indent: 2, lineWidth: 0 }), note: 'This is an excerpt of the shared illustrative input record. The class schema shows how these collections fit within the complete observation.' },
+        { label: 'The supplied record collections', lang: 'yaml' as const, records: true, code: stringify(input, { indent: 2, lineWidth: 0 }), note: lesson.note },
       ],
       takeaway: lesson.takeaway,
     };

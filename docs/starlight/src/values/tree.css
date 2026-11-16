@@ -60,6 +60,17 @@
   white-space: nowrap;
   border: 0;
 }
+.vt-node-note {
+  margin: 0.2rem 0.4rem 0.35rem;
+  color: var(--rf-muted);
+  font-size: 0.7rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.tree-row > .vt-node-note {
+  flex-basis: 100%;
+  margin: 0;
+}
 .value-tree .tree-node-prediction {
   --tree-anchor: 1rem;
 }

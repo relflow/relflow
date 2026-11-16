@@ -1,5 +1,6 @@
 ---
 import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { question } from '../../evidence/catalog';
 import EvidenceReport from '../../components/EvidenceReport.astro';
 import { evidenceEntries, type EvidenceEntry } from '../../evidence/data';
 
@@ -15,7 +16,7 @@ const { entry } = Astro.props;
 
 <StarlightPage
   frontmatter={{
-    title: entry.title,
+    title: question(entry),
     description: entry.description,
     editUrl: false,
     prev: false,

@@ -1,6 +1,6 @@
+import type { Value } from '../../values/types';
 export type CaseId = 'tickets' | 'churn' | 'demand' | 'credit' | 'maintenance' | 'claims';
 
-import type { ExampleValue } from '../type-example';
 
 interface ConceptCode {
   kind?: 'code';
@@ -15,8 +15,8 @@ interface ConceptCode {
 interface ConceptPrediction {
   kind: 'prediction';
   label: string;
-  value: Record<string, ExampleValue>;
-  inputs?: Record<string, ExampleValue>;
+  value: Record<string, Value>;
+  inputs?: Record<string, Value>;
   note?: string;
   code?: never;
   lang?: never;

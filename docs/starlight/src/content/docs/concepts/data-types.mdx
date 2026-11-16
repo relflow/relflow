@@ -3,7 +3,7 @@ title: Leaf Types
 description: Understand how typed leaves bind to source data, represent values, and define prediction and learning behavior.
 ---
 
-import ConceptPage from '../../../components/ConceptPage.astro';
+import ConceptSummary from '../../../components/ConceptSummary.astro';
 import RegistryContracts from '../../../components/RegistryContracts.astro';
 import StateToken from '../../../components/StateToken.astro';
 import { dataTypes } from '../../../data/concepts/data-types';
@@ -48,41 +48,4 @@ The heritage path of a data leaf describes where each leaf exists in relation to
 
 Critically, the default heritage path for a leaf is the assumed query path under which the leaf’s data exists, relative to the tensordict in which data is passed from a data loader (and optional pre-processor) into the model.
 
-## Continuous data
-
-- [Number](/data-types/number/) represents scalar measurements and numeric magnitudes.
-- [Quantile](/data-types/quantile/) represents numeric values by their position in the training distribution.
-- [Vector](/data-types/vector/) represents fixed-width numeric coordinates.
-- [Ordinal](/data-types/ordinal/) represents ordered labels or integer ranks through numeric rank.
-
-Choose Number when distances in the original units or predictions beyond the
-observed range matter. Choose Quantile when relative position in the distribution
-is the useful representation. Its learned range bounds its output and can merge
-inputs beyond the same training tail. The retained checks cover
-[range behavior](/evidence/#P068) and [objective differences](/evidence/#P077).
-
-## Discrete data
-
-- [Category](/data-types/category/) learns a vocabulary of labels.
-- [Boolean](/data-types/boolean/) represents true-or-false values and predicts their probability.
-- [Enum](/data-types/enum/) uses an explicitly declared vocabulary.
-- [Hash](/data-types/hash/) preserves identifier relationships without a learned identity vocabulary.
-- [Set](/data-types/set/) represents unordered label membership.
-- [Group](/data-types/group/) learns shared representations for identities.
-
-## Calendar data
-
-- [Period](/data-types/period/) represents recurring calendar parts.
-- [Duration](/data-types/duration/) derives elapsed time from timestamp endpoints.
-
-## Multimodal data
-
-- [Text](/data-types/text/) uses a frozen text encoder and learns how its representations contribute to the task.
-
-## Other data
-
-[Custom leaf types](/advanced/custom-data-types/) let you bring your own
-representation, objective, and output contract through the same plugin system
-as the built-in leaves.
-
-<ConceptPage concept={dataTypes} />
+<ConceptSummary concept={dataTypes} />

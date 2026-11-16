@@ -1,8 +1,9 @@
 ---
+import type { Value } from '../values/types';
 import { Code } from '@astrojs/starlight/components';
 import { stringify } from 'yaml';
-import type { ExampleValue, TypeExample } from '../data/type-example';
-import DataExplorer from './DataExplorer.astro';
+import type { TypeExample } from '../data/type-example';
+import DataViews from './DataViews.astro';
 import ValueTree from './ValueTree.astro';
 import ExampleSelection from './ExampleSelection.astro';
 
@@ -14,7 +15,7 @@ interface Props {
 const { id, examples } = Astro.props;
 const yamlOptions = { indent: 2, lineWidth: 0 };
 
-function trainingRecord(inputs: ExampleValue, answers: ExampleValue): ExampleValue {
+function trainingRecord(inputs: Value, answers: Value): Value {
   if (Array.isArray(inputs) && Array.isArray(answers)) {
     if (inputs.length !== answers.length)
       throw new Error('Example inputs and answers must retain the same record positions.');
@@ -115,20 +116,12 @@ function trainingRecord(inputs: ExampleValue, answers: ExampleValue): ExampleVal
                 <span>Known context and historical answers</span>
               </>
             </div>
-            <DataExplorer
+            <DataViews
               id={`${id}-${example.id}-data`}
               dataset={example.dataset}
+              schema={example.schema}
               headingLevel={5}
             />
-          </section>
-          <section class="schema-pane" aria-label="Model schema">
-            <div class="pane-heading">
-              <>
-                <h4>Schema</h4>
-                <span>Python</span>
-              </>
-            </div>
-            <Code code={example.schema} lang="python" meta='contract="schema"' />
           </section>
           <details class="records-pane">
             <summary>Inspect the exact records · YAML</summary>

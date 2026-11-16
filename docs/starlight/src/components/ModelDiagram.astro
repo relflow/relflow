@@ -7,10 +7,12 @@ import DataExplorer from './DataExplorer.astro';
 interface Props {
   id: string;
   schema: string;
+  leaves?: Record<string, string>;
+  headingLevel?: 3 | 4 | 5 | 6;
 }
 
-const { id, schema } = Astro.props;
-const model = parseSchema(schema);
+const { id, schema, leaves = {}, headingLevel = 4 } = Astro.props;
+const model = parseSchema(schema, { leaves: Object.keys(leaves) });
 const root = model.classes.find((definition) => definition.name === model.modelClass)!;
 const dataset: Dataset = {
   id,
@@ -28,11 +30,13 @@ function describe(path: string, name: string, nodes: ModelNode[]) {
     description: reference.representations[path === '/' ? 'Model' : 'Branch'],
     columns: nodes.map((node) => ({
       name: node.name,
-      type: `rf.${node.type}`,
+      type: Object.hasOwn(leaves, node.type) ? node.type : `rf.${node.type}`,
       description: [
         node.target
-          ? reference.types[node.type]?.text
-          : reference.representations[node.type] || reference.types[node.type]?.text,
+          ? leaves[node.type] || reference.types[node.type]?.text
+          : leaves[node.type] ||
+            reference.representations[node.type] ||
+            reference.types[node.type]?.text,
         node.target ? reference.options.target.text : undefined,
         `Configuration: ${node.declaration}`,
       ]
@@ -61,4 +65,4 @@ function describe(path: string, name: string, nodes: ModelNode[]) {
 describe('/', model.modelClass, model.nodes);
 ---
 
-<DataExplorer {id} {dataset} view="model" headingLevel={4} showObservation={false} />
+<DataExplorer {id} {dataset} view="model" {headingLevel} showObservation={false} />

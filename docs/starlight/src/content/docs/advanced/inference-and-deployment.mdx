@@ -3,7 +3,8 @@ title: Inference and deployment
 description: Stream batch predictions, bound direct requests, preserve output contracts, and tune the optional JSON/Arrow serving runtime.
 ---
 
-import DataExplorer from '../../../components/DataExplorer.astro';
+import DataViews from '../../../components/DataViews.astro';
+import { repeatPurchaseSchema } from '../../../data/schema-examples';
 import { repeatPurchase } from '../../../data/observations';
 
 Choose the inference path by what must stay in memory and how callers receive
@@ -17,7 +18,7 @@ customer-specific examples use the record shape below and predict
 `returns_in_30d`. Supply application-prepared request files without that future
 label; substitute your own artifact and matching inputs for another model.
 
-<DataExplorer id="inference-purchase-data" dataset={repeatPurchase} />
+<DataViews id="inference-purchase-data" dataset={repeatPurchase} schema={repeatPurchaseSchema} />
 
 ## Bound a direct prediction
 

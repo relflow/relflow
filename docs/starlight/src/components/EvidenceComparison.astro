@@ -1,0 +1,201 @@
+---
+import type { EvidenceEntry } from '../evidence/data';
+import { comparison } from '../evidence/comparison';
+import { formatValue } from '../evidence/presentation';
+interface Props {
+  entry: EvidenceEntry;
+}
+const { entry } = Astro.props;
+const chart = comparison(entry);
+const [min, max] = chart.domain;
+const zero = ((0 - min) / (max - min)) * 100;
+---
+
+<figure class="comparison" data-primary-comparison data-metric={chart.metric}>
+  <figcaption>
+    <span class="kind">{chart.kind}</span>
+    <div class="metric-heading"><strong>{chart.metric}</strong><span>{chart.direction}</span></div>
+    <p>{chart.definition}</p>
+  </figcaption>
+  {
+    chart.available ? (
+      <>
+        <ol class="bars" aria-label={`${chart.metric} by condition`}>
+          {chart.points.map((point) => {
+            const position = ((point.value! - min) / (max - min)) * 100;
+            return (
+              <li data-metric-path={JSON.stringify(point.path)} data-value={point.value}>
+                <div class="bar-label">
+                  <span>{point.label}</span>
+                  <strong>
+                    {formatValue(
+                      point.value,
+                      point.format === 'percent'
+                        ? 'percent'
+                        : chart.metric === 'AUC'
+                          ? 'auc'
+                          : 'number',
+                    )}
+                  </strong>
+                </div>
+                <div class="track" aria-hidden="true" style={`--zero:${zero}%`}>
+                  <span
+                    class="bar"
+                    style={`margin-inline-start:${Math.min(zero, position)}%;width:${Math.abs(position - zero)}%`}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+        <div class="axis" aria-hidden="true">
+          <>
+            <span>{formatValue(min)}</span>
+            <span>{formatValue(max)}</span>
+          </>
+        </div>
+        {chart.kind === 'Recorded measurement' && (
+          <p class="scope">
+            No matched A/B comparison is presented for this readout. Inspect the full measurements
+            and method for the experiment’s other checks.
+          </p>
+        )}
+        {['P056', 'P062', 'P065'].includes(entry.id) && (
+          <p class="scope">
+            Known-answer accuracy and all-row accuracy have different denominators. Inspect coverage
+            in Measurements to see which answers the vocabulary can represent.
+          </p>
+        )}
+        {entry.id === 'P046' && (
+          <p class="scope">
+            First edit cycle. Repeated cycles, source rebindings, and rejected edits remain in
+            Measurements.
+          </p>
+        )}
+        {entry.id === 'P055' && (
+          <p class="scope">
+            The reference is the information limit without identity, not a competing trained model.
+          </p>
+        )}
+        {entry.id === 'P040' && (
+          <p class="scope">
+            The flattened-data reference is an information-bound oracle, not a competing trained
+            model.
+          </p>
+        )}
+        {entry.id === 'P079' && (
+          <p class="scope">
+            Heavy-tailed multiplicative task, matched 500-update budget. Additive tasks, other
+            target types, and longer training budgets remain in Measurements.
+          </p>
+        )}
+      </>
+    ) : (
+      <p class="unavailable">
+        {!entry.result
+          ? 'No measured comparison is available in the selected publication.'
+          : entry.result.outcome === 'error'
+            ? 'The selected execution reported an error; no learning comparison is shown.'
+            : !entry.sourceMatches
+              ? 'The exact source could not be matched; inspect the recorded execution before interpreting these metrics.'
+              : 'The selected record does not contain every measurement needed for this comparison. Inspect Measurements for the available values.'}
+      </p>
+    )
+  }
+</figure>
+<style>
+  .comparison {
+    margin: 1rem 0;
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.5rem;
+    background: var(--rf-card);
+  }
+  .kind {
+    color: var(--sl-color-text-accent);
+    font-size: 0.7rem;
+  }
+  .metric-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.3rem 0.75rem;
+  }
+  .metric-heading strong {
+    font-size: 1.2rem;
+    color: var(--rf-ink);
+  }
+  .metric-heading span,
+  figcaption p,
+  .scope,
+  .axis {
+    color: var(--rf-muted);
+    font-size: 0.75rem;
+    line-height: 1.6;
+  }
+  figcaption p {
+    margin: 0.4rem 0 1.3rem;
+  }
+  .bars {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 1rem;
+  }
+  .bar-label {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 0.75rem;
+    font-size: 0.8rem;
+    line-height: 1.5;
+  }
+  .bar-label span {
+    overflow-wrap: anywhere;
+  }
+  .bar-label strong {
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    font-weight: 600;
+    color: var(--rf-ink);
+  }
+  .track {
+    position: relative;
+    height: 0.6rem;
+    margin-top: 0.35rem;
+    background: var(--rf-border);
+    border-radius: 0.1rem;
+  }
+  .track::after {
+    position: absolute;
+    left: var(--zero);
+    content: '';
+    top: -0.15rem;
+    bottom: -0.15rem;
+    border-inline-start: 1px solid var(--rf-muted);
+  }
+  .bar {
+    display: block;
+    height: 100%;
+    background: var(--rf-muted);
+    border-radius: 0.1rem;
+  }
+  .bars li:last-child .bar {
+    background: var(--sl-color-text-accent);
+  }
+  .axis {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.35rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .scope,
+  .unavailable {
+    margin: 1rem 0 0;
+  }
+  .unavailable {
+    font-size: 0.85rem;
+  }
+</style>

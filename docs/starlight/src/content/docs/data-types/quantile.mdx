@@ -4,32 +4,52 @@ description: Represent a numeric scalar by its position within the training dist
 ---
 
 import DataTypePage from '../../../components/DataTypePage.astro';
-import { quantileExamples } from '../../../data/examples/quantile';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
 
 Use `rf.Quantile` when relative position in a numeric distribution is useful.
 The field learns an approximate training distribution and represents each
 value by its percentile within it.
 
-<DataTypePage id="quantile-examples" examples={quantileExamples}>
+<DataTypePage name="Quantile">
 
-## Inputs
+## Input values
+
+Supply integer or floating-point scalars. Nulls retain their null state.
+NaN and infinite values take the `other` state and do not enter the distribution.
+
+## Standardization and processor pipelines
+
+A streaming distribution summary learns pristine finite training values,
+including hidden targets. Each value is mapped to its estimated percentile;
+sine/cosine Fourier features and a scalar percentile channel are projected
+into model space and combined with a state embedding.
+
+Validation, test, and prediction freeze the distribution. Inputs outside its
+support map to the corresponding tail, and inverse prediction returns to
+the learned source-unit support. The learned distribution is saved with
+the model.
 
 Percentile distance follows the distribution rather than the original units.
 A small change in milliseconds can span many percentiles in a dense region;
 a large change can span fewer in a sparse tail.
 
-Supply integer or floating-point scalars. Nulls retain their null state. NaN
-and infinite values take the `other` state and do not enter the distribution.
+## How is this leaf trained?
 
-The distribution updates from pristine values consumed during training,
-including supervised target values. Validation, test, and prediction use the
-frozen distribution. The learned distribution is saved with the model.
+The state head uses weighted cross-entropy. Content reconstruction
+penalizes differences between predicted and observed percentile coordinates:
+absolute error for `"mae"`, squared error for `"mse"`, or Huber loss for
+`"huber"`.
 
-## Predictions
+These losses operate in percentile space. Reported numeric error metrics
+use original units after the inverse transform; percentile MSE is not
+source-unit MSE.
+
+### Predictions
 
 `mask=True` makes a Quantile field a supervised target. Its rich result contains
-`state`, a scalar `content` in the original units, and `inferred`. In the
-processing example, `predictions.duration_ms.content` is a duration in
+`state`, a scalar `content` in the original units, and `inferred`. For a field named `duration_ms`, `predictions.duration_ms.content` is a duration in
 milliseconds. No percentile coordinate is exposed in that result. See
 [Runtime](/concepts/runtime/) for the full prediction-row contract.
 
@@ -41,7 +61,15 @@ The inverse transform stays within the learned distribution's support. A
 Quantile target therefore cannot predict beyond its learned minimum or maximum.
 Choose Number when predicting outside the observed range is part of your task.
 
-## Options
+<ValueTree
+  id="quantile-predictions"
+  {...outputs.quantile}
+  predictions
+  heading="Illustrative prediction output"
+  label="Quantile prediction output"
+/>
+
+## Leaf-specific parameters
 
 | Option | Default | Purpose |
 | --- | --- | --- |
@@ -52,7 +80,7 @@ Choose Number when predicting outside the observed range is part of your task.
 Changing the objective changes the penalty in percentile space. Reported numeric
 error metrics still use the original units. Quantile has no `jitter` option.
 
-## Request Methods
+### Request Methods
 
 Inspect the training distribution of a Quantile field.
 
@@ -60,7 +88,7 @@ Inspect the training distribution of a Quantile field.
 | --- | --- | --- |
 | `normalization(source, address)` | Dictionary snapshot | Inspect the field's learned distribution summary. |
 
-For a trained processing-job model held in `model`:
+For a trained model with a Quantile field at `/payload_mb`:
 
 ```python
 distribution: dict[str, float | int | None] = rf.Quantile.normalization(
@@ -74,7 +102,15 @@ are `None` before the field has observed finite training values. The method
 also accepts `model.interprocess_encoding_context` as its source. Inspecting
 the snapshot does not update the distribution.
 
-## Footguns
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| Compression below 10, nonpositive bands, or an unknown objective | Configuration validation rejects the option. | Use `compression >= 10`, positive `n_bands`, and a listed objective. |
+| A nonnumeric value or collection supplied as one quantile | `ValueError`: Quantile expects scalar numbers. | Supply numeric scalars; use Vector or a branch for collections. |
+| An invalid address/source passed to `normalization` | `KeyError` or `TypeError` identifies the missing field or wrong context. | Use a Quantile field’s absolute address and its model or encoding context. |
+
+### Footguns
 
 - **Expecting out-of-range inputs to retain their differences.** In P068's
   bounded-range task, different values beyond the same training tail collapsed
@@ -97,15 +133,13 @@ the snapshot does not update the distribution.
   and evaluate interval coverage separately if your application needs it.
   [P067: source-unit readout and scope](/evidence/#P067)
 
-## Related types
+## Relevant evidence
+
+<LeafEvidence type="Quantile" />
+
+### Related types
 
 - [Number](/data-types/number/) preserves magnitude through raw and signed-log representations and supports predictions beyond observed values.
 - [Vector](/data-types/vector/) represents a fixed-width numeric collection.
-
-## Evidence
-
-The selected historical publication includes [P067: returning source-unit predictions](/evidence/#P067)
-and [P068: behavior beyond the learned range](/evidence/#P068). Their controls,
-measured results, and original execution revisions remain available.
 
 </DataTypePage>

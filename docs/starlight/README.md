@@ -46,23 +46,23 @@ assets, and count inert template contents. The report is saved to
 build estimates, not measurements of hosting compression. Revise a budget
 deliberately when justified by content changes and browser measurements.
 
-The homepage renders all six ERDs and their column descriptions in HTML so the
-examples remain readable without JavaScript. Its 26 KiB gzip HTML budget allows
-about 20% headroom over the 21.8 KiB ERD version; its HTML, element, JavaScript,
-and stylesheet limits remain unchanged.
+The shared Data / Model / Schema viewer renders both diagrams and complete
+class schemas as static HTML, preserving all six cases and native switching
+without JavaScript. The expanded page budgets allow about 20% headroom over
+these measured sizes: homepage 375 KiB HTML / 41 KiB gzip / 3,872 elements;
+Data Flow 805 / 84 / 11,175; Runtime 460 / 55 / 5,253; Embeddings 457 / 53 /
+5,056. Existing JavaScript and stylesheet limits stay unchanged. Diagrams still
+initialize only near the visible viewport; hidden views do not add resize work.
 
-The Model trees page has a larger HTML budget for six interactive construction
-walkthroughs and their complete no-JavaScript references. Each case reuses one
-highlighted schema for all three steps; copying derives from those same source
-lines. Its page budget allows about 20% headroom over the current 466 KiB HTML,
-65 KiB gzip, and 4,100 elements. Shared JavaScript and stylesheet limits remain
-unchanged.
+The Model trees page reuses the six-case Data / Model / Schema comparison from
+Featureless Modeling. Diagrams and the class schema are rendered as static HTML, with
+column descriptions, code notes, and native radio controls that work without JavaScript.
+Shared JavaScript and stylesheet budgets still apply.
 
 Data Flow renders the six cases and both paths as static content, with one
-stage expanded after enhancement. Its page budget allows about 20% headroom
-over the initial 585 KiB HTML, 66 KiB gzip, and 9,019 elements. Its controller
-imports only the small stage-path definitions; schemas, datasets, and prediction
-fixtures stay out of the browser bundle. Shared JavaScript/CSS budgets still apply.
+stage expanded after enhancement. Its source-data stage uses the same shared
+viewer; the controller imports only the small stage-path definitions. Schemas,
+datasets, and prediction fixtures stay out of the browser bundle.
 
 Browser regressions delay enhancement modules until after first paint to check
 picker geometry and layout stability. They also verify delegated interaction
@@ -96,6 +96,14 @@ Palette exploration is separate from the selected documentation theme.
 The header and favicon use the selected soft-canopy logo from `logo-rework`,
 with matching light/dark SVGs and the serif wordmark. See `branding/README.md`
 for source provenance and regeneration. Normal builds use the prepared vectors.
+
+Prose mentions of `relflow` also use a small serif wordmark in the theme’s accent
+color. The server-only `src/site/brand.mjs` transform applies it automatically
+through `src/middleware.ts`, in local preview and static builds. Authored text
+stays plain; code, commands, links’ URLs, and exact data remain untouched.
+Use `data-no-brand` to opt out a subtree. The treatment lives in
+`src/styles/site.css` and uses a prepared six-letter subset of the existing
+wordmark font, without additional browser JavaScript.
 
 The sidebar shows every page's frontmatter `description` when its link is hovered
 or focused with the keyboard. Links retain their native navigation behavior,
@@ -132,24 +140,32 @@ the repeated teaching patterns; their typed inputs own the relevant contracts.
 
 | Reader task | Component | Authored input |
 | --- | --- | --- |
-| Learn one leaf type | `DataTypePage` | A stable example ID, three `TypeExample` records, and the seven reference sections as Markdown. |
+| Learn one leaf type | `DataTypePage` | The leaf name and six Number-style reference sections as Markdown. |
+| Inspect a leaf's learning checks | `LeafEvidence` | The leaf name; shared primary-type tags select proofs, and statuses come from the selected publication. |
+| Recognize a field state | `StateToken` | One of `valued`, `null`, `padded`, `masked`, or `other`. |
+| Understand extension roles | `RegistryContracts` | The shared seven-role pseudocode catalog, including optional Output and Write roles. |
 | Follow a concept across use cases | `ConceptPage` | A `Concept` with six focused examples, principles, and related guides. |
-| Follow records through the pipeline | `DataFlow` | The six canonical cases, typed stage views, and prediction/training paths in `src/data/concepts/data-flow.ts`. |
-| Understand supplied records | `DataExplorer` | A page-unique ID and a `Dataset` with explicit entities, columns, and relationships. |
-| Compare source records with model structure | `FeaturelessExamples` | The six canonical source datasets and their shared model schemas. |
-| Flip between Data ERD and Model ERD | `ErdToggle` | A page-unique ID and `data` / `model` slots sharing one diagram viewer. |
+| Explain how a concept fits together | `ConceptSummary` | Its ID, principles, takeaway, and related links, without a use-case explorer. |
+| Follow records through the pipeline | `DataFlow` | One workspace and a connected vertical stage rail; six canonical cases and prediction/training paths. Views live in `src/data/concepts/data-flow.ts`; stage order and representation handoffs live in `src/data-flow/types.ts`. |
+| Understand data and its model | `DataViews` | A page-unique ID, an authored `Dataset`, and its matching class schema; optional descriptions for custom leaves. |
+| Compare source records with model structure | `FeaturelessExamples` | The six canonical source datasets and shared class schemas; an optional page-specific ID prefix. |
+| Switch among data, model structure, and schema | `ErdToggle` | A page-unique ID, `data` / `model` slots, and a `schema` slot. |
 | Compare model and data structure | `ModelDiagram` | A page-unique ID and canonical class schema, rendered as an ERD through `DataExplorer`. |
 | Explain a hierarchy | `Tree` | An accessible label and nodes with `label`, optional `detail`, and nested `children`. |
-| Read nested predictions | `ValueTree` | The complete result row, known inputs, and the `predictions` flag. |
-| Inspect how a schema shapes a model | `ModelExplainer` | A page-unique ID and one of the six canonical case IDs. |
+| Read nested predictions | `ValueTree` | A result row and the `predictions` flag; optional input context, heading, and display-only JSON Pointer notes. |
 | Show source code with contextual help | Markdown fences or Starlight `Code` | Unmodified source, language, and an optional contract annotation. |
 
-`DataTypePage` supplies the anchored **Example** heading and the interactive
-`TypeExamples` view. Its Markdown body contains **Inputs**, **Predictions**,
-**Options**, **Request Methods**, **Footguns**, **Related types**, and **Evidence**,
-once each in that order. The build validates the rendered section contract;
-authors keep Markdown headings and code fences rather than filling seven named
-slots. Leaf type meaning, examples, and documented limitations remain authored.
+`DataTypePage` validates the six-section Markdown contract from the Google Doc's Number page:
+**Input values**, **Standardization and processor pipelines**, **How is this leaf
+trained?**, **Leaf-specific parameters**, **Errors raised**, and **Relevant
+evidence**, once each in that order. Predictions, request methods, footguns, and
+related types remain level-three subsections. The build validates the rendered
+section contract; authors keep Markdown headings and code fences. Leaf type
+meaning and documented limitations remain authored. The Predictions subsection
+retains its output explanation and adds a standalone `ValueTree`, using the scenario-independent output
+shapes in `src/datatypes/predictions.ts`. Tree notes explain returned fields
+without adding them to copied JSON. Values are labeled illustrative; requested
+representations are distinct from decoded predictions.
 
 `UseCases`, `ConceptPage`, and `FeaturelessExamples` share `CasePicker` and one
 choice shape: `{ id, panel, label, summary }`. `ExampleSelection` serializes only
@@ -169,9 +185,9 @@ Markdown heading gaps use rem independently of responsive heading sizes.
 
 The homepage's six use cases render through `UseCases.astro` as entity relationship
 diagrams from `src/data/datasets.ts`. Labels and task descriptions come from
-`src/data/use-cases.json`; its class schemas remain available to other guides.
-Keep schemas, record snippets, prediction outputs, and code tabs out of the
-homepage examples. All six choices remain visible; the selected diagram uses
+`src/data/use-cases.json`; its class schemas supply the Schema view and model diagram.
+Use `DataViews` for Data, Model, and Schema in every homepage example.
+Keep prediction output trees separate from these views. All six choices remain visible; the selected diagram uses
 its natural height, without reserving space for longer examples. Column
 descriptions retain hover, keyboard, touch, and no-JavaScript access.
 Examples show the range of data structures and prediction targets. Benchmark
@@ -180,7 +196,12 @@ records provide the measured predictive comparisons.
 ### Core Concepts
 
 Core Concepts contains Model trees, Context branches, Leaf types, Data flow,
-Targets and masking, and Runtime. Each page includes all six homepage use cases.
+Targets and masking, and Runtime. Model trees, Context branches, Data flow, and
+Runtime include all six homepage use cases. Targets and masking uses a focused
+class schema and authored explanations of supervised targets, hidden answers,
+nested outputs, and input masking, without the use-case explorer.
+Leaf Types retains its contract explanations and
+`ConceptSummary`, without repeating the leaf reference catalog or use-case explorer.
 Runtime introduces `fit`, `validate`, `test`, and `predict` through presets and
 incorporates the prediction output examples. Data modules, Training and learned
 state, and Regularization live in Advanced Usage, alongside mutations and
@@ -203,19 +224,18 @@ not executions or measured results. All six remain readable without JavaScript.
 `src/concepts/selection.ts` owns keyboard behavior, URL selection, saved preference,
 and native concept-link updates.
 
-`/concepts/models/` adds `ModelExplainer.astro`: select a field, branch, or target
-to inspect its representation, context, learning objective, and output location.
-`src/data/model-explainer.ts` derives all six cases from the canonical schemas.
-`src/model-explainer/schema.ts` projects three steps: one answer, added context,
-and another answer. Additional example targets explicitly describe the new
-historical labels they require; their dataset columns stay aligned.
-
-`src/model-explainer/code.mjs` validates projected source and maps declarations
-to schema paths. Each case shares one highlighted `Code` block across its steps;
-visible lines and copied source follow the selected step. Keep complete schemas
-and readable fallback explanations available without JavaScript. This is a
-static explanation of the declarations: builds execute no model or training
-code, and the diagrams establish no measured performance result.
+`/concepts/models/` follows the Google Doc’s short tree definition,
+Branches/Leaves bullets, and Model Presets section. **Explore a use case** stays
+visible and renders `<FeaturelessExamples id="models" />`, reusing the same
+Data / Model / Schema viewer as `/featureless/`, with all three views. This shows the canonical class schema through the shared `Code` renderer,
+including contextual tooltips and exact source copying. The schema
+slot uses the same native radio/CSS controls, including without JavaScript.
+The ID prefix keeps anchors and
+radio groups page-specific. `ModelDiagram` derives its view from the canonical
+class schemas; Data uses the original source datasets. Both diagrams use
+`DataExplorer` and its column tooltips. The three-step model inspector and the
+extra concept summary are not rendered here. Builds execute no model or
+training code, and these diagrams establish no measured performance result.
 
 ### Advanced Usage
 
@@ -251,17 +271,18 @@ Python runtime, or Typst is required.
 Column descriptions open on hover, focus, or tap and close with Escape or an
 outside tap. Static descriptions and native title hints remain without JavaScript.
 The shared use-case selector connects diagrams to the homepage and Core Concepts.
-Featureless Modeling lets readers toggle between the data and model ERDs.
+The shared viewer offers Data, Model, and Schema throughout the docs.
 
 ### Describe data anywhere
 
-Use the same explorer for dataset descriptions across the docs:
+Use the same three-view component for dataset descriptions across the docs:
 
 ```mdx
-import DataExplorer from '../../components/DataExplorer.astro';
+import DataViews from '../../components/DataViews.astro';
+import { repeatPurchaseSchema } from '../../data/schema-examples';
 import { repeatPurchase } from '../../data/observations';
 
-<DataExplorer id="purchase-data" dataset={repeatPurchase} headingLevel={3} />
+<DataViews id="purchase-data" dataset={repeatPurchase} schema={repeatPurchaseSchema} headingLevel={3} />
 ```
 
 Give every instance a page-unique `id`. `headingLevel` sets entity headings to
@@ -290,9 +311,8 @@ Keep measured Evidence in its existing result views.
 
 `Tree.astro` renders conceptual hierarchies such as model collections and nesting.
 Its nodes use `label`, optional `detail`, and optional `children`; `TreeNode.astro`
-renders them recursively with native disclosures. `BranchShapes.astro` uses this
-component for all three schema shapes, keeping their Python code examples beside
-the diagrams. The connector lines, spacing, and disclosure styles live in
+renders them recursively with native disclosures. The connector lines, spacing,
+and disclosure styles live in
 `src/tree/tree.css` and are also used by the value and prediction trees.
 
 ```mdx
@@ -311,8 +331,19 @@ component without that flag, preserving objects that happen to have fields
 called state, content, or inferred.
 
 ```mdx
-<ValueTree id="example-result" value={example.output} inputs={example.inputs} predictions />
+<ValueTree
+  id="number-output"
+  {...outputs.number}
+  predictions
+  heading="Illustrative prediction output"
+/>
 ```
+
+The standalone reference shapes above come from `src/datatypes/predictions.ts`.
+Any page can supply its own `value` without a dataset or scenario. Optional
+`notes` map JSON Pointer paths to display descriptions, including paths under
+returned metadata and representation lists. These notes never enter copied
+JSON. The shared `Value` and `ValueNotes` contracts live in `src/values/types.ts`.
 
 The renderer shows scalar answers, Boolean probabilities of True, returned
 classification candidates, independent membership probabilities, and vector
@@ -325,8 +356,9 @@ copies the unchanged complete row as JSON. Native disclosures work without
 JavaScript and all controls support the keyboard.
 
 `src/values/tree.ts` owns the display projection; `ValueNode.astro` renders it
-recursively and `src/values/tree.css` owns prediction-specific styles. All 39 type examples
-and the six Core Concepts prediction examples use this view. Results remain
+recursively and `src/values/tree.css` owns prediction-specific styles. The thirteen
+leaf references, retained type-example fixtures, and six Core Concepts prediction
+examples use this view. Results remain
 static illustrations with their existing values and notes; no model executes
 during rendering. Source inputs and training answers remain inspectable YAML.
 
@@ -371,13 +403,19 @@ their dataset definitions. Those sources already feed the sidebar and data
 explorer tooltips, respectively; context-specific descriptions do not need to
 be copied into the shared API reference.
 
-Every individual leaf type page uses the same eight sections: **Example**,
-**Inputs**, **Predictions**, **Options**, **Request Methods**, **Footguns**, **Related types**,
-**Evidence**.
+Every individual leaf type page uses the same six reference sections modeled on Number: **Input values**,
+**Standardization and processor pipelines**, **How is this leaf trained?**,
+**Leaf-specific parameters**, **Errors raised**, and **Relevant evidence**.
 Use `Option | Default | Purpose` for options tables, class schemas with a short
 docstring for examples, and verified input/output contracts. The overview at
 `/concepts/data-types/` introduces field representations; the individual leaf type
 reference pages describe their detailed contracts.
+Describe the embedder's representation and the decoder's readout in plain
+language; name the actual state and content objectives. Keep leaf-specific
+validation failures distinct from measured learning limitations.
+`LeafEvidence` renders `Proof ID | Hypothesis being tested | Status per release
+version` from the central catalog and selected publication. Historical, pending,
+and missing runs retain their real status; no authored page supplies an outcome.
 Request methods use a `Method | Returns | Purpose` table and a short Python
 example showing the type helper, model, and absolute field address. Include
 explicit result type annotations in each snippet, using the example’s label
@@ -392,7 +430,8 @@ revision, including controls and unmet checks. An unmeasured experiment is a
 question, not a finding; API constraints and unsupported outputs can be explained
 from pinned implementation/tests without calling them learning results.
 
-All thirteen type pages use `TypeExamples.astro` to explore three scenarios per type.
+Leaf reference pages omit dataset and scenario showcases. The existing
+`TypeExamples.astro` component and its scenarios remain available to guides.
 Author schemas, known inputs, training answers, and complete illustrative
 prediction rows together in `src/data/examples/<type>.ts`. The shared contract
 and rich-result helper live in `src/data/type-example.ts`. Preserve the API's
@@ -402,8 +441,8 @@ The selector updates the full example, supports keyboard navigation and deep
 links, and leaves every example readable without JavaScript. Field names link
 schema and data notes through `contract` metadata on the shared code renderer.
 Keep the illustration label visible; these examples do not execute models.
-Inputs, training answers, complete training records, and prediction rows render
-as YAML with two-space indentation and soft wrapping.
+Inputs, training answers, and complete training records render as YAML with
+two-space indentation and soft wrapping; prediction rows use `ValueTree`.
 The model still returns a prediction table; this is a display format. Copying
 retains the complete record and its probabilities. YAML keys, including quoted
 keys and list-member keys, use the shared contextual notes and field highlighting.
@@ -497,7 +536,25 @@ executed source using the recorded revision and script hash. The raw-source-only
 offline, including their original comments; embedded old result headers are
 never used as measurements.
 
-Each experiment has a page at `/evidence/Pxxx/`. Measurements, Method, Reproduce,
+Each experiment has a page at `/evidence/Pxxx/`. Its interrogative title leads
+into **How is the question modeled?**, followed by a single **Primary comparison**.
+`src/evidence/catalog.ts` owns neutral setup copy and primary leaf-type tags.
+`LeafEvidence type="Number"` and the catalog's shareable `?type=Number` filter
+consume that same mapping. Tags describe primary test subjects, not every type
+used incidentally in a generator; retired Cluster results are not Group results.
+
+`src/evidence/comparison.ts` selects condition labels and metric paths, never
+measurements or outcomes. Standard source-unit RMSE/MAE/MSE take priority when
+recorded for every plotted condition. AUC and accuracy retain distinct meanings.
+Constant-prediction baselines, information-bound references, before/after results,
+and controlled comparisons are labeled separately. A proof without a matched
+comparison says so. Missing values are never synthesized from source commentary.
+`EvidenceComparison` renders semantic HTML with CSS bars, exact numeric labels,
+and a shared zero-based axis; it needs no browser chart library or JavaScript.
+
+Check totals and the selected CI verdict remain visible, including unmet checks.
+Individual criteria, illustrative records, and the full investigation are native
+disclosures closed by default. Measurements, Method, Reproduce,
 and Code panels retain complete results and source context. Authored interpretation
 is folded under Method, labeled as source commentary rather than an automatic CI
 verdict. Unmet checks and missing measurements remain visible. The selected

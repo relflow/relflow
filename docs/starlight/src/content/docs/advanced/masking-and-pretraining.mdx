@@ -3,7 +3,8 @@ title: Masking and pretraining
 description: Build reconstruction objectives, select hidden coordinates, and adapt learned context to a supervised task.
 ---
 
-import DataExplorer from '../../../components/DataExplorer.astro';
+import DataViews from '../../../components/DataViews.astro';
+import { scenarios } from '../../../data/concepts/scenarios';
 import { observationDatasets } from '../../../data/observations';
 
 Masking defines which values the encoder can see and which answers a loss
@@ -84,7 +85,7 @@ Use the maintenance example's observation boundary: one asset at an assessment
 cutoff, with sensor readings and completed work known then. The eventual
 supervised task predicts failure within the next 30 days.
 
-<DataExplorer id="pretraining-maintenance-data" dataset={observationDatasets.maintenance} />
+<DataViews id="pretraining-maintenance-data" dataset={observationDatasets.maintenance} schema={scenarios.filter((item) => item.id === 'maintenance')[0].schema} />
 
 The explorer describes the final task. The pretraining schema below uses its
 context fields without `failure_30d`: sampled temperature and load readings

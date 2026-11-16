@@ -27,6 +27,7 @@ const bars = view?.kind === 'vector' ? magnitudes(view.values) : [];
           </span>
           {node.context && <span class="tree-context">{node.context}</span>}
         </summary>
+        {node.note && <p class="vt-node-note">{node.note}</p>}
         {node.children.length ? (
           <ul class="tree-children">
             {node.children.map((child) => (
@@ -46,6 +47,7 @@ const bars = view?.kind === 'vector' ? magnitudes(view.values) : [];
           </>
         </summary>
         <div class="vt-result">
+          {node.note && <p class="vt-node-note">{node.note}</p>}
           {view?.kind === 'scalar' && (
             <div class="vt-scalar">
               <strong
@@ -212,6 +214,7 @@ const bars = view?.kind === 'vector' ? magnitudes(view.values) : [];
           >
             {formatValue(node.value ?? null)}
           </span>
+          {node.note && <span class="vt-node-note">{node.note}</span>}
         </>
       </div>
     )

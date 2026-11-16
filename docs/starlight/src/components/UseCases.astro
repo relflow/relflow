@@ -3,7 +3,7 @@ import cases from '../data/use-cases.json';
 import { datasets } from '../data/datasets';
 import ExampleSelection from './ExampleSelection.astro';
 import CasePicker from './CasePicker.astro';
-import DataExplorer from './DataExplorer.astro';
+import DataViews from './DataViews.astro';
 
 const examples = cases.map((item) => {
   const dataset = datasets.find((dataset) => dataset.id === item.id);
@@ -39,7 +39,12 @@ const choices = examples.map((item) => ({
             <h3 id={`case-${item.id}-title`}>{item.title}</h3>
             <p>{item.description}</p>
           </div>
-          <DataExplorer id={`case-${item.id}-data`} dataset={item.dataset} headingLevel={4} />
+          <DataViews
+            id={`case-${item.id}`}
+            dataset={item.dataset}
+            schema={item.code}
+            headingLevel={4}
+          />
         </section>
       ))
     }

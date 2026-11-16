@@ -1,13 +1,12 @@
 import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5';
 
 const sections = [
-  ['inputs', 'Inputs'],
-  ['predictions', 'Predictions'],
-  ['options', 'Options'],
-  ['request-methods', 'Request Methods'],
-  ['footguns', 'Footguns'],
-  ['related-types', 'Related types'],
-  ['evidence', 'Evidence'],
+  ['input-values', 'Input values'],
+  ['standardization-and-processor-pipelines', 'Standardization and processor pipelines'],
+  ['how-is-this-leaf-trained', 'How is this leaf trained?'],
+  ['leaf-specific-parameters', 'Leaf-specific parameters'],
+  ['errors-raised', 'Errors raised'],
+  ['relevant-evidence', 'Relevant evidence'],
 ] as const;
 
 /** Validate the rendered Markdown contract without rewriting prose or code. */
@@ -28,7 +27,7 @@ export function checkSections(html: string, page: string): void {
     found.some(([id, title], index) => id !== sections[index][0] || title !== sections[index][1])
   ) {
     throw new Error(
-      `Data type page ${page} must provide ${sections.map(([id, title]) => `${title} (#${id})`).join(', ')} in that order after its examples; received ${found.map(([id, title]) => `${title} (#${id ?? 'missing'})`).join(', ') || 'no sections'}. Use ordinary level-two Markdown headings for this contract.`,
+      `Leaf type page ${page} must provide ${sections.map(([id, title]) => `${title} (#${id})`).join(', ')} in that order; received ${found.map(([id, title]) => `${title} (#${id ?? 'missing'})`).join(', ') || 'no sections'}. Use ordinary level-two Markdown headings for this contract.`,
     );
   }
 }

@@ -3,7 +3,7 @@ title: Online vocabulary
 description: Understand label admission, cold starts, mutable training state, vocabulary growth, and deployment boundaries.
 ---
 
-import DataExplorer from '../../../components/DataExplorer.astro';
+import DataViews from '../../../components/DataViews.astro';
 import { categoryExamples } from '../../../data/examples/category';
 
 A new product category can appear halfway through a training stream. relflow
@@ -49,7 +49,7 @@ Consider the shopping example: use a customer's known region, preferred
 channel, and account age to predict their next shopping category. Both the
 context fields and the target can encounter new labels in a later cohort.
 
-<DataExplorer id="online-shopping-data" dataset={categoryExamples[0].dataset} />
+<DataViews id="online-shopping-data" dataset={categoryExamples[0].dataset} schema={categoryExamples[0].schema} />
 
 Prepare these application-supplied files before running the example:
 

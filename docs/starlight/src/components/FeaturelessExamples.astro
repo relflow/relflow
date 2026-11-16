@@ -2,10 +2,16 @@
 import cases from '../data/use-cases.json';
 import { datasets } from '../data/datasets';
 import CasePicker from './CasePicker.astro';
-import DataExplorer from './DataExplorer.astro';
+import DataViews from './DataViews.astro';
 import ExampleSelection from './ExampleSelection.astro';
-import ModelDiagram from './ModelDiagram.astro';
-import ErdToggle from './ErdToggle.astro';
+
+interface Props {
+  id?: string;
+}
+
+const { id = 'featureless' } = Astro.props;
+if (!id || /\s/.test(id))
+  throw new Error('FeaturelessExamples needs a page-unique id without whitespace.');
 
 const examples = cases.map((item) => {
   const dataset = datasets.find((dataset) => dataset.id === item.id);
@@ -15,7 +21,7 @@ const examples = cases.map((item) => {
 
 const choices = examples.map((item) => ({
   id: item.id,
-  panel: `featureless-${item.id}`,
+  panel: `${id}-${item.id}`,
   label: item.label,
   summary: item.structure,
 }));
@@ -23,7 +29,7 @@ const choices = examples.map((item) => ({
 
 <section
   class="featureless-examples not-content"
-  aria-label="Explore featureless modeling by use case"
+  aria-label="Compare data and model structure by use case"
   data-use-cases
 >
   <ExampleSelection choices={choices} persistent />
@@ -32,21 +38,18 @@ const choices = examples.map((item) => ({
   {
     examples.map((item) => (
       <article
-        id={`featureless-${item.id}`}
+        id={`${id}-${item.id}`}
         class="featureless-example"
         aria-label={item.label}
         data-case={item.id}
       >
-        <ErdToggle id={`featureless-${item.id}`}>
-          <DataExplorer
-            slot="data"
-            id={`featureless-${item.id}-data`}
-            dataset={item.dataset}
-            headingLevel={4}
-            showObservation={false}
-          />
-          <ModelDiagram slot="model" id={`featureless-${item.id}-model`} schema={item.code} />
-        </ErdToggle>
+        <DataViews
+          id={`${id}-${item.id}`}
+          dataset={item.dataset}
+          schema={item.code}
+          headingLevel={4}
+          showObservation={false}
+        />
       </article>
     ))
   }

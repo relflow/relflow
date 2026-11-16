@@ -5,18 +5,16 @@ description: Follow one observation from loading and input preparation through t
 
 import DataFlow from '../../../components/DataFlow.astro';
 
-Follow an observation through the relflow pipeline. Choose a use case, then
-open a stage or use **Next** to see what happens to its records and values.
-
-**Predict** follows a fitted model through to its returned results. **Train**
-adds historical answers and follows the loss, gradients, and parameter updates.
-Preprocessing and postprocessing are optional; these examples use prepared
-records and pass through both stages.
-
-The records and predictions are shared illustrations. Intermediate views show
-data contracts and model structure.
+Follow one observation from its source to the returned predictions. Choose a
+stage on the connected path, or use **Continue** to follow it step by step.
+Switch to **Train** to follow historical answers through loss, gradients, and
+parameter updates.
 
 <DataFlow />
+
+Preprocessing and postprocessing are optional; these examples use prepared
+records and pass through both stages. The records and predictions are shared
+illustrations. Intermediate views show data contracts and model structure.
 
 ## Explore the contracts
 

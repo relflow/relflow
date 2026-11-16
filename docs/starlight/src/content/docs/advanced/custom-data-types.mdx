@@ -3,7 +3,8 @@ title: Custom leaf types
 description: Own a field’s Arrow contract, tensor representation, neural modules, and optional prediction output through explicit extension roles.
 ---
 
-import DataExplorer from '../../../components/DataExplorer.astro';
+import DataViews from '../../../components/DataViews.astro';
+import { bearingSchema } from '../../../data/schema-examples';
 
 A custom leaf type changes how one kind of value enters the network, learns,
 or becomes a prediction. Its implementation belongs to the field extension;
@@ -44,7 +45,7 @@ numeric scalars in `[0, 360)` and encodes each as sine and cosine. A learned
 projection then places those two coordinates in the model’s context space.
 Nulls remain field states; they do not become a zero-degree bearing.
 
-<DataExplorer id="bearing-source" dataset={{
+<DataViews id="bearing-source" schema={bearingSchema} leaves={{ Bearing: "Circular bearing in degrees, encoded with sine and cosine." }} dataset={{
   id: 'route-bearing',
   label: 'Route delay',
   observation: 'One route with its direction and distance known before travel.',
