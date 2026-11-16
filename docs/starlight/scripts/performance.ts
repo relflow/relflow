@@ -75,6 +75,18 @@ export interface PageSize {
   styles: string[];
 }
 
+function canonical(node: DefaultTreeAdapterTypes.Node): string | undefined {
+  if ('tagName' in node && node.tagName === 'link') {
+    const attributes = Object.fromEntries(node.attrs.map(({ name, value }) => [name, value]));
+    if (attributes.rel?.split(/\s+/).includes('canonical')) return attributes.href;
+  }
+  if ('childNodes' in node)
+    for (const child of node.childNodes) {
+      const href = canonical(child);
+      if (href) return href;
+    }
+}
+
 /** Inspect static output without executing its scripts or downloading its resources. */
 export function measure(directory: string, route: string): PageSize {
   const origin = 'https://docs.invalid';
@@ -88,6 +100,12 @@ export function measure(directory: string, route: string): PageSize {
     throw new Error(`Performance page must stay inside the build directory: ${route}`);
   const html = readFileSync(file, 'utf8');
   const document = parse(html);
+  const href = canonical(document);
+  const pathname = href ? new URL(href, origin).pathname : address.pathname;
+  if (!pathname.endsWith(address.pathname))
+    throw new Error(`Canonical pathname ${pathname} must retain the measured page route ${route}.`);
+  const base = pathname.slice(0, -address.pathname.length);
+  address.pathname = pathname;
   const scripts = new Set<string>();
   const styles = new Set<string>();
   let elements = 0;
@@ -98,7 +116,9 @@ export function measure(directory: string, route: string): PageSize {
       throw new Error(
         `Performance budgets require local script/style assets; cannot measure ${url.href}.`,
       );
-    const file = resolve(root, `.${decodeURIComponent(url.pathname)}`);
+    if (base && !url.pathname.startsWith(`${base}/`))
+      throw new Error(`Bundle asset ${specifier} must stay inside documentation version ${base}/.`);
+    const file = resolve(root, `.${decodeURIComponent(url.pathname.slice(base.length))}`);
     if (!file.startsWith(`${root}${sep}`))
       throw new Error(`Bundle asset escapes the build directory: ${specifier}`);
     return { file, url };

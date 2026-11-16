@@ -142,7 +142,6 @@ files = [
     ".pre-commit-config.yaml",
     ".readthedocs.yaml",
     "AGENTS.md",
-    "BIBLIOGRAPHY.md",
     "CITATION.bib",
     "CLAUDE.md",
     "CONTRIBUTING.md",

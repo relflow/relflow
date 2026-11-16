@@ -72,6 +72,10 @@ def licensing(root: Path = Path(".")) -> None:
                 raise ValueError(f"{notice}: licensing requires a regular file before building")
             files[name] = notice.read_bytes()
         notices(files, str(directory))
+    citation = root / "CITATION.bib"
+    licenses = re.findall(r"(?m)^\s*license\s*=\s*\{([^}]+)\}", citation.read_text())
+    if licenses != [LICENSE]:
+        raise ValueError(f"{citation}: citation license must be {LICENSE} before building; got {licenses!r}")
     cargo = root / "native/Cargo.toml"
     if tomllib.loads(cargo.read_text())["package"].get("license") != LICENSE:
         raise ValueError(f"{cargo}: package.license must be {LICENSE} before building")

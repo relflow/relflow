@@ -59,7 +59,7 @@ Site pages, assets, search, and navigation stay inside that version path.
 The canonical public host is `www.relflow.ai`. The `latest` version follows
 `main`; release versions and pull request previews are separate host builds.
 Use full version URLs when linking publicly, such as
-`https://www.relflow.ai/en/latest/concepts/models/`. No old-route aliases are
+`https://www.relflow.ai/latest/concepts/models/`. No old-route aliases are
 provided. GitHub's reusable `docs.yml` validates the same site and uploads a
 review artifact; it does not deploy production.
 

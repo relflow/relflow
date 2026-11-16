@@ -8,7 +8,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/relflow/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" /><img alt="PyPI version" src="https://shieldcn.dev/pypi/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
-  <a href="https://www.relflow.ai/en/latest/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/docs-read%20online-68b78a.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Read the documentation" src="https://shieldcn.dev/badge/docs-read%20online-185a3c.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
+  <a href="https://www.relflow.ai/latest/"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/docs-read%20online-68b78a.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Read the documentation" src="https://shieldcn.dev/badge/docs-read%20online-185a3c.svg?logo=readthedocs&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <a href="https://github.com/relflow/relflow/actions/workflows/ci.yml?query=branch%3Amain"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="CI on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=ci.yml&amp;branch=main&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <a href="https://github.com/relflow/relflow/actions/workflows/compatibility.yml?query=branch%3Amain"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=compatibility.yml&amp;branch=main&amp;label=compatibility&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Dependency compatibility on main" src="https://shieldcn.dev/github/ci/relflow/relflow.svg?workflow=compatibility.yml&amp;branch=main&amp;label=compatibility&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <a href="https://github.com/relflow/relflow/actions/workflows/coverage.yml?query=branch%3Amain"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Line coverage on main" src="https://shieldcn.dev/badge/dynamic/json.svg?url=https%3A%2F%2Fraw.githubusercontent.com%2Frelflow%2Frelflow%2Fbadges%2Fcoverage.json&amp;query=%24.message&amp;label=coverage&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
@@ -16,16 +16,16 @@
       <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
       <img alt="Required Python version" src="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
     </picture>
-  <a href="LICENSE"><img alt="AGPL-3.0-only license" src="https://img.shields.io/badge/license-AGPL--3.0--only-185a3c" /></a>
+  <a href="LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/license-AGPL--3.0--only-68b78a.svg?variant=outline&amp;size=sm&amp;mode=dark" /><img alt="AGPL-3.0-only license" src="https://shieldcn.dev/badge/license-AGPL--3.0--only-185a3c.svg?variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Discord-Join-68b78a.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Discord community" src="https://shieldcn.dev/badge/Discord-Join-185a3c.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <!-- discord-invite:end -->
 </p>
 
 <p align="center">
-  <a href="https://www.relflow.ai/en/latest/">User Guide</a> ·
-  <a href="https://www.relflow.ai/en/latest/benchmarks/">Benchmarks</a> ·
-  <a href="https://www.relflow.ai/en/latest/api-map/">API map</a> ·
+  <a href="https://www.relflow.ai/latest/">User Guide</a> ·
+  <a href="https://www.relflow.ai/latest/benchmarks/">Benchmarks</a> ·
+  <a href="https://www.relflow.ai/latest/api-map/">API map</a> ·
   <a href="https://discord.gg/DVyZUkvTFA">Community</a>
 </p>
 
@@ -55,7 +55,7 @@ history into a hand-crafted table of counts and averages.
   with its learned vocabularies and normalizers included.
 - **State of the art.** On the nine published RelArena tasks with more than one
   million training observations, relflow beats TabPFN-3 on **9 of 9** and
-  TabPFN-3.5 on **6 of 9**. [Inspect the scores and comparison records](https://www.relflow.ai/en/latest/benchmarks/).
+  TabPFN-3.5 on **6 of 9**. [Inspect the scores and comparison records](https://www.relflow.ai/latest/benchmarks/).
 
 ## Philosophy
 
@@ -79,7 +79,7 @@ uv run relflow --version
 
 With pip, use `python -m pip install relflow`. Add optional capabilities with
 `uv add "relflow[text,serving]"` for text encoders and HTTP serving. See
-[Installation](https://www.relflow.ai/en/latest/installation/) for the full list.
+[Installation](https://www.relflow.ai/latest/installation/) for the full list.
 
 ## Describe your data. Define your predictions.
 
@@ -146,7 +146,7 @@ the model without becoming an input. Validation and test records also include
 observed answers, hidden in the same way for evaluation. New prediction requests
 may omit the target. Each history is supplied oldest to newest;
 `overflow="tail"` retains the most recent records up to the declared cap. See
-[Targets and masking](https://www.relflow.ai/en/latest/concepts/targets/) for
+[Targets and masking](https://www.relflow.ai/latest/concepts/targets/) for
 multiple objectives and targets within nested collections.
 
 The Parquet files contain one subscriber observation per row, with nested usage
@@ -174,7 +174,7 @@ print(result.select("inputs", "predictions"))
 The result is an eager Polars DataFrame. Each row retains its customer identifier
 under `inputs`; `predictions.churn_90d.content.probability` holds the estimated
 probability of cancellation. For larger prediction jobs, stream output to files
-with [batch inference](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/#stream-a-prediction-job-to-files).
+with [batch inference](https://www.relflow.ai/latest/advanced/inference-and-deployment/#stream-a-prediction-job-to-files).
 Use `rf.PolarsDataModule` when training and validation data are already in memory.
 
 ## What can you build with relflow?
@@ -184,33 +184,33 @@ generalizes across datasets and prediction tasks:
 
 | Use case | Available context | Predictions |
 | --- | --- | --- |
-| [Support tickets](https://www.relflow.ai/en/latest/?case=tickets#case-tickets) | Product details and a conversation | Escalation probability and time to resolution |
-| [Customer churn](https://www.relflow.ai/en/latest/?case=churn#case-churn) | Subscriber details, usage, and support histories | Cancellation within 90 days |
-| [Demand forecasting](https://www.relflow.ai/en/latest/?case=demand#case-demand) | Sales history and planned promotions | Units sold for each supplied future week |
-| [Credit risk](https://www.relflow.ai/en/latest/?case=credit#case-credit) | An application, credit accounts, and inquiries | Default within 12 months |
-| [Predictive maintenance](https://www.relflow.ai/en/latest/?case=maintenance#case-maintenance) | Sensor readings and completed work orders | Failure within 30 days |
-| [Insurance claims](https://www.relflow.ai/en/latest/?case=claims#case-claims) | Policies, claims, invoices, and line items | Payout and fraud probability for each claim |
+| [Support tickets](https://www.relflow.ai/latest/?case=tickets#case-tickets) | Product details and a conversation | Escalation probability and time to resolution |
+| [Customer churn](https://www.relflow.ai/latest/?case=churn#case-churn) | Subscriber details, usage, and support histories | Cancellation within 90 days |
+| [Demand forecasting](https://www.relflow.ai/latest/?case=demand#case-demand) | Sales history and planned promotions | Units sold for each supplied future week |
+| [Credit risk](https://www.relflow.ai/latest/?case=credit#case-credit) | An application, credit accounts, and inquiries | Default within 12 months |
+| [Predictive maintenance](https://www.relflow.ai/latest/?case=maintenance#case-maintenance) | Sensor readings and completed work orders | Failure within 30 days |
+| [Insurance claims](https://www.relflow.ai/latest/?case=claims#case-claims) | Policies, claims, invoices, and line items | Payout and fraud probability for each claim |
 
 These illustrate the same modeling contract across different data structures,
-leaf types, and prediction targets. [Explore the data, model, and class schema](https://www.relflow.ai/en/latest/featureless/#example)
-and [learn about leaf types](https://www.relflow.ai/en/latest/concepts/data-types/).
+leaf types, and prediction targets. [Explore the data, model, and class schema](https://www.relflow.ai/latest/featureless/#example)
+and [learn about leaf types](https://www.relflow.ai/latest/concepts/data-types/).
 
 ## Results you can inspect
 
 **On the nine published RelArena tasks with more than one million training
 observations, relflow beats TabPFN-3 on 9 of 9 and TabPFN-3.5 on 6 of 9.**
 This is the recorded comparison checked November 10, 2026; the
-[benchmark page](https://www.relflow.ai/en/latest/benchmarks/) includes individual
+[benchmark page](https://www.relflow.ai/latest/benchmarks/) includes individual
 scores, task sizes, comparison rules, and source records.
 
 A retained Amazon item-lifetime-value model has **926,554 task-trained
 parameters**, about **0.42%** of the approximately **220 million** in the
 TabPFN-3.5 base checkpoint. Including its shared frozen text encoder, the relflow
 model has **23,640,282 parameters**. See the
-[model-size comparison](https://www.relflow.ai/en/latest/benchmarks/#count-the-whole-model)
+[model-size comparison](https://www.relflow.ai/latest/benchmarks/#count-the-whole-model)
 for exactly what is counted.
 
-The [Evidence library](https://www.relflow.ai/en/latest/evidence/) explores
+The [Evidence library](https://www.relflow.ai/latest/evidence/) explores
 individual learning capabilities with controlled comparisons, source code,
 measurements, and execution provenance.
 
@@ -221,9 +221,9 @@ measurements, and execution provenance.
 
 | Experiment | relflow result | Control |
 | --- | --- | --- |
-| [Match IDs absent from training](https://www.relflow.ai/en/latest/evidence/P021/) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
-| [Recall a value by an unfamiliar ID](https://www.relflow.ai/en/latest/evidence/P025/) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
-| [Distinguish nulls from zero](https://www.relflow.ai/en/latest/evidence/P038/) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
+| [Match IDs absent from training](https://www.relflow.ai/latest/evidence/P021/) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
+| [Recall a value by an unfamiliar ID](https://www.relflow.ai/latest/evidence/P025/) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
+| [Distinguish nulls from zero](https://www.relflow.ai/latest/evidence/P038/) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
 
 <!-- evidence-results:end -->
 
@@ -234,15 +234,15 @@ Each linked page explains the setup, limitations, and retained results.
 
 ## Go further
 
-- [Models and schemas](https://www.relflow.ai/en/latest/concepts/models/): how typed declarations shape the model.
-- [Context branches](https://www.relflow.ai/en/latest/concepts/branches/): collections, nested records, and learned context.
-- [Targets and masking](https://www.relflow.ai/en/latest/concepts/targets/): hidden answers, multiple objectives, and nested predictions.
-- [Data flow](https://www.relflow.ai/en/latest/concepts/data-flow/): follow an observation from loading to prediction or a training update.
-- [Runtime](https://www.relflow.ai/en/latest/concepts/runtime/): fit, validate, test, and predict with presets.
-- [Data modules](https://www.relflow.ai/en/latest/advanced/data-modules/): streaming files, queries, and custom readers.
-- [Custom leaf types](https://www.relflow.ai/en/latest/advanced/custom-data-types/): extend the same registration system used by built-in fields.
-- [Inference and deployment](https://www.relflow.ai/en/latest/advanced/inference-and-deployment/): batch output and HTTP serving.
-- [API map](https://www.relflow.ai/en/latest/api-map/): find public classes and methods with links to their source.
+- [Models and schemas](https://www.relflow.ai/latest/concepts/models/): how typed declarations shape the model.
+- [Context branches](https://www.relflow.ai/latest/concepts/branches/): collections, nested records, and learned context.
+- [Targets and masking](https://www.relflow.ai/latest/concepts/targets/): hidden answers, multiple objectives, and nested predictions.
+- [Data flow](https://www.relflow.ai/latest/concepts/data-flow/): follow an observation from loading to prediction or a training update.
+- [Runtime](https://www.relflow.ai/latest/concepts/runtime/): fit, validate, test, and predict with presets.
+- [Data modules](https://www.relflow.ai/latest/advanced/data-modules/): streaming files, queries, and custom readers.
+- [Custom leaf types](https://www.relflow.ai/latest/advanced/custom-data-types/): extend the same registration system used by built-in fields.
+- [Inference and deployment](https://www.relflow.ai/latest/advanced/inference-and-deployment/): batch output and HTTP serving.
+- [API map](https://www.relflow.ai/latest/api-map/): find public classes and methods with links to their source.
 
 Join the [Discord community](https://discord.gg/DVyZUkvTFA), contribute through
 [CONTRIBUTING.md](CONTRIBUTING.md), or work on the site using the
@@ -253,8 +253,7 @@ Public relflow releases beginning with 0.5.0 are free and open source under the
 This covers project-authored code, documentation, examples, schema machinery,
 cache implementations, and preset definitions unless a file states otherwise.
 See [NOTICE](NOTICE) for attribution and
-[licensing](https://www.relflow.ai/en/latest/license/) for scope and source-sharing obligations.
+[licensing](https://www.relflow.ai/latest/license/) for scope and source-sharing obligations.
 
-Previously granted Apache-2.0 permissions remain effective for code published
-under those terms. Additional licensing permissions require written approval
-from both Grantham Taylor and Reid Taylor and the necessary contribution rights.
+Additional licensing permissions require written approval from both Grantham
+Taylor and Reid Taylor and the necessary contribution rights.

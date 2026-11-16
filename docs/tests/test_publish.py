@@ -42,7 +42,7 @@ def project(tmp_path: Path) -> Path:
 @pytest.fixture
 def environment(project: Path) -> dict[str, str]:
     return {
-        "READTHEDOCS_CANONICAL_URL": "https://relflow.readthedocs.io/en/latest/",
+        "READTHEDOCS_CANONICAL_URL": "https://relflow.readthedocs.io/latest/",
         "READTHEDOCS_OUTPUT": str(project.parent / "output"),
         "READTHEDOCS_GIT_COMMIT_HASH": subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=project, text=True
@@ -91,9 +91,9 @@ def renderer(project: Path, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 @pytest.mark.parametrize(
     "site_url",
     [
-        "https://relflow.readthedocs.io/en/latest/",
-        "https://relflow.ai/en/v0.4.2",
-        "https://relflow--66.org.readthedocs.build/en/66/",
+        "https://relflow.readthedocs.io/latest/",
+        "https://relflow.ai/v0.4.2",
+        "https://relflow--66.org.readthedocs.build/66/",
     ],
 )
 @pytest.mark.parametrize("output", ["external", "_readthedocs"])
@@ -185,16 +185,16 @@ def test_publish_rejects_a_service_revision_that_does_not_match_checkout(project
     "site_url",
     [
         "",
-        "/en/latest/",
-        "http://relflow.ai/en/latest/",
-        "https://user:password@relflow.ai/en/latest/",
-        "https://relflow.ai/en/latest/?query=true",
-        "https://relflow.ai/en/latest/#fragment",
-        "https://relflow.ai/en/ latest/",
+        "/latest/",
+        "http://relflow.ai/latest/",
+        "https://user:password@relflow.ai/latest/",
+        "https://relflow.ai/latest/?query=true",
+        "https://relflow.ai/latest/#fragment",
+        "https://relflow.ai/ latest/",
         "https://[broken",
-        "https://relflow.ai:invalid/en/latest/",
-        "https://relflow.ai:70000/en/latest/",
-        "https://relflow.ai:0/en/latest/",
+        "https://relflow.ai:invalid/latest/",
+        "https://relflow.ai:70000/latest/",
+        "https://relflow.ai:0/latest/",
     ],
 )
 def test_publish_rejects_malformed_canonical_urls_before_building(project, environment, renderer, site_url):
@@ -277,14 +277,14 @@ def test_publish_does_not_copy_stale_output_after_build_failure(project, environ
 @pytest.mark.parametrize(
     "invalid",
     [
-        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/"><script src="missing.js"></script>',
+        '<link rel="canonical" href="https://relflow.readthedocs.io/latest/"><script src="missing.js"></script>',
         '<link rel="canonical" href="https://relflow.readthedocs.io/">',
-        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/wrong-page/">',
-        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
+        '<link rel="canonical" href="https://relflow.readthedocs.io/latest/wrong-page/">',
+        '<link rel="canonical" href="https://relflow.readthedocs.io/latest/">'
         '<a href="guide/#missing">Absent fragment</a>',
-        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
+        '<link rel="canonical" href="https://relflow.readthedocs.io/latest/">'
         '<a href="/installation/">Escaped version</a>',
-        '<link rel="canonical" href="https://relflow.readthedocs.io/en/latest/">'
+        '<link rel="canonical" href="https://relflow.readthedocs.io/latest/">'
         '<a href="https://github.com/relflow/relflow/blob/main/docs/starlight/src/content/docs/index.mdx">Source</a>',
     ],
 )

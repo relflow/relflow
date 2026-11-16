@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { catalog } from '../src/versions/catalog.ts';
 
-const currentURL = 'https://docs.example.org/en/latest/concepts/models/';
+const currentURL = 'https://docs.example.org/latest/concepts/models/';
 
 test('Read the Docs owns version labels, ordering, and URLs, including custom domains', () => {
   const menu = catalog(
@@ -13,9 +13,9 @@ test('Read the Docs owns version labels, ordering, and URLs, including custom do
           {
             slug: 'stable',
             verbose_name: '0.5.0',
-            urls: { documentation: 'https://www.relflow.ai/en/stable/' },
+            urls: { documentation: 'https://www.relflow.ai/stable/' },
           },
-          { slug: 'latest', urls: { documentation: 'https://www.relflow.ai/en/latest/' } },
+          { slug: 'latest', urls: { documentation: 'https://www.relflow.ai/latest/' } },
           {
             slug: '102',
             type: 'external',
@@ -36,7 +36,7 @@ test('Read the Docs owns version labels, ordering, and URLs, including custom do
     ],
   );
   assert.equal(menu.versions[0].label, '0.5.0');
-  assert.equal(menu.versions[1].url, 'https://www.relflow.ai/en/latest/');
+  assert.equal(menu.versions[1].url, 'https://www.relflow.ai/latest/');
   assert.equal(menu.versions[2].url, 'https://relflow--102.org.readthedocs.build/102/');
 });
 
@@ -45,7 +45,7 @@ test('a current preview missing from active versions remains selectable at its a
     {
       versions: {
         current: { slug: '102', type: 'external' },
-        active: [{ slug: 'stable', urls: { documentation: 'https://www.relflow.ai/en/stable/' } }],
+        active: [{ slug: 'stable', urls: { documentation: 'https://www.relflow.ai/stable/' } }],
       },
     },
     currentURL,

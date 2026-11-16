@@ -4,13 +4,13 @@ const data = {
   versions: {
     current: { slug: 'latest' },
     active: [
-      { slug: 'latest', urls: { documentation: 'https://www.relflow.ai/en/latest/' } },
+      { slug: 'latest', urls: { documentation: 'https://www.relflow.ai/latest/' } },
       {
         slug: 'stable',
         verbose_name: '0.5.0',
-        urls: { documentation: 'https://www.relflow.ai/en/stable/' },
+        urls: { documentation: 'https://www.relflow.ai/stable/' },
       },
-      { slug: 'v0.4.7', urls: { documentation: 'https://www.relflow.ai/en/v0.4.7/' } },
+      { slug: 'v0.4.7', urls: { documentation: 'https://www.relflow.ai/v0.4.7/' } },
     ],
   },
 };
@@ -45,10 +45,7 @@ test('the version dialog consumes host data, filters releases, and supports keyb
   await expect(search).toBeFocused();
   await search.fill('0.5');
   await expect(dialog.getByRole('link')).toHaveCount(1);
-  await expect(dialog.getByRole('link')).toHaveAttribute(
-    'href',
-    'https://www.relflow.ai/en/stable/',
-  );
+  await expect(dialog.getByRole('link')).toHaveAttribute('href', 'https://www.relflow.ai/stable/');
   await search.fill('missing');
   await expect(dialog.locator('[data-version-empty]')).toBeVisible();
   await search.fill('');

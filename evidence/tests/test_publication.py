@@ -219,7 +219,7 @@ def test_selection_refreshes_readme_from_candidate_metrics_with_exact_boundaries
     assert "49.32% after filling nulls with zero" in content
     assert content.count("| [") == 3
     for identifier in ("P021", "P025", "P038"):
-        assert f"https://www.relflow.ai/en/latest/evidence/{identifier}/" in content
+        assert f"https://www.relflow.ai/latest/evidence/{identifier}/" in content
 
 
 def test_readme_reads_current_selection_instead_of_an_old_report(reports, publication, readme_target):

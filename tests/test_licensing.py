@@ -18,6 +18,7 @@ def checkout(tmp_path):
         "pyproject.toml",
         "LICENSE",
         "NOTICE",
+        "CITATION.bib",
         "native/pyproject.toml",
         "native/Cargo.toml",
         "native/LICENSE",
@@ -49,13 +50,14 @@ def test_checked_out_sources_are_ready_for_agpl_builds(checkout):
         "docs/pyproject.toml",
         "docs/starlight/package.json",
         "docs/starlight/package-lock.json",
+        "CITATION.bib",
         "NOTICE",
         "native/NOTICE",
     ],
 )
-def test_source_gate_rejects_a_stale_apache_declaration(checkout, name):
+def test_source_gate_rejects_a_stale_permissive_declaration(checkout, name):
     path = checkout / name
-    path.write_text(path.read_text().replace("AGPL-3.0-only", "Apache-2.0"))
+    path.write_text(path.read_text().replace("AGPL-3.0-only", "MIT"))
     with pytest.raises(ValueError, match="AGPL"):
         release.licensing(checkout)
 
@@ -78,7 +80,7 @@ def test_docs_lockfile_license_is_its_root_package_license(checkout):
     path = checkout / "docs/starlight/package-lock.json"
     lock = json.loads(path.read_text())
     lock["license"] = "AGPL-3.0-only"
-    lock["packages"][""]["license"] = "Apache-2.0"
+    lock["packages"][""]["license"] = "MIT"
     path.write_text(json.dumps(lock))
     with pytest.raises(ValueError, match="documentation package license"):
         release.licensing(checkout)

@@ -62,6 +62,57 @@ test('inert template contents count toward markup budgets rather than hiding the
   assert.ok(after.htmlBytes > before.htmlBytes);
 });
 
+for (const base of ['/latest/', '/v0.5.0/', '/previews/102/'])
+  test(`hosted ${base} pages resolve their asset closure inside the build directory`, (t) => {
+    const html = `<!doctype html><html><head>
+      <script type="module" src="${base}_astro/main.js"></script>
+      <link rel="stylesheet" href="${base}_astro/site.css">
+      <link rel="canonical" href="https://www.relflow.ai${base}">
+      </head><body>Hosted page</body></html>`;
+    const root = fixture(t, html);
+    const files = {
+      'main.js': "import './shared.js'; import './site.css';",
+      'shared.js': 'export const value = 7;',
+      'site.css': 'body { color: green; }',
+    };
+    for (const [name, source] of Object.entries(files))
+      writeFileSync(join(root, '_astro', name), source);
+    mkdirSync(join(root, 'guide'));
+    writeFileSync(
+      join(root, 'guide/index.html'),
+      html.replace(`https://www.relflow.ai${base}"`, `https://www.relflow.ai${base}guide/"`),
+    );
+    for (const route of ['/', '/guide/']) {
+      const result = measure(root, route);
+      assert.deepEqual(result.scripts.sort(), ['_astro/main.js', '_astro/shared.js']);
+      assert.deepEqual(result.styles, ['_astro/site.css']);
+      assert.equal(
+        result.initialJsGzipBytes,
+        ['main.js', 'shared.js'].reduce(
+          (sum, file) => sum + gzipSync(files[file], { level: 9 }).length,
+          0,
+        ),
+      );
+      assert.equal(result.cssGzipBytes, gzipSync(files['site.css'], { level: 9 }).length);
+    }
+  });
+
+test('hosted bundles reject assets outside their version and still require every referenced file', (t) => {
+  for (const [asset, error] of [
+    ['/_astro/main.js', /documentation version/],
+    ['/other/_astro/main.js', /documentation version/],
+    ['https://cdn.invalid/main.js', /require local script\/style assets/],
+    ['/latest/_astro/missing.js', /missing\.js/],
+  ]) {
+    const root = fixture(
+      t,
+      `<link rel="canonical" href="https://www.relflow.ai/latest/"><script type="module" src="${asset}"></script>`,
+    );
+    writeFileSync(join(root, '_astro/main.js'), 'export const value = 7;');
+    assert.throws(() => measure(root, '/'), error);
+  }
+});
+
 test('missing referenced assets fail the budget check instead of understating the bundle', (t) => {
   const root = fixture(t, '<script type="module" src="/_astro/missing.js"></script>');
   assert.throws(() => measure(root, '/'), /missing\.js/);

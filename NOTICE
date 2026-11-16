@@ -8,8 +8,8 @@ Unless a file states otherwise, this covers project-authored source code,
 documentation, examples, schema machinery, cache implementations, and preset
 definitions. Third-party components retain their own licenses and notices.
 
-Previously granted Apache-2.0 permissions remain effective for code made
-available under those terms, including earlier development snapshots.
+Previously granted licensing permissions remain effective for earlier releases
+and development snapshots.
 
 Additional licensing permissions require written approval from both Grantham
 Taylor and Reid Taylor and the necessary rights for all included contributions.

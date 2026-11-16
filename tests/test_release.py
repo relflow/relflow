@@ -92,9 +92,9 @@ def test_agpl_archives_reject_inconsistent_licensing(tmp_path, kind, problem):
                 assert stream is not None
                 members[member.name] = stream.read()
     if problem == "expression":
-        members[metadata] = members[metadata].replace(b"AGPL-3.0-only", b"Apache-2.0")
+        members[metadata] = members[metadata].replace(b"AGPL-3.0-only", b"MIT")
     elif problem == "legacy":
-        members[metadata] = b"License: Apache-2.0\n" + members[metadata]
+        members[metadata] = b"License: MIT\n" + members[metadata]
     elif problem == "declaration":
         members[metadata] = members[metadata].replace(b"License-File: LICENSE\n", b"")
     elif problem == "missing":

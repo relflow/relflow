@@ -11,7 +11,7 @@ needed; do not use camel-case branding.
 Public relflow releases beginning with 0.5.0 use `AGPL-3.0-only` for
 project-authored code, documentation, examples, schema machinery, caches, and
 preset definitions unless a file states otherwise. Preserve third-party notices
-and earlier Apache grants. Additional licensing permissions require written
+and existing licensing grants. Additional licensing permissions require written
 approval from both Grantham Taylor and Reid Taylor and the necessary rights for
 every contribution; follow [CONTRIBUTING.md](CONTRIBUTING.md).
 

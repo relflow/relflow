@@ -89,8 +89,7 @@ def readme_content(entries: dict, source: str) -> str:
     if intact < 0 or broken < 0:
         raise ValueError("README normalized RMSE measurements must be nonnegative")
     urls = {
-        identifier: f"https://www.relflow.ai/en/latest/evidence/{identifier}/"
-        for identifier in ("P021", "P025", "P038")
+        identifier: f"https://www.relflow.ai/latest/evidence/{identifier}/" for identifier in ("P021", "P025", "P038")
     }
     table = (
         "| Experiment | relflow result | Control |\n"
