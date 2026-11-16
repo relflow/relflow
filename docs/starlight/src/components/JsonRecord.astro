@@ -1,0 +1,101 @@
+---
+interface Props {
+  value: Record<string, unknown>;
+  label: string;
+}
+
+const { value, label } = Astro.props;
+const json = JSON.stringify(value, null, 2);
+---
+
+<div class="json-record not-content" data-json-record>
+  <div class="json-toolbar">
+    <span>JSON</span>
+    <button type="button" data-json-copy hidden>Copy JSON</button>
+  </div>
+  <pre tabindex="0" role="region" aria-label={label}><code>{json}</code></pre>
+  <p class="json-status" role="status" aria-live="polite" data-json-status></p>
+</div>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-json-record]')) {
+    const button = root.querySelector<HTMLButtonElement>('[data-json-copy]')!;
+    const code = root.querySelector('code')!;
+    const status = root.querySelector<HTMLElement>('[data-json-status]')!;
+    let reset: ReturnType<typeof setTimeout> | undefined;
+    button.hidden = false;
+    button.addEventListener('click', async () => {
+      clearTimeout(reset);
+      try {
+        await navigator.clipboard.writeText(code.textContent || '');
+        button.textContent = 'Copied';
+        status.textContent = 'Complete record copied as JSON.';
+      } catch {
+        button.textContent = 'Copy unavailable';
+        status.textContent = 'Select the JSON below or use the record download link.';
+      }
+      reset = setTimeout(() => {
+        button.textContent = 'Copy JSON';
+      }, 1800);
+    });
+  }
+</script>
+
+<style>
+  .json-record {
+    min-width: 0;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.35rem;
+    background: var(--rf-code);
+    color: var(--sl-color-text);
+    overflow: hidden;
+  }
+  .json-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem var(--rf-panel-padding);
+    font: 0.72rem/1.5 var(--sl-font);
+    color: var(--rf-muted);
+  }
+  button {
+    border: 1px solid var(--rf-border);
+    border-radius: 0.25rem;
+    padding: 0.25rem 0.5rem;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text-accent);
+    font: inherit;
+    cursor: pointer;
+  }
+  button:hover {
+    border-color: var(--sl-color-text-accent);
+  }
+  :is(button, pre):focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: -2px;
+  }
+  pre {
+    margin: 0;
+    border-top: 1px solid var(--rf-border);
+    padding: var(--rf-panel-padding);
+    max-height: 28rem;
+    overflow: auto;
+    font: 0.8rem/1.65 var(--sl-font-mono);
+    white-space: pre;
+    tab-size: 2;
+  }
+  code {
+    font: inherit;
+    background: none;
+    padding: 0;
+  }
+  .json-status {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

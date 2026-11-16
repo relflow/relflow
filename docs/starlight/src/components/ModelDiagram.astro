@@ -1,0 +1,68 @@
+---
+import { parseSchema, type ModelNode } from '../model-explainer/schema';
+import type { Dataset } from '../datasets/types';
+import { reference } from '../reference.mjs';
+import DataExplorer from './DataExplorer.astro';
+
+interface Props {
+  id: string;
+  schema: string;
+  leaves?: Record<string, string>;
+  headingLevel?: 3 | 4 | 5 | 6;
+}
+
+const { id, schema, leaves = {}, headingLevel = 4 } = Astro.props;
+const model = parseSchema(schema, { leaves: Object.keys(leaves) });
+const root = model.classes.find((definition) => definition.name === model.modelClass)!;
+const dataset: Dataset = {
+  id,
+  label: model.modelClass,
+  observation: root.docstring,
+  description: root.docstring,
+  entities: [],
+  relations: [],
+};
+
+function describe(path: string, name: string, nodes: ModelNode[]) {
+  dataset.entities.push({
+    id: path,
+    name,
+    description: reference.representations[path === '/' ? 'Model' : 'Branch'],
+    columns: nodes.map((node) => ({
+      name: node.name,
+      type: Object.hasOwn(leaves, node.type) ? node.type : `rf.${node.type}`,
+      description: [
+        node.target
+          ? leaves[node.type] || reference.types[node.type]?.text
+          : leaves[node.type] ||
+            reference.representations[node.type] ||
+            reference.types[node.type]?.text,
+        node.target ? reference.options.target.text : undefined,
+        `Configuration: ${node.declaration}`,
+      ]
+        .filter(Boolean)
+        .join(' '),
+      ...(node.kind === 'branch'
+        ? { role: 'collection' as const }
+        : node.target
+          ? { role: 'target' as const }
+          : {}),
+    })),
+  });
+  for (const node of nodes) {
+    if (node.kind !== 'branch') continue;
+    dataset.relations.push({
+      from: path,
+      to: node.path,
+      fromColumn: node.name,
+      cardinality: 'many',
+      description: `${node.className} records provide context to ${name} through ${node.name}.`,
+    });
+    describe(node.path, node.className!, node.children);
+  }
+}
+
+describe('/', model.modelClass, model.nodes);
+---
+
+<DataExplorer {id} {dataset} view="model" {headingLevel} showObservation={false} />

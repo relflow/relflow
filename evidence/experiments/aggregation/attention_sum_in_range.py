@@ -1,0 +1,257 @@
+# %% [markdown]
+# ---
+# title: Can it add a list of numbers?
+# categories:
+# - Cardinality generalization
+# description: Predict the total of a list whose length varies within the range used in training.
+# execute:
+#   enabled: false
+#   eval: false
+# code-fold: true
+# toc: false
+# evidence-readout:
+# - label: New lists
+#   metric:
+#   - measured
+#   - nrmse
+#   format: error
+# evidence-group: Aggregation
+# ---
+#
+# Each record is a small bag of signed numbers. The model receives the items and must predict their
+# total; it receives neither the answer nor a separate count field. Because both values and list
+# lengths vary, recognizing a typical length cannot solve the task.
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {amount: 0.5}
+#   - {amount: -0.2}
+#   - {amount: 0.9}
+# total: 1.2
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# In the illustration, adding 0.5 and −0.2 gives 0.3; adding the remaining 0.9 gives the hidden
+# answer 1.2. Negative amounts matter: predicting the number of items, or simply adding their
+# magnitudes, would produce a different answer.
+#
+# ```{typst}
+# //| label: fig-evidence-attention-sum-in-range
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("total", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Test on fresh lists, then reorder the same items. Reordering should preserve the total.
+#
+# Training and scoring use independently generated lists of one through six items, with amounts
+# between −1 and 1. The second comparison moves complete items to different positions without
+# changing any amount or the target. A model that relies on the first or last position could look
+# accurate on ordinary examples yet change its answer under this intervention.
+#
+# ## Result
+#
+# {{< evidence P001 status >}}
+#
+# The model learns an approximate total in this range. Longer lists need a separate test.
+#
+#
+# Prediction error is compared with always guessing the training-set mean total: 100% means that
+# constant guess, and lower is better. Permutation drift instead measures how much predictions move
+# when the answer should stay fixed. These checks cover approximate addition within the tested
+# length range, not a general-purpose exact calculator.
+#
+# <details class="evidence-details">
+# <summary>Experiment details and code</summary>
+#
+# {{< evidence P001 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< evidence P001 script >}}
+#
+# ### How it works
+#
+# Training, validation, and test records contain one through six independent
+# amounts drawn from −1 to 1. Both the repeated item branch and root use learned
+# `rf.Attention` reductions. There is no visible count input.
+#
+# Attention’s reduction retains aggregate evidence and present-token count as
+# well as its normalized learned summary. These representations offer a route to
+# predicting sums with changing length. Independent values prevent count alone
+# from solving the task; a complete-item permutation checks approximate order
+# stability. [Unseen-length tests](attention-sum-unseen-lengths.html) separately
+# check whether the learned behavior extends beyond interpolation.
+#
+# ### Remaining work
+#
+# Repeat across seeds and change capacities, widths, and nested placement.
+# This in-range result alone establishes neither arbitrary-length generalization
+# nor an exact arithmetic sum; empty and missing-item cases need separate checks.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+# ### Complete experiment code
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "computation"
+# types = ["Number"]
+# conditions = ["transformations"]
+# ///
+
+"""Learned Attention can interpolate a sum over seen cardinalities.
+
+Check ordinary in-range accuracy and approximate order invariance.
+
+Run: uv run evidence/experiments/run.py P001 --wheel /path/to/relflow-0.5.0-py3-none-any.whl"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Iterator
+from copy import deepcopy
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+TRAIN_MAX = 6
+CAPACITY = 12
+
+
+def random_records(*, rows: int, seed: int, minimum: int = 1, maximum: int = TRAIN_MAX) -> Iterator[dict]:
+    """Draw variable-length numerical bags and their mean and sum."""
+    if not 1 <= minimum <= maximum <= CAPACITY:
+        raise ValueError(f"length range must satisfy 1 <= minimum <= maximum <= {CAPACITY}")
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        length = int(rng.integers(minimum, maximum + 1))
+        values = rng.uniform(-1.0, 1.0, size=length)
+        row: dict[str, object] = {
+            "items": [{"amount": float(value)} for value in values],
+            "mean_amount": float(values.mean()),
+            "total": float(values.sum()),
+        }
+        yield row
+
+
+def permute(observations: list[dict], *, seed: int) -> list[dict]:
+    """Jointly permute complete items without changing any target."""
+    rng = np.random.default_rng(seed)
+    rows = deepcopy(observations)
+    for row in rows:
+        items = row["items"]
+        row["items"] = [items[index] for index in rng.permutation(len(items))]
+    return rows
+
+
+def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
+    inputs = [{"items": row["items"]} for row in observations]
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
+    return np.asarray([row["total"]["content"] for row in output], dtype=np.float64)
+
+
+def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
+    return float(np.sqrt(np.mean(np.square(actual - predicted))))
+
+
+def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict[str, float]:
+    """Compare held-out RMSE with the constant training-target mean."""
+    actual = np.asarray([row["total"] for row in test], dtype=np.float64)
+    baseline = rmse(actual, float(np.asarray([row["total"] for row in train], dtype=np.float64).mean()))
+    measured = rmse(actual, predicted)
+    return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
+
+
+class Item(rf.Branch):
+    amount = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=CAPACITY, attention="mha", n_layers=2, reduction=rf.Attention(n_layers=2))
+    total = rf.Number(mask=True, objective="mse")
+
+
+@experiment("P001", seed=3609)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    # Split seeds are independent; rerunning a generator reproduces the same records.
+    train = list(random_records(rows=1536, seed=seed + 1))
+    test = list(random_records(rows=768, seed=seed + 3))
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
+    datamodule = rf.SyntheticDataModule(
+        train=lambda: random_records(rows=1536, seed=seed + 1),
+        validate=lambda: random_records(rows=384, seed=seed + 2),
+        seed=seed,
+    )
+    model.fit(
+        datamodule,
+        batch_size=64,
+        optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_epochs=-1,
+        max_steps=1100 if steps is None else min(steps, 1100),
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    trainer = model.trainer
+
+    # Evaluate held-out answers and retain their original labels in corruption controls.
+    intact_prediction = prediction(model, test)
+    measured = score(train=train, test=test, predicted=intact_prediction)
+    permuted_prediction = prediction(model, permute(test, seed=seed + 5))
+    target_scale = float(np.asarray([row["total"] for row in test], dtype=np.float64).std())
+    permutation_drift = rmse(intact_prediction, permuted_prediction) / target_scale
+    metrics = {"measured": measured, "permutation_drift": permutation_drift, "steps": trainer.global_step}
+    checks = {
+        "Seen-length nRMSE below 0.35": bool(measured["nrmse"] < 0.35),
+        "Permutation drift below 0.12 target SD": bool(permutation_drift < 0.12),
+    }
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)
+
+# %% [markdown]
+# </details>

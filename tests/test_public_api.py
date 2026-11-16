@@ -1,0 +1,126 @@
+import sys
+from typing import get_type_hints
+
+import pyarrow as pa
+import pytest
+
+import relflow
+import relflow.inference as inference
+import relflow.tensorfields as tensorfields
+
+
+def test_common_resources_are_available_from_package_root():
+    assert relflow.Model.__name__ == "Model"
+    assert relflow.presets.SMALL.name == "small"
+    assert relflow.presets.MEDIUM.name == "medium"
+    assert relflow.presets.FitDefaults is not None
+    assert relflow.Attention().type == "attention"
+    assert relflow.AttentionMode.mha == "mha"
+    assert relflow.Mean().type == "mean"
+    assert relflow.ReductionConfig is not None
+    assert relflow.ArrowDataModule.__name__ == "ArrowDataModule"
+    assert relflow.CustomDataModule.__name__ == "CustomDataModule"
+    assert relflow.DuckDBDataModule.__name__ == "DuckDBDataModule"
+    assert relflow.PolarsDataModule.__name__ == "PolarsDataModule"
+    assert relflow.SyntheticDataModule.__name__ == "SyntheticDataModule"
+    assert relflow.Schema.__name__ == "Schema"
+    assert relflow.Address("label") == "/label"
+    assert relflow.Address("transactions", "amount") == "/transactions/amount"
+    assert relflow.Address() == "/"
+    assert relflow.Branch.__name__ == "Branch"
+    assert relflow.Extension.__name__ == "Extension"
+    assert tensorfields.Extension is relflow.Extension
+    assert relflow.Mask.model_fields["rate"].default is None
+    assert relflow.Jitter.model_fields["add"].default == 0.0
+    assert relflow.Jitter.model_fields["multiply"].default == 0.0
+    assert relflow.Jitter.model_fields["normalize"].default is True
+    for tensorfield in (relflow.Number, relflow.Vector, relflow.DateParts, relflow.Text):
+        assert isinstance(tensorfield.model_fields["jitter"].default_factory(), relflow.Jitter)
+    assert relflow.where("type").name == "type"
+    assert relflow.preprocess.__name__ == "preprocess"
+    assert relflow.postprocess.__name__ == "postprocess"
+    assert relflow.Preprocessor.__name__ == "Preprocessor"
+    assert relflow.PreprocessorProvider.strata == "strata"
+    assert relflow.Context().state is None
+    assert relflow.Context().salt == 0
+    assert relflow.OptimizerConfig is not None
+    assert relflow.SchedulerConfig is not None
+    assert relflow.RollbackCheckpoint.__name__ == "RollbackCheckpoint"
+    assert relflow.EarlyStopping.__name__ == "EarlyStopping"
+    assert relflow.Writer.__name__ == "Writer"
+    assert relflow.Postprocessor is not None
+    assert relflow.Deployment.__name__ == "Deployment"
+    assert relflow.Accelerator.cpu == "cpu"
+    assert relflow.JSONBackend.orjson == "orjson"
+    assert relflow.Input is not None
+    assert relflow.ModelSource is not None
+    assert relflow.UpdateOperation is not None
+    assert relflow.SchemaField is not None
+    assert relflow.Category.model_fields["type"].default == "category"
+    assert relflow.Enum.model_fields["type"].default == "enum"
+    assert relflow.Enum.model_fields["values"].is_required()
+    assert relflow.Boolean.model_fields["type"].default == "boolean"
+    assert relflow.Number.model_fields["type"].default == "number"
+    assert relflow.Duration is relflow.TENSORFIELDS["duration"].Request
+    assert relflow.Ordinal is relflow.TENSORFIELDS["ordinal"].Request
+    assert relflow.Quantile.model_fields["type"].default == "quantile"
+    assert relflow.Set.model_fields["type"].default == "set"
+    assert relflow.Hash.model_fields["type"].default == "hash"
+    assert relflow.Overflow.tail == "tail"
+    assert relflow.VocabularySyncCallback.__name__ == "VocabularySyncCallback"
+    assert "number" in relflow.TENSORFIELDS
+    assert "enum" in relflow.TENSORFIELDS
+    assert "quantile" in relflow.TENSORFIELDS
+    assert "boolean" in relflow.TENSORFIELDS
+    assert "set" in relflow.TENSORFIELDS
+    assert "hash" in relflow.TENSORFIELDS
+
+
+def test_period_is_the_registered_dateparts_request_under_both_public_names():
+    from relflow import DateParts, Period
+
+    assert Period is DateParts is relflow.TENSORFIELDS["dateparts"].Request
+    assert "Periods" not in relflow.__all__
+    namespace: dict[str, object] = {}
+    exec("from relflow import *", namespace)
+    assert namespace["Period"] is namespace["DateParts"] is Period
+
+
+def test_data_module_constructor_annotations_resolve_at_runtime():
+    for module in (
+        relflow.ArrowDataModule,
+        relflow.CustomDataModule,
+        relflow.DuckDBDataModule,
+        relflow.PolarsDataModule,
+        relflow.SyntheticDataModule,
+    ):
+        hints = get_type_hints(module.__init__)
+        assert hints["model"] == relflow.Model | None
+
+    writer_hints = get_type_hints(relflow.Writer.write_on_batch_end)
+    assert writer_hints["output"] is pa.Table
+
+
+def test_star_imports_and_lazy_serving_exports_without_the_serving_extra(monkeypatch):
+    monkeypatch.setitem(sys.modules, "fastapi", None)
+    monkeypatch.delitem(sys.modules, "relflow.inference.deployment", raising=False)
+    # Lazy names may already be cached from earlier access; drop them without triggering ``__getattr__``.
+    monkeypatch.delitem(inference.__dict__, "deployment", raising=False)
+    for module in (relflow, inference):
+        for name in ("Accelerator", "Deployment", "Input", "JSONBackend", "ModelSource", "UpdateOperation"):
+            monkeypatch.delitem(module.__dict__, name, raising=False)
+            assert name not in module.__all__
+            assert name in dir(module)
+
+    namespace: dict[str, object] = {}
+    exec("from relflow import *\nfrom relflow.inference import *", namespace)
+
+    assert namespace["Model"] is relflow.Model
+    assert namespace["Writer"] is relflow.Writer
+    assert "Deployment" not in namespace
+    with pytest.raises(ModuleNotFoundError, match="relflow.Deployment requires the serving extra"):
+        relflow.Deployment
+    with pytest.raises(ModuleNotFoundError, match="relflow.inference.Accelerator requires the serving extra"):
+        inference.Accelerator
+    with pytest.raises(AttributeError, match="has no attribute 'Missing'"):
+        relflow.Missing

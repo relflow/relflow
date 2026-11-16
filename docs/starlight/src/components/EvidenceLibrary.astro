@@ -1,0 +1,657 @@
+---
+import EvidenceTypes from './EvidenceTypes.astro';
+import {
+  capabilities,
+  capabilityFor,
+  conditions,
+  conditionsFor,
+  description,
+  leafTypes,
+  question,
+  typesFor,
+} from '../evidence/catalog';
+import { evidenceEntries, selection } from '../evidence/data';
+import { experimentURL, recordDate, status } from '../evidence/presentation';
+
+const entries = evidenceEntries.map((entry) => ({
+  ...entry,
+  state: status(entry),
+  question: question(entry),
+  types: typesFor(entry),
+  capability: capabilityFor(entry),
+  conditions: conditionsFor(entry),
+}));
+const groups = [
+  ...capabilities,
+  ...(entries.some((entry) => entry.capability.id === 'archived')
+    ? [{ id: 'archived', label: 'Archived experiments' }]
+    : []),
+];
+const states = [...new Map(entries.map((entry) => [entry.state.id, entry.state])).values()];
+const stateCount = (id: string) => entries.filter((entry) => entry.state.id === id).length;
+const fullRuns = stateCount('met') + stateCount('not_met');
+const recorded = entries.filter((entry) => entry.result);
+const pending = recorded.length === 0;
+const selectionReason =
+  typeof selection.report.status === 'string' ? selection.report.status.trim() : '';
+const selectionLabel = pending
+  ? 'Awaiting CI results'
+  : selection.report.passed === false
+    ? 'CI preview'
+    : 'Selected CI results';
+const lastRecorded = recorded
+  .map((entry) => entry.result!.started_at)
+  .filter((date) => Number.isFinite(Date.parse(date)))
+  .sort((a, b) => Date.parse(a) - Date.parse(b))
+  .at(-1);
+---
+
+<section
+  class="evidence-library not-content"
+  aria-label="Controlled experiments"
+  data-evidence-library
+>
+  <header class="library-selection">
+    <p class="selection-label">{selectionLabel}</p>
+    <p class="selection-context">
+      <span>Publication {selection.version}</span>
+      <span>Revision <code title={selection.revision}>{selection.revision.slice(0, 7)}</code></span>
+      {
+        lastRecorded && (
+          <span>
+            Recorded <time datetime={lastRecorded}>{recordDate(lastRecorded)}</time> UTC
+          </span>
+        )
+      }
+    </p>
+    <p class="selection-description">
+      {
+        pending
+          ? 'No result has been selected yet. The experiment declarations are available below; learning measurements are pending.'
+          : selection.report.passed === false
+            ? 'This selected CI report is marked as not passed. Inspect the individual outcomes and execution record before drawing a conclusion.'
+            : 'These measurements come from the selected CI execution. Each experiment retains its recorded revision, protocol, and checks.'
+      }
+    </p>
+    {
+      selectionReason && (pending || selection.report.passed === false) && (
+        <p class="selection-description">{selectionReason}</p>
+      )
+    }
+    <details class="selection-details">
+      <summary>Publication details and downloads</summary>
+      <div class="selection-links">
+        <a href="/evidence/selected.json" download>Results JSON ↓</a>
+        {selection.report.release && <a href={selection.report.release}>Execution archive ↗</a>}
+        {
+          selection.report.github_run?.html_url && (
+            <a href={selection.report.github_run.html_url}>CI run ↗</a>
+          )
+        }
+      </div>
+      <dl class="library-summary">
+        <div><dt>Experiments shown</dt><dd>{entries.length}</dd></div>
+        <div><dt>Full learning runs</dt><dd>{fullRuns}</dd></div>
+        <div><dt>Runs with checks met</dt><dd>{stateCount('met')}</dd></div>
+        <div><dt>Runs with unmet checks</dt><dd>{stateCount('not_met')}</dd></div>
+      </dl>
+    </details>
+  </header>
+
+  <div class="library-controls">
+    <label
+      >Find an experiment
+      <input
+        type="search"
+        data-library-search
+        placeholder="Try missing values, identity, or P021"
+        autocomplete="off"
+        spellcheck="false"
+        aria-controls="evidence-results"
+      />
+    </label>
+    <label
+      >Capability
+      <select data-library-group aria-controls="evidence-results">
+        <option value="">All capabilities</option>
+        {
+          groups.map((capability) => (
+            <option value={capability.id} data-label={capability.label}>
+              {capability.label} (
+              {entries.filter((entry) => entry.capability.id === capability.id).length})
+            </option>
+          ))
+        }
+      </select>
+    </label>
+    <label
+      >Leaf type
+      <select data-library-type aria-controls="evidence-results">
+        <option value="">All leaf types</option>
+        {
+          leafTypes
+            .filter((type) => entries.some((entry) => entry.types.includes(type)))
+            .map((type) => <option value={type}>{type}</option>)
+        }
+      </select>
+    </label>
+    <label
+      >Evaluation condition
+      <select data-library-condition aria-controls="evidence-results">
+        <option value="">All conditions</option>
+        {conditions.map((condition) => <option value={condition.id}>{condition.label}</option>)}
+      </select>
+    </label>
+    <label
+      >Result
+      <select data-library-status aria-controls="evidence-results">
+        <option value="">All results</option>
+        {
+          states.map((state) => (
+            <option value={state.id}>
+              {state.label} ({stateCount(state.id)})
+            </option>
+          ))
+        }
+      </select>
+    </label>
+  </div>
+
+  <div class="library-results">
+    <p class="library-count" role="status" aria-live="polite" aria-atomic="true" data-library-count>
+      Showing {entries.length} of {entries.length} experiments.
+    </p>
+    <button type="button" class="library-reset" data-library-reset disabled>Reset filters</button>
+  </div>
+  <div class="library-empty" data-library-empty hidden>
+    <p>No experiments match these filters. Try a shorter search or choose another capability.</p>
+  </div>
+
+  <ol id="evidence-results" class="evidence-list">
+    {
+      entries.map((entry) => {
+        const result = entry.result;
+        const measured = entry.state.id === 'met' || entry.state.id === 'not_met';
+        const checks = measured && result ? Object.values(result.checks) : [];
+        const family = entry.capability.label;
+        return (
+          <li
+            id={entry.id}
+            data-evidence-entry
+            data-group={entry.capability.id}
+            data-conditions={entry.conditions.map((condition) => condition.id).join(' ')}
+            data-status={entry.state.id}
+            data-types={entry.types.join(' ')}
+            data-search={`${entry.id} ${entry.family} ${entry.conditions.map((condition) => condition.label).join(' ')} ${family} ${entry.question} ${entry.title} ${entry.types.join(' ')} ${description(entry)} ${entry.lane} ${entry.archived ? 'archived' : ''} ${entry.requirements.join(' ')}`.toLowerCase()}
+          >
+            <article aria-labelledby={`${entry.id}-title`}>
+              <div class="entry-labels">
+                <span class="entry-id">{entry.id}</span>
+                <span>{family}</span>
+                {entry.archived && <span>Archived experiment</span>}
+              </div>
+              <h3 id={`${entry.id}-title`}>
+                <a href={experimentURL(entry.id)}>{entry.question}</a>
+              </h3>
+              <EvidenceTypes entry={entry} />
+              <p class="entry-description">{description(entry)}</p>
+              {entry.conditions.length > 0 && (
+                <ul class="entry-conditions" aria-label="Evaluation conditions">
+                  {entry.conditions.map((condition) => (
+                    <li>
+                      <a
+                        href={`/evidence/?condition=${condition.id}`}
+                        data-library-condition-link={condition.id}
+                      >
+                        {condition.label}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div class="entry-result">
+                <span class="result-status" data-outcome={entry.state.id}>
+                  {entry.state.label}
+                </span>
+                {measured && (
+                  <span class="check-count">
+                    {checks.filter((met) => met).length} of {checks.length} checks met
+                  </span>
+                )}
+              </div>
+              {!measured && (
+                <p class="unmeasured">
+                  {entry.state.id === 'missing'
+                    ? 'No selected measurement.'
+                    : entry.state.id === 'smoke'
+                      ? 'A limited run does not establish a full learning result.'
+                      : 'The selected execution reported an error.'}
+                </p>
+              )}
+            </article>
+          </li>
+        );
+      })
+    }
+  </ol>
+</section>
+
+<script>
+  for (const root of document.querySelectorAll<HTMLElement>('[data-evidence-library]')) {
+    const search = root.querySelector<HTMLInputElement>('[data-library-search]')!;
+    const group = root.querySelector<HTMLSelectElement>('[data-library-group]')!;
+    const status = root.querySelector<HTMLSelectElement>('[data-library-status]')!;
+    const type = root.querySelector<HTMLSelectElement>('[data-library-type]')!;
+    const condition = root.querySelector<HTMLSelectElement>('[data-library-condition]')!;
+    const reset = root.querySelector<HTMLButtonElement>('[data-library-reset]')!;
+    const count = root.querySelector<HTMLElement>('[data-library-count]')!;
+    const empty = root.querySelector<HTMLElement>('[data-library-empty]')!;
+    const entries = [...root.querySelectorAll<HTMLElement>('[data-evidence-entry]')];
+
+    function restoreFilters() {
+      const params = new URL(location.href).searchParams;
+      search.value = params.get('q') || '';
+      group.value = params.get('group') || '';
+      status.value = params.get('status') || '';
+      type.value = params.get('type') || '';
+      condition.value = params.get('condition') || '';
+      for (const select of [group, status, type, condition])
+        if (select.selectedIndex < 0) select.value = '';
+    }
+
+    function filter(updateURL = true) {
+      const words = search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      let visible = 0;
+      for (const entry of entries) {
+        const match =
+          words.every((word) => entry.dataset.search!.includes(word)) &&
+          (!group.value || group.value === entry.dataset.group) &&
+          (!status.value || status.value === entry.dataset.status) &&
+          (!type.value || entry.dataset.types!.split(' ').includes(type.value)) &&
+          (!condition.value || entry.dataset.conditions!.split(' ').includes(condition.value));
+        entry.hidden = !match;
+        if (match) visible++;
+      }
+      const label = group.selectedOptions[0]?.dataset.label;
+      count.textContent = `Showing ${visible} of ${entries.length} experiments${label ? ` · ${label.trim()}` : ''}.`;
+      empty.hidden = visible !== 0;
+      reset.disabled =
+        !search.value && !group.value && !status.value && !type.value && !condition.value;
+      if (!updateURL) return;
+      const url = new URL(location.href);
+      for (const [key, value] of [
+        ['q', search.value],
+        ['group', group.value],
+        ['status', status.value],
+        ['type', type.value],
+        ['condition', condition.value],
+      ]) {
+        if (value) url.searchParams.set(key, value);
+        else url.searchParams.delete(key);
+      }
+      const target = entries.find((entry) => `#${entry.id}` === url.hash);
+      if (target?.hidden) url.hash = '';
+      history.replaceState(null, '', url);
+    }
+
+    function clearFilters() {
+      search.value = '';
+      group.value = '';
+      status.value = '';
+      type.value = '';
+      condition.value = '';
+    }
+
+    function revealHash() {
+      const target = entries.find((entry) => `#${entry.id}` === location.hash);
+      if (!target) return;
+      if (target.hidden) {
+        clearFilters();
+        filter();
+      }
+      requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
+    }
+
+    for (const link of root.querySelectorAll<HTMLAnchorElement>('[data-library-condition-link]'))
+      link.addEventListener('click', (event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0)
+          return;
+        event.preventDefault();
+        condition.value = link.dataset.libraryConditionLink!;
+        filter();
+        condition.focus();
+      });
+    search.addEventListener('input', () => filter());
+    for (const select of [group, status, type, condition])
+      select.addEventListener('change', () => filter());
+    reset.addEventListener('click', () => {
+      clearFilters();
+      filter();
+      search.focus();
+    });
+    window.addEventListener('hashchange', revealHash);
+    window.addEventListener('popstate', () => {
+      restoreFilters();
+      filter(false);
+      revealHash();
+    });
+    restoreFilters();
+    filter(false);
+    root.dataset.ready = '';
+    revealHash();
+  }
+</script>
+
+<style>
+  .entry-conditions {
+    display: flex;
+    flex-wrap: wrap;
+    list-style: none;
+    gap: 0.3rem 0.6rem;
+    padding: 0;
+    margin: 0.75rem 0 0;
+  }
+  .entry-conditions a {
+    font-size: 0.68rem;
+    color: var(--rf-muted);
+    text-underline-offset: 0.2em;
+  }
+  .entry-conditions a:hover {
+    color: var(--sl-color-text-accent);
+  }
+
+  .evidence-library {
+    --evidence-unmet: #f0b35a;
+    --evidence-error: #f28b82;
+    margin-block: var(--rf-section-gap);
+    min-width: 0;
+  }
+  :global(:root[data-theme='light']) .evidence-library {
+    --evidence-unmet: #9a5a12;
+    --evidence-error: #b42318;
+  }
+  .library-selection {
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.4rem;
+    background: var(--rf-card);
+  }
+  .selection-label {
+    margin: 0;
+    color: var(--sl-color-text-accent);
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .selection-context {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem 1rem;
+    margin: 0.5rem 0;
+    color: var(--rf-ink);
+    font-size: 0.8rem;
+    line-height: 1.7;
+  }
+  .selection-description {
+    margin: 0.5rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .selection-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    margin-top: 0.8rem;
+    font-size: 0.78rem;
+  }
+  .library-summary {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin: 1.1rem 0 0;
+    padding-top: 1rem;
+    border-top: 1px solid var(--rf-border);
+  }
+  .library-summary > div {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 0.3rem;
+    min-width: 0;
+  }
+  .library-summary dt {
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+    line-height: 1.5;
+  }
+  .library-summary dd {
+    margin: 0;
+    color: var(--rf-ink);
+    font-size: 1.5rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .library-controls {
+    display: none;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: end;
+    gap: 0.7rem;
+    margin-block: 1.75rem 1rem;
+  }
+  .library-controls > label:first-child {
+    grid-column: 1 / -1;
+  }
+  .selection-details {
+    margin-top: 1rem;
+    font-size: 0.8rem;
+  }
+  .selection-details summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
+  }
+  [data-ready] .library-controls {
+    display: grid;
+  }
+  label {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    min-width: 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  input,
+  select,
+  button {
+    box-sizing: border-box;
+    min-width: 0;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.35rem;
+    background: var(--sl-color-bg);
+    color: var(--sl-color-text);
+    padding: 0.65rem;
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 400;
+    line-height: 1.5;
+  }
+  input,
+  select {
+    width: 100%;
+  }
+  button {
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  button:hover:enabled {
+    color: var(--sl-color-text-accent);
+    border-color: var(--sl-color-text-accent);
+  }
+  :is(input, select, button, a):focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+  .library-results {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--rf-picker-gap);
+    margin-block: 1rem;
+  }
+  .library-reset {
+    display: none;
+    padding: 0.3rem 0;
+    border: 0;
+    background: transparent;
+    color: var(--sl-color-text-accent);
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  [data-ready] .library-reset {
+    display: block;
+  }
+  .library-count {
+    margin: 0;
+    color: var(--rf-muted);
+    font-size: 0.78rem;
+  }
+  .library-empty {
+    padding: var(--rf-panel-padding);
+    border: 1px dashed var(--rf-border);
+    border-radius: 0.35rem;
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .library-empty p {
+    margin: 0;
+  }
+  .evidence-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .evidence-list > li {
+    min-width: 0;
+    padding: var(--rf-panel-padding);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.4rem;
+    scroll-margin-top: 6rem;
+  }
+  .evidence-list > li[data-status='not_met'] {
+    box-shadow: inset 0 -3px 0 var(--evidence-unmet);
+  }
+  .evidence-list > li[data-status='error'] {
+    box-shadow: inset 0 -3px 0 var(--evidence-error);
+  }
+  [hidden] {
+    display: none !important;
+  }
+  article {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 0;
+  }
+  .entry-labels {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.35rem 0.6rem;
+    color: var(--rf-muted);
+    font-size: 0.66rem;
+    line-height: 1.6;
+  }
+  .entry-id {
+    color: var(--sl-color-text-accent);
+    font-family: var(--sl-font-mono);
+  }
+  h3 {
+    margin: 0.6rem 0;
+    font-size: 1rem;
+    line-height: 1.5;
+    letter-spacing: -0.02em;
+  }
+  h3 a {
+    color: var(--rf-ink);
+    text-decoration: none;
+  }
+  h3 a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+  .entry-description {
+    margin: 0;
+    color: var(--rf-muted);
+    font-size: 0.8rem;
+    line-height: 1.7;
+  }
+  .entry-result {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem 0.7rem;
+    margin-top: auto;
+    padding-top: 0.9rem;
+    font-size: 0.68rem;
+    line-height: 1.6;
+  }
+  .result-status {
+    color: var(--rf-ink);
+    font-weight: 600;
+  }
+  .result-status[data-outcome='not_met'] {
+    color: var(--evidence-unmet);
+  }
+  .result-status[data-outcome='error'] {
+    color: var(--evidence-error);
+  }
+  .result-status[data-outcome='met'] {
+    color: var(--sl-color-text-accent);
+  }
+  .result-status[data-outcome='missing'],
+  .result-status[data-outcome='smoke'] {
+    color: var(--rf-muted);
+    font-weight: 400;
+  }
+  .check-count {
+    color: var(--rf-muted);
+  }
+  .unmeasured {
+    margin: 0.4rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    line-height: 1.6;
+  }
+  code {
+    font-family: var(--sl-font-mono);
+    font-size: 0.9em;
+  }
+  a {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
+  }
+  @media (max-width: 700px) {
+    .library-controls {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .library-controls label:first-child {
+      grid-column: 1 / -1;
+    }
+    .evidence-list {
+      grid-template-columns: 1fr;
+    }
+  }
+  @media (max-width: 420px) {
+    .library-summary {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+</style>

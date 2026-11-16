@@ -1,0 +1,127 @@
+---
+title: Boolean
+description: Represent true or false values and predict the probability of an outcome.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Boolean` for a true-or-false fact: whether an account is active,
+whether a customer returns, or whether an item needs review. As a prediction
+target, it learns the probability of `True`.
+
+<DataTypePage name="Boolean">
+
+## Input values
+
+Supply Boolean values (`True` or `False`) or nulls. `False` is a known value;
+null has a separate state. Convert source labels such as `"yes"` and `"no"`
+to Booleans in a preprocessor, or use [Enum](/data-types/enum/) for named labels.
+
+## Standardization and processor pipelines
+
+Boolean uses a fixed content representation for `True` and `False`,
+combined with a learned state embedding. It does not build a vocabulary or fit
+a numeric normalizer. Training counters track state and class exposure;
+nulls remain separate from either Boolean answer.
+
+## How is this leaf trained?
+
+Selected reconstruction targets train the state head with weighted
+cross-entropy. Valued Boolean answers train the content logit with
+counter-weighted binary cross-entropy. A sigmoid turns that logit into the
+probability of `True`.
+
+The `threshold` option changes decision metrics, not this loss or the returned
+probability.
+
+### Predictions
+
+For a decoded target, `content.probability` is the predicted probability of
+`True`. relflow returns a score that your application can use to rank customers
+or apply a decision threshold. See [Runtime](/concepts/runtime/).
+
+<ValueTree
+  id="boolean-predictions"
+  {...outputs.boolean}
+  predictions
+  heading="Illustrative prediction output"
+  label="Boolean prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `threshold` | `0.5` | Configure decision metrics at one threshold or a nonempty list of thresholds in `[0, 1]`. |
+
+`threshold` defaults to `0.5`. A single threshold or a nonempty list of
+thresholds in `[0, 1]` configures decision metrics such as precision and recall.
+The prediction output continues to contain a probability; this setting does
+not turn it into a Boolean decision. Repeated thresholds are deduplicated.
+
+### Request methods
+
+Call these helpers on `rf.Boolean` with a model and the field's absolute
+schema address. For a trained model, inspect the known
+subscription input:
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `counts(model, address)` | A dictionary keyed by `False` and `True` | Inspect the number of observed training values in each class. |
+
+```python
+counts: dict[bool, int] = rf.Boolean.counts(model, "/has_subscription")
+false_count: int = counts[False]
+true_count: int = counts[True]
+```
+
+The snapshot excludes nulls and the counter's internal prior. Both classes are
+present with zero counts before any training values have been observed.
+Counts describe accumulated training exposure, rather than prediction
+probabilities or a count of distinct customers. Changing the returned
+dictionary does not change the model.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| A threshold outside `[0, 1]` or an empty threshold list | Configuration validation rejects the threshold. | Supply one valid threshold or a nonempty list of valid thresholds. |
+| Strings or other non-Boolean source values | The source family does not satisfy the Boolean input contract. | Convert source labels to Booleans in preprocessing, or use Enum. |
+| An invalid address passed to `counts` | `KeyError` for an absent field; `TypeError` for the wrong model or leaf type. | Use a Boolean leaf’s absolute schema address. |
+
+### Footguns
+
+- **Turning an unresolved outcome into `False`.** That supplies a known
+  negative label. Keep unknown outcomes distinct and wait for the complete
+  outcome window before assigning negatives; see the
+  [null-target checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_boolean.py#L262).
+- **Expecting `threshold` to change prediction scores.** It configures decision
+  metrics; your application still receives a probability. Apply the decision
+  rule explicitly and compare its costs on held-out data. The
+  [writer test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_boolean.py#L362)
+  checks that thresholds leave written scores unchanged.
+- **Treating confidence as evidence of useful inputs.** Compare against a
+  constant prevalence baseline as well as your chosen decision metrics.
+  The recorded 0.4.2 [P060 categorical-prior control](/evidence/#P060) learned
+  a high class probability without useful context; confidence alone does not
+  establish that context improves your task.
+- **Checking fit without an independent control.** Use held-out observations
+  and a shuffled-label or simple baseline to test whether performance survives
+  beyond fitting. The recorded 0.4.2 [P017 signal/noise task](/evidence/#P017)
+  uses independent held-out rows to separate those cases.
+
+## Relevant evidence
+
+<LeafEvidence type="Boolean" />
+
+### Related types
+
+- [Category](/data-types/category/) learns one label from a vocabulary discovered during training.
+- [Enum](/data-types/enum/) chooses one label from a fixed declaration.
+- [Set](/data-types/set/) predicts several labels that can apply together.
+
+</DataTypePage>

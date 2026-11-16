@@ -1,0 +1,300 @@
+---
+title: Custom data modules
+description: Connect restartable sources, adapt mapping datasets, and understand the encoded-batch contract before replacing the loader.
+---
+
+import DataViews from '../../../components/DataViews.astro';
+import { repeatPurchaseSchema } from '../../../data/schema-examples';
+import { repeatPurchase } from '../../../data/observations';
+
+Connect a source that the built-in loaders do not already handle. Use
+`rf.CustomDataModule` for Python records, or `rf.ArrowDataModule` when your
+connector already returns Arrow. A complete Lightning data module is useful
+when you also need to replace batching and loader scheduling.
+
+The examples use the 0.5.0 API and application-supplied files.
+
+## Choose the boundary you need
+
+| Your source or requirement | Start with | What you own |
+| --- | --- | --- |
+| Files, a directory, or a glob | `rf.source(...)` with `rf.ArrowDataModule` | Prepared observations and split selection. |
+| An Arrow Dataset or a connector returning Arrow batches | `rf.ArrowDataModule` with a Dataset or restartable factory | A fresh scan and stable Arrow schema on every pass. |
+| A Python dataset yielding mappings | `rf.CustomDataModule` | A restartable `IterableDataset` and an explicit source schema. |
+| A generator function yielding mappings | `rf.SyntheticDataModule` | A callable that creates a new iterator. |
+| A custom sampling or encoded-batch pipeline | A Lightning data module | Batching, model ownership, device transfer, distributed ownership, and the encoded-batch contract. |
+
+`rf.CustomDataModule` is an adapter over the Arrow pipeline. It converts bounded
+groups of mappings once, then uses the same preprocessing, schema queries,
+shuffling, batching, and tensorization as `rf.ArrowDataModule`.
+The [adapter implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/datasets/custom.py#L115)
+defines that boundary.
+
+## Keep one decision in each source record
+
+For repeat purchases, the decision is whether a customer buys again within
+30 days. Each source record contains that customer's known orders at one
+cutoff. Training and validation records also contain the completed outcome;
+prediction records omit it.
+
+<DataViews id="custom-module-purchase-data" dataset={repeatPurchase} schema={repeatPurchaseSchema} />
+
+Neither an ingress chunk nor a training batch changes this observation boundary.
+Do not split the orders into independent customers when grouping source rows.
+The application still prepares joins, cutoffs, and evaluation splits before
+the data module receives them.
+
+## Adapt a mapping dataset
+
+This example reads application-prepared JSON Lines files. Each nonempty line is
+one complete mapping with the nested fields shown above. Opening the file inside
+`__iter__` makes every pass start with a fresh reader, including validation passes.
+
+```python
+import json
+from collections.abc import Iterator, Mapping
+from pathlib import Path
+
+import polars as pl
+import pyarrow as pa
+from torch.utils.data import IterableDataset
+
+import relflow as rf
+
+
+class JsonLines(IterableDataset[Mapping[str, object]]):
+    """A restartable stream of complete observation mappings."""
+
+    def __init__(self, path: str) -> None:
+        self.path = Path(path)
+
+    def __iter__(self) -> Iterator[Mapping[str, object]]:
+        with self.path.open(encoding="utf-8") as stream:
+            for line in stream:
+                if line.strip():
+                    yield json.loads(line)
+
+
+class Order(rf.Branch):
+    """One order known at the customer's prediction cutoff."""
+
+    amount = rf.Number
+    category = rf.Category
+    days_ago = rf.Number
+
+
+class Customer(rf.Model):
+    """A customer history and its future-purchase target."""
+
+    days_since_signup = rf.Number
+    orders = Order(length=32, overflow="tail")
+    returns_in_30d = rf.Boolean(mask=True)
+
+
+training_schema: pa.Schema = pa.schema([
+    ("customer_id", pa.string()),
+    ("days_since_signup", pa.float64()),
+    ("orders", pa.list_(pa.struct([
+        ("amount", pa.float64()),
+        ("category", pa.string()),
+        ("days_ago", pa.float64()),
+    ]))),
+    ("returns_in_30d", pa.bool_()),
+])
+request_schema: pa.Schema = training_schema.remove(
+    training_schema.get_field_index("returns_in_30d")
+)
+
+
+if __name__ == "__main__":
+    model = Customer(preset="small")
+    data = rf.CustomDataModule(
+        train=JsonLines("data/train.jsonl"),
+        validate=JsonLines("data/validation.jsonl"),
+        predict=JsonLines("data/requests.jsonl"),
+        arrow_schema={
+            "train": training_schema,
+            "validate": training_schema,
+            "predict": request_schema,
+        },
+        ingress_rows=2048,
+        shuffle_rows=8192,
+        num_workers=0,
+        pin_memory=False,
+        seed=2026,
+        retain=("customer_id",),
+    )
+    model.fit(
+        data,
+        batch_size=128,
+        learning_rate=1e-3,
+        max_epochs=8,
+        accelerator="cpu",
+        devices=1,
+    )
+    predictions: pl.DataFrame = model.predict(datamodule=data)
+```
+
+The Python dataset yields mappings, not tensors or batches of mappings.
+`CustomDataModule` checks that each item is a mapping with string keys. The
+Arrow schema fixes the physical types, including empty order lists, before
+the model schema chooses their learned representations. `customer_id` is
+retained for matching results and is outside the model's input schema.
+
+When `arrow_schema` is a mapping, its keys must exactly match the configured
+splits. The prediction split intentionally has a different source schema
+because it omits the answer. Without an explicit schema, the adapter infers
+from its first ingress chunk; empty sources, all-null top-level fields, and
+fields introduced in later chunks require an explicit schema. Both source and
+preprocessed schemas are then checked on later scans.
+See the [schema and restart tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_arrow_datamodules.py#L949).
+
+## Separate ingress, shuffle, and model batches
+
+| Setting in the example | Meaning |
+| --- | --- |
+| `ingress_rows=2048` | Convert up to 2,048 Python mappings to one Arrow batch. |
+| `shuffle_rows=8192` | Bound the streaming training shuffle buffer. |
+| `fit(batch_size=128)` | Put up to 128 outer observations in a model batch per device. |
+| `Order(length=32, overflow="tail")` | Keep the latest 32 orders inside each already ordered customer observation. |
+
+An ingress chunk is not a model batch. Larger mapping chunks can reduce
+conversion overhead while increasing temporary memory. A shuffle buffer mixes
+observations; it does not shuffle orders between customers. A branch cap bounds
+the retained history, but the source must separately bound any larger candidate
+history it reads.
+
+For a potentially unbounded factory, set an `epoch_size` budget. With shuffling,
+the Arrow pipeline limits its candidate window to
+`max(epoch_size, 2 * shuffle_rows)` rows before applying the epoch cap; without
+shuffling, it limits that window to the cap. These limits apply after
+preprocessing and sampling; an ingress chunk or connector can read more source
+rows before the pipeline slices it. This is a row budget, not a wall-clock
+timeout or an acknowledgement protocol for a message queue.
+The [iteration implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/datasets/arrow.py#L498)
+defines these limits.
+
+## Return a fresh Arrow stream from a connector
+
+If a connector already emits Arrow, avoid converting it to Python rows just to
+use `CustomDataModule`. Supply a top-level callable to `ArrowDataModule`. This
+example reads an Arrow IPC stream and scopes both file and reader to one pass:
+
+```python
+from collections.abc import Iterator
+
+import pyarrow as pa
+import relflow as rf
+
+
+def training_batches() -> Iterator[pa.RecordBatch]:
+    with pa.OSFile("exports/train.arrow", "rb") as stream:
+        with pa.ipc.open_stream(stream) as reader:
+            yield from reader
+
+
+data = rf.ArrowDataModule(
+    train=training_batches,
+    validate="exports/validation.parquet",
+    num_workers=0,
+    pin_memory=False,
+)
+```
+
+Pass the callable itself. A factory must return a fresh reader or iterable of
+Arrow tables or record batches; returning a single table is not the factory
+contract. A `pa.Table` can be passed directly instead. Pass an Arrow Dataset
+rather than a configured Scanner, and create a new RecordBatchReader on each
+factory call rather than sharing a consumed reader. An empty factory must still
+declare its schema through a reader or an empty Arrow unit.
+
+Keep the returned schema stable across units and passes, including metadata.
+Missing fields and changing list element types are schema drift, not automatic
+schema mutation. Factory sources do not support dataset-scoped preprocessing
+in this revision; use partition-scoped preprocessing or prepare a materialized
+source first. See [source acceptance and schema locking](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/datasets/arrow.py#L113).
+
+## Treat workers and distributed ranks as separate owners
+
+For the built-in Arrow-backed modules, let relflow assign source ownership.
+Do not also shard the supplied mapping dataset by rank or worker: that would
+apply another partitioning policy before relflow divides the stream.
+
+- **Workers:** ordinary training, validation, and test loading divide file
+  manifests, alternate stream units, or stride in-memory rows before
+  preprocessing. Prediction, an epoch cap, or dataset-scoped preprocessing
+  requires coordinated replay instead. A generic factory may therefore be
+  opened by several consumers; an external destructive queue is not a
+  repeatable source.
+- **Distributed ranks:** ranks must replay the same logical stream in the same
+  order so they can take disjoint rows from global superbatches. A short final
+  superbatch gives every rank a step; some ranks can receive zero rows. With
+  `drop_last=True`, the incomplete global tail is dropped.
+- **Spawned workers:** put dataset classes and factories at module scope, open
+  live resources inside each iteration, and keep construction and fitting under
+  the `__main__` guard. Keep `pin_memory=False` when using worker processes.
+
+Changing worker count, batching, or source order can also change sampled history
+windows and masking plans. Seeded replay requires the same consumer plan, not
+just the same integer seed. The
+[worker and distributed ownership tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_arrow_datamodules.py#L267)
+cover these structural guarantees; they are not a throughput benchmark.
+
+## Understand the contract before replacing the loader
+
+A plain Lightning data module is accepted by `model.fit`, but an arbitrary
+`(features, labels)` batch does not satisfy the relflow model's batch contract.
+
+| Path | What the model expects |
+| --- | --- |
+| Built-in Arrow-backed data modules | An encoded batch retaining tensor inputs, Arrow source, extension observations, and resource bindings. |
+| Custom training, validation, or test loader | Compatible tensor inputs, such as the TensorDict returned by `model.encode(...)`, with the correct stratum and batch axis. |
+| Data-module prediction | Encoded batches retaining their Arrow source so collection geometry, retained columns, and prediction writing remain aligned. |
+
+`model.encode(table, strata="train")` returns a TensorDict and immediately
+applies training observation updates. It is not a pure serialization step.
+Its direct input can be an eager Polars frame, an Arrow table, or a record batch.
+Encoding a whole epoch in advance changes when vocabulary and statistics are
+updated and can freeze encoding-time sampling. Validation, test, and prediction
+encoding must use their corresponding strata. Do not encode evaluation records
+as training just to admit their vocabulary.
+
+Do not move `model.encode` into an arbitrary worker collator and expect it to
+replace model-process learning. The built-in pipeline carries pristine
+observations and resource bindings back from workers; a plain TensorDict does
+not carry that handoff.
+
+A plain TensorDict is sufficient for the supported training/evaluation step
+boundary, but it is not a complete data-module prediction batch. The latter
+needs the Arrow carrier produced by the data pipeline. Keep that pipeline for
+prediction rather than reconstructing an internal batch wrapper. The
+[step contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/runtime.py#L455)
+explicitly enforces this distinction.
+
+When subclassing a built-in module or composing its loaders, preserve these
+invariants:
+
+- **Model ownership:** `fit`, `validate`, `test`, and `predict` bind an unbound
+  built-in module. Direct loader access needs `data.bind(model)` first. A bound
+  module cannot be reused with a different loaded model; construct another one.
+- **Batch size:** built-in loaders read `model.batch_size` when created. A
+  custom Lightning loader owns its own size; passing `batch_size` to `fit`
+  does not rewrite that loader.
+- **Device transfer:** preserve the model's `on_before_batch_transfer` resource
+  binding and `transfer_batch_to_device` behavior. Tensor payloads move to the
+  accelerator; Arrow source stays on CPU. Dropping these hooks can break
+  extension resources, especially before distributed forward execution.
+- **Nested geometry:** preserve the complete encoded TensorDict, including
+  structural entries under the reserved root address `/`. Do not infer record
+  lengths or null collections from leaf values or independently slice siblings.
+  A null collection, an empty collection, and a null record slot are different
+  structures.
+
+The [binding and transfer hooks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/root.py#L1092)
+and [data-module binding contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/datasets/arrow.py#L870)
+are the implementation reference for this revision.
+
+Continue with [data modules and data flow](/advanced/data-modules/) for the six
+application examples, [Category](/data-types/category/) for vocabulary
+inspection, or the [API map](/api-map/#api-rf-customdatamodule) for related
+classes and methods.

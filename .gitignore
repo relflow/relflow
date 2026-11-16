@@ -1,0 +1,43 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+.cache/
+wheels/
+*.egg-info
+.coverage
+.coverage.*
+coverage.xml
+coverage.json
+htmlcov/
+junit*.xml
+test-results/
+
+# Virtual environments
+.venv
+
+.DS_Store
+wandb/
+.vscode/
+.python-version
+
+private/
+
+*.ckpt
+
+/specs
+
+# Static documentation and evidence output
+.pytest_cache/
+.ruff_cache/
+docs/assets/evidence-plots/
+evidence/runs/
+/_readthedocs/
+# Private local schema preview
+/sites/schema-declarations/
+
+# Native build output
+/native/target/
+/native/python/relflow_native/native*.so
+/native/python/relflow_native/native*.pyd

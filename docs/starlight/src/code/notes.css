@@ -1,0 +1,71 @@
+.expressive-code .rf-code-note {
+  text-decoration-line: underline;
+  text-decoration-style: dotted;
+  text-decoration-color: var(--rf-muted);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.22em;
+  cursor: pointer;
+  border-radius: 0.1rem;
+}
+
+.expressive-code .rf-code-note:hover,
+.expressive-code .rf-code-note[data-note-open] {
+  background: var(--sl-color-accent-low);
+  text-decoration-color: var(--sl-color-text-accent);
+}
+
+.expressive-code .rf-code-note:focus-visible {
+  outline: 2px solid var(--sl-color-text-accent);
+  outline-offset: 3px;
+}
+
+.rf-code-tooltip {
+  position: fixed;
+  inset: auto;
+  z-index: 100;
+  box-sizing: border-box;
+  width: min(22rem, calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--rf-border);
+  border-radius: 0.45rem;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  box-shadow: 0 0.25rem 1rem rgb(0 0 0 / 14%);
+  font-family: var(--sl-font);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.rf-code-tooltip[hidden] {
+  display: none !important;
+}
+.rf-code-tooltip::backdrop {
+  background: transparent;
+}
+.rf-code-tooltip__title {
+  display: block;
+  margin: 0 0 0.35rem;
+  color: var(--rf-ink);
+  font-size: 0.86rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+.rf-code-tooltip__text {
+  margin: 0;
+  color: var(--rf-muted);
+}
+
+@media (forced-colors: active) {
+  .expressive-code .rf-code-note {
+    text-decoration-color: LinkText;
+  }
+  .rf-code-tooltip {
+    border-color: CanvasText;
+  }
+}

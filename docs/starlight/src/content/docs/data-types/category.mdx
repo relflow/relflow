@@ -1,0 +1,152 @@
+---
+title: Category
+description: Learn a vocabulary of scalar labels from training data.
+---
+
+import TypeChoice from '../../../components/TypeChoice.astro';
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Category` for one label whose vocabulary comes from your data:
+a product category, a region, or a support queue. relflow maintains the
+vocabulary during training, so you do not need to build an integer encoding
+or one-hot columns first.
+
+<TypeChoice group="labels" />
+
+<DataTypePage name="Category">
+
+## Input values
+
+Labels may be strings, integers, floating-point values, Booleans, or
+bytes. Use one compatible scalar type within a field. Numeric labels are
+identities: their numerical distance has no meaning to `Category`. Use
+[Number](/data-types/number/) when magnitude matters.
+
+Training can admit new labels. Validation, test, and prediction reuse the
+learned vocabulary. An unfamiliar input label remains a valued input with
+unavailable label content; it is distinct from a null. A newly admitted label
+still needs training before the model learns what that label means.
+
+Floating-point NaN uses the `other` state rather than becoming a label.
+
+## Standardization and processor pipelines
+
+String labels can be stripped or lowercased before vocabulary lookup.
+The vocabulary maps each admitted scalar label to a learned embedding row;
+the content embedding is combined with the field’s state embedding.
+
+Only training admits new labels. Unknown input content contributes no known
+label embedding, while its state stays `valued`. Newly admitted rows begin
+neutral and need subsequent training exposure to learn a representation.
+`p_unavailable` hides known input content during training without changing
+the reconstruction answer.
+
+## How is this leaf trained?
+
+The state head uses cross-entropy. Content reconstruction uses multiclass
+cross-entropy over populated vocabulary labels. Unknown target identities
+supply no label-classification loss; they are still counted when reporting
+target vocabulary coverage.
+
+A softmax supplies the returned class probabilities. Spare allocation and
+the unavailable sentinel are not prediction classes.
+
+### Predictions
+
+A decoded target returns the selected label in `content.value` and its
+probability in `content.probability`. Labels are written as strings.
+Predictions select labels from the populated vocabulary; target labels outside
+that vocabulary cannot be returned.
+
+<ValueTree
+  id="category-predictions"
+  {...outputs.category}
+  predictions
+  heading="Illustrative prediction output"
+  label="Category prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `topk` | `None` | Request ranked candidates and top-k metrics, such as `topk=[3]`. Values must be integers greater than one. |
+| `strip` | `False` | Trim surrounding whitespace from string labels before lookup. |
+| `cased` | `True` | Set `cased=False` to lowercase string labels before lookup. |
+| `p_unavailable` | `0.01` | Hide known input label content at this rate during training; reconstruction targets stay intact. |
+
+String matching is exact by default. When folding is enabled, vocabulary
+snapshots and predictions carry the folded labels. Top-k output is capped by
+the number of known labels; the largest requested `k` determines its width.
+
+### Request methods
+
+Inspect a field by passing its absolute schema address. These helpers return
+snapshots, so inspecting or changing the returned values does not modify the
+model. For a trained model with a Category field at `/next_category`:
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `vocabulary(source, address)` | A tuple of populated labels | Read the unique labels admitted to this field, in vocabulary order. |
+| `counts(model, address)` | A dictionary mapping each populated label to an integer | Inspect observed training exposure for the vocabulary, excluding the internal prior. |
+
+```python
+labels: tuple[str, ...] = rf.Category.vocabulary(model, "/next_category")
+counts: dict[str, int] = rf.Category.counts(model, "/next_category")
+```
+
+`vocabulary` accepts either a model or its `interprocess_encoding_context`;
+`counts` requires the model. Labels retain their scalar types and any configured
+string folding. A populated label may still have a zero count; admission alone
+does not establish training exposure or a useful learned representation.
+Repeated training exposure can increase counts, so they are not counts of
+unique observations.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| Invalid `topk` or `p_unavailable` | Configuration validation rejects the option. | Use top-k integers greater than one and an allowed probability. |
+| A container or incompatible mixture of label families | The source values do not satisfy the scalar-label contract. | Use one compatible scalar family, Set for memberships, or Branch for records. |
+| An inspection helper targets a missing or different leaf | `KeyError` or `TypeError` identifies the address or source mismatch. | Use the Category field’s absolute address and the supported model/context source. |
+
+### Footguns
+
+- **Reporting known-label accuracy as accuracy on every answer.** Check target
+  vocabulary coverage and score all held-out rows. In recorded 0.4.2
+  [P056](/evidence/#P056), known-label accuracy was 100% while all-row accuracy
+  was 50%; unfamiliar target labels could not be returned.
+- **Expecting a new identifier's spelling to supply its meaning.** Unknown
+  categorical content shares a fallback, so retain useful context and evaluate
+  new-identity cohorts explicitly. Recorded 0.4.2 [P055](/evidence/#P055)
+  checks that renaming unfamiliar labels does not change predictions.
+- **Calling vocabulary admission “learning.”** After admitting labels,
+  continue fitting with examples of new and existing labels, then check both
+  cohorts. Recorded 0.4.2 [P059](/evidence/#P059) separates admission from
+  the subsequent fitting that learned its new labels.
+- **Forcing every new identity to a uniform prediction.** Other visible
+  fields can still carry decisive information. Evaluate confidence with that
+  context intact: recorded 0.4.2 [P061](/evidence/#P061) distinguishes weak
+  and strong context for previously unseen input identities.
+
+## Relevant evidence
+
+<LeafEvidence type="Category" />
+
+### Related types
+
+- [Group](/data-types/group/) lets repeated identities share learned representations through a prediction task.
+- [Ordinal](/data-types/ordinal/) preserves an explicit label ordering.
+
+- [Enum](/data-types/enum/) declares every allowed label in advance and rejects other labels.
+- [Set](/data-types/set/) represents several labels on the same record.
+- [Hash](/data-types/hash/) preserves identifier matching without a learned identity vocabulary.
+
+For admission, unknown labels, and continued training, see
+[Online vocabulary](/advanced/online-vocabulary/).
+
+</DataTypePage>

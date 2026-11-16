@@ -1,0 +1,346 @@
+{
+  "schema": 1,
+  "source": {
+    "artifact": {
+      "digest": "sha256:e046078f30fec596ff49dfb6945f36af8485dbde87016532117bca9e8311b1b0",
+      "id": 13525390929,
+      "name": "relflow-evidence-attempt-1"
+    },
+    "executor_sha": "f71d59490ed397a650c84524cad61ecabec1cfa8",
+    "head_sha": "b1f616ebef4c03e02c3d7ecd1ee0e5e9c4a82bdc",
+    "repository": "relflow/relflow",
+    "run_attempt": 1,
+    "run_id": 42256336241,
+    "suite_sha": "c60f359c4f1c62a089870fcf37c27c32146159b5"
+  },
+  "tasks": {
+    "P001": {
+      "baseline": 52.985987,
+      "candidate": 52.624077
+    },
+    "P002": {
+      "baseline": 57.169283,
+      "candidate": 56.381718
+    },
+    "P003": {
+      "baseline": 20.572529,
+      "candidate": 20.423412
+    },
+    "P004": {
+      "baseline": 29.021887,
+      "candidate": 29.773563
+    },
+    "P005": {
+      "baseline": 28.641451,
+      "candidate": 28.725006
+    },
+    "P006": {
+      "baseline": 94.417331,
+      "candidate": 93.395262
+    },
+    "P007": {
+      "baseline": 48.03316,
+      "candidate": 46.745108
+    },
+    "P008": {
+      "baseline": 22.062983,
+      "candidate": 22.298309
+    },
+    "P009": {
+      "baseline": 11.317073,
+      "candidate": 11.362093
+    },
+    "P010": {
+      "baseline": 149.817405,
+      "candidate": 152.427574
+    },
+    "P011": {
+      "baseline": 85.04011,
+      "candidate": 84.045345
+    },
+    "P012": {
+      "baseline": 127.229047,
+      "candidate": 125.766048
+    },
+    "P013": {
+      "baseline": 11.601066,
+      "candidate": 11.608378
+    },
+    "P014": {
+      "baseline": 47.542689,
+      "candidate": 47.522562
+    },
+    "P015": {
+      "baseline": 18.259923,
+      "candidate": 18.190384
+    },
+    "P016": {
+      "baseline": 102.985759,
+      "candidate": 102.348307
+    },
+    "P017": {
+      "baseline": 16.969134,
+      "candidate": 16.794863
+    },
+    "P018": {
+      "baseline": 32.778022,
+      "candidate": 33.2659
+    },
+    "P019": {
+      "baseline": 4.999021,
+      "candidate": 4.990279
+    },
+    "P020": {
+      "baseline": 20.58407,
+      "candidate": 20.282113
+    },
+    "P021": {
+      "baseline": 61.794358,
+      "candidate": 61.501445
+    },
+    "P022": {
+      "baseline": 46.306594,
+      "candidate": 45.877599
+    },
+    "P023": {
+      "baseline": 41.203677,
+      "candidate": 40.740559
+    },
+    "P024": {
+      "baseline": 99.445253,
+      "candidate": 98.680119
+    },
+    "P025": {
+      "baseline": 314.733178,
+      "candidate": 314.667125
+    },
+    "P026": {
+      "baseline": 120.712165,
+      "candidate": 122.934618
+    },
+    "P027": {
+      "baseline": 408.031799,
+      "candidate": 416.679569
+    },
+    "P028": {
+      "baseline": 56.453301,
+      "candidate": 55.511652
+    },
+    "P029": {
+      "baseline": 29.92587,
+      "candidate": 30.268439
+    },
+    "P030": {
+      "baseline": 84.129615,
+      "candidate": 83.60641
+    },
+    "P031": {
+      "baseline": 82.271006,
+      "candidate": 81.820873
+    },
+    "P032": {
+      "baseline": 170.000634,
+      "candidate": 171.244813
+    },
+    "P033": {
+      "baseline": 184.901567,
+      "candidate": 183.286561
+    },
+    "P034": {
+      "baseline": 117.149824,
+      "candidate": 116.176646
+    },
+    "P035": {
+      "baseline": 99.565405,
+      "candidate": 98.29724
+    },
+    "P036": {
+      "baseline": 173.950715,
+      "candidate": 173.756764
+    },
+    "P037": {
+      "baseline": 96.597448,
+      "candidate": 96.272172
+    },
+    "P038": {
+      "baseline": 10.022775,
+      "candidate": 10.043226
+    },
+    "P039": {
+      "baseline": 25.537517,
+      "candidate": 25.311777
+    },
+    "P040": {
+      "baseline": 6.110333,
+      "candidate": 5.893125
+    },
+    "P041": {
+      "baseline": 11.52371,
+      "candidate": 11.596324
+    },
+    "P042": {
+      "baseline": 27.461364,
+      "candidate": 27.352639
+    },
+    "P043": {
+      "baseline": 10.204518,
+      "candidate": 10.014363
+    },
+    "P044": {
+      "baseline": 25.981535,
+      "candidate": 25.940665
+    },
+    "P045": {
+      "baseline": 10.54854,
+      "candidate": 10.223917
+    },
+    "P046": {
+      "baseline": 18.293497,
+      "candidate": 18.161721
+    },
+    "P047": {
+      "baseline": 157.612371,
+      "candidate": 158.6804
+    },
+    "P048": {
+      "baseline": 68.182205,
+      "candidate": 69.036798
+    },
+    "P049": {
+      "baseline": 17.305271,
+      "candidate": 17.373271
+    },
+    "P050": {
+      "baseline": 52.518129,
+      "candidate": 52.414798
+    },
+    "P051": {
+      "baseline": 18.354256,
+      "candidate": 18.307073
+    },
+    "P052": {
+      "baseline": 23.167793,
+      "candidate": 22.833156
+    },
+    "P053": {
+      "baseline": 33.069695,
+      "candidate": 33.128973
+    },
+    "P054": {
+      "baseline": 39.826413,
+      "candidate": 39.600458
+    },
+    "P055": {
+      "baseline": 21.384486,
+      "candidate": 21.227967
+    },
+    "P056": {
+      "baseline": 15.511869,
+      "candidate": 15.100262
+    },
+    "P057": {
+      "baseline": 16.176812,
+      "candidate": 15.843587
+    },
+    "P058": {
+      "baseline": 17.885838,
+      "candidate": 17.696237
+    },
+    "P059": {
+      "baseline": 22.701078,
+      "candidate": 23.03881
+    },
+    "P060": {
+      "baseline": 35.513479,
+      "candidate": 35.898566
+    },
+    "P061": {
+      "baseline": 48.822886,
+      "candidate": 48.605614
+    },
+    "P062": {
+      "baseline": 17.624242,
+      "candidate": 17.393686
+    },
+    "P063": {
+      "baseline": 24.582119,
+      "candidate": 24.129024
+    },
+    "P064": {
+      "baseline": 24.222409,
+      "candidate": 24.074688
+    },
+    "P065": {
+      "baseline": 18.547801,
+      "candidate": 18.281962
+    },
+    "P066": {
+      "baseline": 64.139456,
+      "candidate": 64.08993
+    },
+    "P067": {
+      "baseline": 12.776228,
+      "candidate": 12.799113
+    },
+    "P068": {
+      "baseline": 13.057623,
+      "candidate": 13.072296
+    },
+    "P069": {
+      "baseline": 18.133151,
+      "candidate": 17.788264
+    },
+    "P070": {
+      "baseline": 21.66229,
+      "candidate": 21.805838
+    },
+    "P071": {
+      "baseline": 107.251314,
+      "candidate": 107.699661
+    },
+    "P072": {
+      "baseline": 78.29006,
+      "candidate": 79.686564
+    },
+    "P073": {
+      "baseline": 45.798078,
+      "candidate": 46.146729
+    },
+    "P074": {
+      "baseline": 22.963212,
+      "candidate": 23.119359
+    },
+    "P075": {
+      "baseline": 167.951553,
+      "candidate": 168.684359
+    },
+    "P076": {
+      "baseline": 31.278804,
+      "candidate": 31.353641
+    },
+    "P077": {
+      "baseline": 106.76673,
+      "candidate": 107.144689
+    },
+    "P078": {
+      "baseline": 84.106911,
+      "candidate": 83.808845
+    },
+    "P079": {
+      "baseline": 304.038259,
+      "candidate": 305.437846
+    },
+    "P080": {
+      "baseline": 178.448905,
+      "candidate": 178.678553
+    },
+    "P081": {
+      "baseline": 118.809429,
+      "candidate": 122.35266
+    },
+    "P082": {
+      "baseline": 347.51817,
+      "candidate": 338.738789
+    }
+  }
+}

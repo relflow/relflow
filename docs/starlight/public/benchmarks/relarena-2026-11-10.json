@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "kind": "published_benchmark_snapshot",
+  "observed_on": "2026-11-10",
+  "source": {
+    "url": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/README.md#-leaderboards",
+    "repository": "PriorLabs/relarena",
+    "document": "README.md",
+    "revision": "fa4f1468c02b7dafd0c7b107544a887b83ca04c1",
+    "committed_at": "2026-11-10T13:49:31Z",
+    "document_sha256": "fd33c4d658e7eddffae3e06bffbb8574855e6f0ed094d60689787deed77172fb"
+  },
+  "benchmark": {
+    "name": "RelArena-alpha",
+    "task_suite": "RelBench v1 entity-level prediction",
+    "tasks": 21,
+    "databases": 7,
+    "seed": 0,
+    "ranking": "Elo",
+    "bootstrap_samples": 100,
+    "interval_percentiles": [
+      2.5,
+      97.5
+    ]
+  },
+  "entry": "relflow-2026-11-04",
+  "standings": {
+    "models": {
+      "rank": 3,
+      "entries": 13,
+      "elo": 1897.1,
+      "bootstrap_interval": [
+        1776.1,
+        2041.9
+      ]
+    },
+    "models_and_systems": {
+      "rank": 4,
+      "entries": 17,
+      "elo": 1865.3,
+      "bootstrap_interval": [
+        1781.3,
+        1984.4
+      ]
+    }
+  },
+  "scope": "Prepared extract of the pinned public aggregate tables and selected per-task scores. No new model execution was performed. Comparisons use the shared single-seed benchmark results.",
+  "results_source": {
+    "url": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/baseline_results/results.csv",
+    "sha256": "46f0a1d642349224d335c9361ee00ca9f0ab0483de4d8c8a065eb9e9b5f3a123",
+    "selection": "selected=True; model entries; seed=0"
+  },
+  "million_observation_comparison": {
+    "definition": "Published relflow selected-row config.training_rows > 1000000; original inner training anchors, not all source records or the final train+validation refit size.",
+    "tasks": 9,
+    "minimum_training_observations": 1360743,
+    "maximum_training_observations": 5488184,
+    "win_definition": "Strictly greater selected held-out ROC AUC, or strictly lower selected held-out MAE.",
+    "wins": {
+      "tabpfn-rel-client-2026-08-15": 9,
+      "tabpfn-rel-client-2026-09-28": 6,
+      "tabpfn-rel-local-2026-08-15": 9,
+      "tabpfn-rel-local-2026-09-28": 6
+    },
+    "rows": [
+      {
+        "dataset": "rel-amazon",
+        "task": "item-churn",
+        "metric": "roc_auc",
+        "training_observations": 2536014,
+        "relflow_score": 0.8300385609468495,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.8279955929355153,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.8286527397830145,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.8278570732636555,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.8276848113436708,
+            "relflow_wins": true
+          }
+        }
+      },
+      {
+        "dataset": "rel-amazon",
+        "task": "item-ltv",
+        "metric": "mae",
+        "training_observations": 2707679,
+        "relflow_score": 39.8579934533261,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 46.76818119562782,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 45.27051479241541,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 47.768328364959885,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 45.349611919727955,
+            "relflow_wins": true
+          }
+        }
+      },
+      {
+        "dataset": "rel-amazon",
+        "task": "user-churn",
+        "metric": "roc_auc",
+        "training_observations": 4708383,
+        "relflow_score": 0.7123158681716346,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.7086491891485106,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.7116975645100978,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.7024030187395066,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.7066695514511213,
+            "relflow_wins": true
+          }
+        }
+      },
+      {
+        "dataset": "rel-amazon",
+        "task": "user-ltv",
+        "metric": "mae",
+        "training_observations": 4708383,
+        "relflow_score": 13.87528672329461,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 14.35821180025244,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 13.877122272542712,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 14.400940148306976,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 13.88577099426453,
+            "relflow_wins": true
+          }
+        }
+      },
+      {
+        "dataset": "rel-hm",
+        "task": "item-sales",
+        "metric": "mae",
+        "training_observations": 5488184,
+        "relflow_score": 0.0445304519473717,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.06050739108093068,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.0364787779830473,
+            "relflow_wins": false
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.0613622229990495,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.0365385235837179,
+            "relflow_wins": false
+          }
+        }
+      },
+      {
+        "dataset": "rel-hm",
+        "task": "user-churn",
+        "metric": "roc_auc",
+        "training_observations": 3832692,
+        "relflow_score": 0.7085057524696476,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.7052152396487823,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.7060214083108701,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.7056902013553468,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.705416000194907,
+            "relflow_wins": true
+          }
+        }
+      },
+      {
+        "dataset": "rel-stack",
+        "task": "post-votes",
+        "metric": "mae",
+        "training_observations": 2453921,
+        "relflow_score": 0.063615881895169,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.06788175450819699,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.0627329871405511,
+            "relflow_wins": false
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.0679574267388494,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.0628415549809546,
+            "relflow_wins": false
+          }
+        }
+      },
+      {
+        "dataset": "rel-stack",
+        "task": "user-badge",
+        "metric": "roc_auc",
+        "training_observations": 3386276,
+        "relflow_score": 0.8931522850062874,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.8803863055267221,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.8834433132787123,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.8634698165821446,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.8846334560946378,
+            "relflow_wins": true
+          }
+        }
+      },
+      {
+        "dataset": "rel-stack",
+        "task": "user-engagement",
+        "metric": "roc_auc",
+        "training_observations": 1360743,
+        "relflow_score": 0.9071239366676848,
+        "baselines": {
+          "tabpfn-rel-client-2026-08-15": {
+            "test_score": 0.9059940164322988,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-client-2026-09-28": {
+            "test_score": 0.9076619476134612,
+            "relflow_wins": false
+          },
+          "tabpfn-rel-local-2026-08-15": {
+            "test_score": 0.905834237356288,
+            "relflow_wins": true
+          },
+          "tabpfn-rel-local-2026-09-28": {
+            "test_score": 0.9077414258983942,
+            "relflow_wins": false
+          }
+        }
+      }
+    ]
+  }
+}

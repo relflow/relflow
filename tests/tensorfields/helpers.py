@@ -1,0 +1,54 @@
+"""Shared tensorfield construction for focused extension tests."""
+
+from dataclasses import replace
+
+import torch
+
+from relflow.data.ragged import Projection
+from relflow.structs.enums import Strata
+from relflow.structs.experiment import Schema
+from relflow.structs.tree import Address
+from relflow.tensorfields.base import Context, Extension, TensorFieldBase
+
+
+def tensorize(
+    tensorfield: type[TensorFieldBase],
+    projection: Projection,
+    extension: Extension,
+    *,
+    address: Address | str,
+    schema: Schema,
+    strata: Strata,
+    context: Context = Context(),
+) -> TensorFieldBase:
+    """Exercise an isolated extension with coalesced geometry and caller-owned resources.
+
+    Model-level tests cover worker batching, binding, and resource learning;
+    component tests here deliberately control vocabulary snapshots and hash salts.
+    """
+
+    address = Address(address)
+    values = extension.prepare(projection.pristine.values, address=address)
+    extension.observe(
+        field=replace(projection.pristine, values=values),
+        address=address,
+        schema=schema,
+        state=context.state,
+        learn=strata == Strata.train,
+    )
+    input, target = projection.split(values)
+    shape = input.shape
+    return tensorfield.new(
+        input=input,
+        target=target,
+        present=torch.from_numpy(projection.present).reshape(shape),
+        trainable=torch.from_numpy(projection.trainable).reshape(shape),
+        inferred=torch.from_numpy(projection.inferred).reshape(shape),
+        address=address,
+        schema=schema,
+        strata=strata,
+        context=context,
+    )
+
+
+__all__ = ["tensorize"]

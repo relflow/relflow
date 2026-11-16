@@ -1,0 +1,464 @@
+from types import SimpleNamespace
+
+import pyarrow as pa
+import pydantic
+import pytest
+import torch
+from tensordict import TensorDict
+
+import relflow as rf
+from relflow.architecture import runtime
+from relflow.data.ragged import coalesce
+from relflow.helpers.optimizers import adamw
+from relflow.structs.enums import Strata, TensorKey, Tokens
+from relflow.structs.experiment import Schema
+from relflow.structs.packages import Prediction
+from relflow.structs.tree import Mask
+from relflow.tensorfields.base import TENSORFIELDS, TensorInput
+from relflow.tensorfields.extensions.vector import Decoder, Embedder, TensorField, loss, write
+from relflow.tensorfields.extensions.vector import output as output_type
+from relflow.tensorfields.shared.jitter import Jitter
+from tests.arrow import table as arrow_table
+from tests.tensorfields.helpers import tensorize
+
+ADDRESS = "/items/embedding"
+
+
+def build_schema(
+    *,
+    n_dim: int = 3,
+    objective: str = "l2",
+    mask: bool | Mask = False,
+    jitter: Jitter | dict[str, object] | None = None,
+) -> Schema:
+    options = {} if jitter is None else {"jitter": jitter}
+    return rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        items=rf.Branch(length=2, embedding=rf.Vector(n_dim=n_dim, objective=objective, mask=mask, **options)),
+    )
+
+
+def values() -> list:
+    return [
+        [[[0.1, 0.2, 0.3], [0.4, 0.5, 0.6]]],
+        [[[0.7, 0.8, 0.9], [1.0, 1.1, 1.2]]],
+    ]
+
+
+def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
+    batch = arrow_table([{"items": [{"embedding": value} for value in root]} for (root,) in values])
+    projection = coalesce(batch, schema=schema, strata=strata).fields[ADDRESS]
+    return tensorize(
+        TensorField,
+        projection,
+        TENSORFIELDS["vector"],
+        address=ADDRESS,
+        schema=schema,
+        strata=strata,
+    )
+
+
+def test_vector_request_is_available_in_structure():
+    schema = build_schema()
+    request = schema.requests[ADDRESS]
+    assert request.type == "vector"
+    assert request.n_dim == 3
+
+
+def test_vector_request_rejects_non_positive_n_dim():
+    with pytest.raises(ValueError, match="greater than 0"):
+        build_schema(n_dim=0)
+
+
+@pytest.mark.parametrize("normalize", [True, False])
+def test_vector_request_hydrates_jitter_from_a_mapping(normalize: bool):
+    schema = build_schema(jitter={"add": 0.2, "multiply": 0.1, "normalize": normalize})
+
+    assert schema.requests[ADDRESS].jitter == Jitter(add=0.2, multiply=0.1, normalize=normalize)
+
+
+@pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
+def test_vector_requires_a_jitter_configuration(value: object):
+    with pytest.raises(pydantic.ValidationError):
+        rf.Vector(n_dim=3, jitter=value)
+
+
+def test_vector_tensorfield_new_rejects_wrong_embedding_length():
+    schema = build_schema(n_dim=3)
+    bad_values = [
+        [[[0.1, 0.2], [0.3, 0.4, 0.5]]],
+        [[[0.6, 0.7, 0.8], [0.9, 1.0, 1.1]]],
+    ]
+
+    with pytest.raises(ValueError, match="expects every value to have length 3"):
+        tensorfield(
+            values=bad_values,
+            schema=schema,
+            strata=Strata.train,
+        )
+
+
+def test_vector_embedder_and_decoder_shapes():
+    schema = build_schema(n_dim=3)
+
+    field = tensorfield(
+        values=values(),
+        schema=schema,
+        strata=Strata.train,
+    )
+
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    parcel = embedder.embed(field)
+    assert parcel.payload.shape == (2, 1, 2, 16)
+
+    decoder = Decoder(schema=schema, address=ADDRESS)
+    prediction = decoder(
+        [parcel],
+        batch_size=field.state.shape[0],
+        device=parcel.payload.device,
+    )
+    assert prediction.payload[TensorKey.state].shape == (2, 2, len(Tokens))
+    assert prediction.payload[TensorKey.content].shape == (2, 2, 3)
+
+
+def test_vector_jitters_only_finite_valued_coordinates(monkeypatch: pytest.MonkeyPatch):
+    schema = build_schema(jitter=Jitter(add=0.5))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    captured: list[torch.Tensor] = []
+
+    def capture(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        assert self == Jitter(add=0.5)
+        captured.append(mask.clone())
+        return inputs
+
+    monkeypatch.setattr(Jitter, "apply", capture)
+    inputs = TensorInput(
+        state=torch.tensor([Tokens.valued, Tokens.null, Tokens.masked, Tokens.valued]),
+        content=torch.tensor(
+            [
+                [1.0, 2.0, 3.0],
+                [4.0, 5.0, 6.0],
+                [7.0, 8.0, 9.0],
+                [10.0, float("inf"), float("nan")],
+            ]
+        ),
+        batch_size=[4],
+    )
+
+    embedder.train()
+    embedder(inputs)
+
+    assert len(captured) == 1
+    assert captured[0].tolist() == [
+        [True, True, True],
+        [False, False, False],
+        [False, False, False],
+        [True, False, False],
+    ]
+
+
+@pytest.mark.parametrize("normalize", [True, False])
+def test_vector_jitter_runs_only_in_training_mode(monkeypatch: pytest.MonkeyPatch, normalize: bool):
+    schema = build_schema(jitter=Jitter(add=0.5, normalize=normalize))
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    field = tensorfield(values=values(), schema=schema, strata=Strata.train)
+    calls: list[torch.Tensor] = []
+
+    def capture(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        calls.append(inputs.clone())
+        return inputs
+
+    monkeypatch.setattr(Jitter, "apply", capture)
+
+    embedder.train()
+    embedder.embed(field)
+    embedder.eval()
+    embedder.embed(field)
+
+    assert len(calls) == 1
+
+
+def test_vector_jitter_preserves_content_and_reconstruction_targets(monkeypatch: pytest.MonkeyPatch):
+    schema = build_schema(jitter=Jitter(add=0.5), mask=Mask(reconstruct=True))
+    field = tensorfield(values=values(), schema=schema, strata=Strata.train)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+    content = field.content.clone()
+    targets = field.targets[TensorKey.content].clone()
+
+    def replace(self: Jitter, inputs: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        return inputs.masked_fill(mask, 99.0)
+
+    monkeypatch.setattr(Jitter, "apply", replace)
+
+    embedder.train()
+    embedder.embed(field)
+
+    assert torch.equal(field.content, content)
+    assert torch.equal(field.targets[TensorKey.content], targets)
+
+
+def test_vector_jitter_is_configuration_not_checkpoint_state():
+    configured = Jitter(add=0.2, multiply=0.1, normalize=False)
+    schema = build_schema(jitter=configured)
+    embedder = Embedder(schema=schema, address=ADDRESS)
+
+    assert embedder.jitter == configured
+    assert not any("jitter" in name for name in embedder.state_dict())
+    assert not any("jitter" in name for name, _ in embedder.named_buffers())
+
+
+class DummyModule:
+    def __init__(self, schema: Schema):
+        self.schema = schema
+        self.nodes = {ADDRESS: SimpleNamespace(decoder=Decoder(schema=schema, address=ADDRESS))}
+        self.logged: list[tuple[tuple[str, ...], object]] = []
+
+    def track(self, names: tuple[str, ...], value: torch.Tensor) -> torch.Tensor:
+        self.logged.append((names, float(value.detach().cpu()) if torch.is_tensor(value) else value))
+        return value
+
+
+@pytest.mark.parametrize(("objective", "expected"), [("l1", 2.0), ("l2", 4.0)])
+def test_vector_loss_uses_selected_objective(objective: str, expected: float):
+    schema = build_schema(objective=objective, mask=Mask(reconstruct=True))
+
+    field = tensorfield(
+        values=values(),
+        schema=schema,
+        strata=Strata.train,
+    )
+    state_logits = torch.full((*field.state.shape, len(Tokens)), -50.0)
+    state_logits.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
+    prediction_tensor = field.targets[TensorKey.content] + 2.0
+    prediction = Prediction(
+        address=ADDRESS,
+        payload=TensorDict(
+            {
+                TensorKey.state: state_logits,
+                TensorKey.content: prediction_tensor,
+            },
+            batch_size=[2],
+        ),
+    )
+
+    module = DummyModule(schema)
+    output = loss(module=module, prediction=prediction, batch=field, strata=Strata.train)
+    assert torch.isclose(output, torch.tensor(expected, dtype=output.dtype))
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("batch_size", [1, 2, 3])
+def test_vector_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
+    model = rf.Model(preset="small", d_model=8, target=rf.Vector(n_dim=2, mask=True))
+    decoder = model.nodes["/target"].decoder
+    with torch.no_grad():
+        decoder.regression.weight.zero_()
+        decoder.regression.bias.zero_()
+    rows = pa.table({"target": pa.array([[3.0, 3.0], [4.0, 4.0], None], type=pa.list_(pa.float32()))})
+    data = rf.ArrowDataModule(model, validate=rows)
+    values = model.validate(
+        data,
+        batch_size=batch_size,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        enable_progress_bar=False,
+        default_root_dir=tmp_path,
+    )[0]
+    assert values[".target/validate.mae.content"] == pytest.approx(3.5)
+    assert values[".target/validate.rmse.content"] == pytest.approx((25 / 2) ** 0.5)
+
+
+@pytest.mark.parametrize("nullable", [True, False])
+def test_vector_write_returns_content_payload(nullable):
+    schema = build_schema()
+    state_logits = torch.full((2, 2, len(Tokens)), -50.0)
+    state_logits[0, :, Tokens.valued.value] = 50.0
+    state_logits[1, :, Tokens.null.value] = 50.0
+    prediction = Prediction(
+        address=ADDRESS,
+        payload=TensorDict(
+            {
+                TensorKey.state: state_logits,
+                TensorKey.content: torch.ones(2, 2, 3),
+            },
+            batch_size=[2],
+        ),
+    )
+
+    module = DummyModule(schema)
+    datatype = output_type(module, ADDRESS)
+    assert datatype.field(TensorKey.content.name).type.value_field.name == "element"
+    element = pa.field("element", pa.float32(), nullable=nullable, metadata={b"unit": b"coordinate"})
+    datatype = pa.struct([pa.field(TensorKey.content.name, pa.list_(element, 3), nullable=False)])
+    output = write(module=module, prediction=prediction, datatype=datatype)
+    assert output.type == datatype
+    content = output.field(TensorKey.content.name)
+    assert content.type.value_field.equals(element, check_metadata=True)
+    assert len(content) == 4
+    assert content.to_pylist() == [
+        [1.0, 1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+    ]
+
+
+@pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test, Strata.predict])
+def test_vector_omits_targets_without_reconstruction(strata: Strata):
+    schema = build_schema()
+
+    field = tensorfield(values=values(), schema=schema, strata=strata)
+
+    assert field.targets.is_empty()
+    assert field.targets.batch_size == field.state.shape
+    assert not field.trainable.any()
+    torch.testing.assert_close(field.content, torch.tensor(values(), dtype=torch.float32), rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("owner", ["leaf", "branch", "root"])
+@pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
+def test_vector_retains_targets_for_reconstruction(owner: str, strata: Strata):
+    schema = rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        dropout=0.1,
+        mask=Mask(reconstruct=True) if owner == "root" else False,
+        items=rf.Branch(
+            length=2,
+            mask=Mask(reconstruct=True) if owner == "branch" else False,
+            embedding=rf.Vector(n_dim=3, mask=Mask(reconstruct=True) if owner == "leaf" else False),
+        ),
+    )
+
+    field = tensorfield(values=values(), schema=schema, strata=strata)
+
+    assert ADDRESS in schema.objectives
+    assert set(field.targets.keys()) == {TensorKey.state, TensorKey.content}
+    assert field.targets.batch_size == field.state.shape
+    assert field.targets[TensorKey.content].shape == field.content.shape
+    if strata == Strata.train:
+        torch.testing.assert_close(
+            field.targets[TensorKey.content], torch.tensor(values(), dtype=torch.float32), rtol=0, atol=0
+        )
+    else:
+        assert not field.trainable.any()
+
+
+@pytest.mark.parametrize("reconstruct", [False, True])
+@pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
+def test_vector_target_policy_preserves_empty_nested_rows(reconstruct: bool, strata: Strata):
+    schema = build_schema(mask=Mask(reconstruct=True) if reconstruct else False)
+    rows = [[[]], values()[1]]
+
+    field = tensorfield(values=rows, schema=schema, strata=strata)
+
+    assert field.state.shape == (2, 1, 2)
+    assert field.targets.batch_size == field.state.shape
+    assert not field.present[0].any()
+    assert not field.content[0].any()
+    assert field.targets.is_empty() == (not reconstruct)
+    expected = torch.zeros_like(field.content[1]) if reconstruct else torch.tensor(values()[1], dtype=torch.float32)
+    torch.testing.assert_close(field.content[1], expected, rtol=0, atol=0)
+
+
+def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.MonkeyPatch):
+    outcomes = []
+    for padded_targets in (False, True):
+        torch.manual_seed(2718)
+        model = rf.Model(
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            dropout=0.0,
+            batch_size=2,
+            embedding=rf.Vector(n_dim=3),
+            label=rf.Number(mask=True),
+        )
+        monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)
+        source = arrow_table(
+            [
+                {"embedding": [0.1, 0.2, 0.3], "label": 1.0},
+                {"embedding": [0.4, 0.5, 0.6], "label": -1.0},
+            ]
+        )
+        batch = runtime.prepare(model, source, preprocess=(), strata=Strata.train, seed=2718)
+        field = batch.tensors["/embedding"]
+        assert field.targets.is_empty()
+        if padded_targets:
+            # Reconstruct the previous unused payload without changing model input.
+            field.targets = TensorDict(
+                {
+                    TensorKey.state: torch.full_like(field.state, Tokens.padded.value),
+                    TensorKey.content: torch.zeros_like(field.content),
+                },
+                batch_size=field.state.shape,
+            )
+        embedding = model.nodes["/embedding"].embedder.embed(field).payload.detach().clone()
+        optimizer = adamw(1e-3)(model)
+        loss = model.training_step(batch, batch_idx=0)["loss"]
+        loss.backward()
+        gradients = {
+            name: None if value.grad is None else value.grad.clone() for name, value in model.named_parameters()
+        }
+        optimizer.step()
+        outcomes.append(
+            (
+                embedding,
+                loss.detach(),
+                gradients,
+                {name: value.detach().clone() for name, value in model.named_parameters()},
+                {name: value.clone() for name, value in model.named_buffers()},
+            )
+        )
+
+    torch.testing.assert_close(outcomes[0], outcomes[1], rtol=0, atol=0)
+
+
+def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets():
+    rows = pa.table({"vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [1.0, float("inf")], None])})
+    expected = [Tokens.valued, Tokens.other, Tokens.other, Tokens.null]
+
+    inputs = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    field = inputs.encode(rows, strata="predict")[rf.Address("vec")]
+    assert field.state.reshape(-1).tolist() == expected
+    assert torch.isfinite(field.content).all() and field.content.reshape(4, 2)[1].tolist() == [0.0, 0.0]
+
+    targets = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2, mask=True))
+    field = targets.encode(rows, strata="train")[rf.Address("vec")]
+    assert field.targets[TensorKey.state].reshape(-1).tolist() == expected
+    assert torch.isfinite(field.targets[TensorKey.content]).all()
+    assert field.targets[TensorKey.content].reshape(4, 2)[2].tolist() == [0.0, 0.0]
+
+
+@pytest.mark.integration
+def test_vector_training_survives_a_non_finite_element(tmp_path):
+    model = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    rows = pa.table(
+        {
+            "vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [3.0, float("-inf")], [0.5, 0.5]]),
+            "label": [True, False, True, False],
+        }
+    )
+    data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
+    model.fit(
+        data,
+        batch_size=4,
+        accelerator="cpu",
+        devices=1,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        num_sanity_val_steps=0,
+        early_stopping=False,
+        rollback=False,
+        enable_progress_bar=False,
+        logger=False,
+        enable_checkpointing=False,
+        default_root_dir=tmp_path,
+    )
+    assert all(torch.isfinite(parameter).all() for parameter in model.parameters())

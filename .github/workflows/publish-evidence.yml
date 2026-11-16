@@ -1,0 +1,68 @@
+name: Publish release evidence
+
+on:
+  workflow_call:
+    inputs:
+      library_run_id:
+        description: Successful main CI run containing the complete paired report
+        type: string
+        required: true
+      version:
+        description: Package version being released
+        type: string
+        required: true
+      source_sha:
+        description: Exact source checked by release CI
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: evidence-publication-${{ inputs.version }}
+  queue: max
+
+jobs:
+  publish:
+    # workflow_call inherits the Release caller's event and ref.
+    if: github.ref == 'refs/heads/main' && inputs.library_run_id != '' && inputs.version != '' && inputs.source_sha != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: docs/starlight/package-lock.json
+      - name: Install locked documentation tools
+        run: make prepare
+      - name: Validate and freeze the versioned evidence assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.library_run_id }}
+          VERSION: ${{ inputs.version }}
+        run: >-
+          uv run --project docs python evidence/publication.py
+          --run-id "$SOURCE_RUN" --version "$VERSION"
+          --output "$RUNNER_TEMP/evidence-publication"
+      - name: Attach the validated publication assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: relflow-${{ inputs.version }}-evidence-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/evidence-publication/relflow-${{ inputs.version }}-evidence*
+            ${{ runner.temp }}/evidence-publication/docs-base.txt
+          if-no-files-found: ignore
+          retention-days: 30

@@ -1,0 +1,47 @@
+---
+title: Featureless modeling, shaped by your data
+description: relflow is a predictive modeling framework, intended for any predictive task.
+---
+
+import UseCases from '../../components/UseCases.astro';
+
+<div class="home-intro">
+  <p class="home-lead">relflow is a predictive modeling framework, intended for any predictive task. relflow is different from other modeling approaches for relational learning:</p>
+</div>
+
+- **[Featureless](/featureless/):** Learn features from typed values and nested records inside the model, without a separate feature engineering pipeline.
+- **[Modular](/modular/):** Compose models from fields and branches. Extend them with your own custom leaf types and connect to your own [custom data sources](/advanced/custom-data-modules/).
+- **[Scalable](/scaling/):** Stream massive datasets through batched training and inference.
+- **[Deployable](/advanced/inference-and-deployment/):** Use the trained model for batch predictions and real-time serving.
+
+As a result of the above unique aspects of relflow, our models are the SOTA: On the nine published RelArena tasks with over one million training observations, relflow beats TabPFN-3 on nine and TabPFN-3.5 on six.
+
+## Philosophy
+
+**relflow was designed to be the first-of-its-class featureless modeling paradigm, providing a scalable solution in which model architecture embodies the latent data structure.**
+
+Our work is motivated by the challenges associated with traditional ML pipelines, which are shared with frontier labs’ recent efforts with in-context learning. These approaches rely on feature engineering loops or even deep-feature synthesis. Such methods prevent economic scaling and deployment, and they require intense engineering and validation efforts.
+
+relflow was built as open-source software and will always be free.
+
+## What can you build with relflow?
+
+<UseCases />
+
+## Get started
+
+<ol class="learning-path">
+  <li><a href="/installation/">Install relflow.</a> Add the package to your Python project.</li>
+  <li><a href="/concepts/models/">Define your model.</a> Describe its typed fields and collections of related records.</li>
+  <li><a href="/concepts/targets/">Choose your predictions.</a> Learn a probability, a value, or several answers at different levels of a record.</li>
+</ol>
+
+Want to inspect the underlying capabilities? The [learning experiment library](/evidence/)
+keeps the measured results, controls, and original execution records available.
+
+## License
+
+Public relflow releases beginning with 0.5.0 are free and open source under the
+[GNU Affero General Public License, version 3 only](/license/) (`AGPL-3.0-only`).
+The license covers project-authored code and documentation, including examples,
+schema machinery, caches, and preset definitions unless a file states otherwise.

@@ -1,0 +1,182 @@
+---
+title: Duration
+description: Derive signed elapsed time from timestamps and learn numeric predictions in fixed units.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Duration` for the time between two events: account age at review,
+time since a shipment left, or the duration of a completed repair. It derives
+`end - start` from timestamps and models the result using Number's numeric
+representations, normalization, and objectives.
+
+<DataTypePage name="Duration">
+
+## Input values
+
+Supply timestamp sources through `query=("start_path", "end_path")`, in that
+order. The paths are relative to the record containing the field. The source
+record contains the endpoint values; it does not need a member with the
+derived Duration field's name. For instance, `created_at` and `reviewed_at`
+can supply the endpoints for `account_age_days`.
+
+The result preserves fractions and signs. One and a half days stays `1.5`;
+an end before its start produces a negative duration. Zero is a valued duration.
+If your source already contains a numeric elapsed value, use
+[Number](/data-types/number/) instead.
+
+You can pair one queried timestamp with exactly one configured `start` or
+`end` timestamp. Endpoint options are timestamp literals; query strings are
+source paths. With one configured endpoint and no query, the field reads its
+same-named source member. Two configured endpoints without queries produce
+a constant duration. Every cutoff is explicit; Duration never reads the wall
+clock.
+
+Inside a branch, `../` begins a path to an ancestor source. A shipment's
+`shipped_at` can pair with its parent's `reviewed_at` through this syntax.
+The explicit branch retains record alignment and broadcasts the matching
+parent cutoff. Declare a branch for repeated endpoint records rather than
+expecting a wildcard path to create a new axis.
+
+Endpoints accept dates, timestamps, and strings. A date represents naive
+midnight. Aware timestamps represent absolute instants, so an offset change
+across daylight saving affects elapsed time correctly. Two naive endpoints
+use their naive timeline; mixing aware and naive endpoints raises an error.
+Use `pattern` for custom string formats. Named-zone `%Z` formats are
+unsupported; use `%z` numeric offsets or typed aware timestamps.
+
+A null endpoint produces a null Duration when both source positions exist.
+Structural absence, such as an absent containing record, stays absent. Invalid
+timestamps and unsafe range or resolution conversions raise errors. Days are
+exactly 86,400 seconds and weeks are seven such days; months and years are not
+supported units.
+
+## Standardization and processor pipelines
+
+Duration first selects the endpoint sources, computes signed
+`end - start`, and converts the result into the configured fixed unit.
+This derivation runs before the derived field is masked; endpoints are
+not separate model inputs unless the schema also declares them.
+
+The resulting scalar follows Number’s two-channel pipeline: online
+standardization of the original and signed-log values, Fourier features,
+and a learned projection with state. Null endpoints and structural absence
+retain their distinct states. Training jitter acts on the derived scalar,
+not on the source timestamps.
+
+## How is this leaf trained?
+
+Duration uses Number’s objectives on the derived numeric elapsed value.
+State classification uses cross-entropy. The default `"mae"` combines
+standardized signed-log error and a scaled source-unit absolute-error term;
+`"mse"` and `"huber"` use the original elapsed-value space.
+
+Only finite, valued reconstruction targets contribute numeric content
+loss. Predictions and numeric error metrics use the configured
+granularity, such as hours or days.
+
+### Predictions
+
+With `mask=True`, Duration becomes a supervised numeric target. Training first
+derives its value from the supplied endpoints, then hides that derived value
+from the model's inputs. Endpoint source fields are not embedded independently
+unless you declare them as additional model inputs.
+
+For a repair-duration target, supply both endpoints in training answers. New
+requests omit them; `predictions.resolution_hours.content` returns the estimated number
+of hours, alongside `state` and `inferred`. It returns neither a datetime nor
+the two original endpoints. Input Duration fields provide context and do not
+appear as decoded targets.
+
+Predictions and numeric error metrics use the configured granularity. Keep it
+consistent with the model's trained state. Duration reuses Number's readout,
+including its numeric precision behavior; see
+[Number](/data-types/number/) and [Runtime](/concepts/runtime/).
+
+<ValueTree
+  id="duration-predictions"
+  {...outputs.duration}
+  predictions
+  heading="Illustrative prediction output"
+  label="Duration prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `query` | `None` | Select an ordered `(start_path, end_path)`, or one source path with exactly one fixed endpoint. |
+| `start` | `None` | Configure a fixed start as a date, datetime, or timestamp string. |
+| `end` | `None` | Configure a fixed end as a date, datetime, or timestamp string. |
+| `granularity` | `"days"` | Choose `"seconds"`, `"minutes"`, `"hours"`, `"days"`, or `"weeks"` for elapsed values and predictions. |
+| `pattern` | `None` | Parse string endpoints using the specified timestamp format. |
+| `mask` | `False` | Set `mask=True` to hide the derived value and learn it as a supervised target. |
+| `objective` | `"mae"` | Choose Number's `"mae"`, `"mse"`, or `"huber"` numeric reconstruction objective. |
+| `alpha` | `None` | Use cumulative normalization statistics, or a rate between 0 and 1 for exponential training updates. |
+| `jitter` | `rf.Jitter()` | Apply training-only noise in the configured duration units while preserving pristine targets. |
+| `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
+| `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
+
+Choose a valid endpoint combination: two query paths without constants, one
+source with exactly one constant, or two constants without queries. The
+numeric options operate on the derived duration and follow
+[Number's semantics](/data-types/number/#leaf-specific-parameters).
+
+### Request methods
+
+Duration inherits Number's normalization inspection method.
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `normalization(model, address)` | Dictionary snapshot | Inspect the derived field's numeric training statistics. |
+
+For a trained model with a Duration field at `/account_age_days`:
+
+```python
+statistics: dict[str, float | int | None] = rf.Duration.normalization(
+    model, "/account_age_days"
+)
+```
+
+The dictionary contains `mean`, `variance`, `std`, `count`, and `alpha`, using
+the derived durations rather than the timestamp epochs. With `granularity="days"`,
+the mean and standardizing scale are in days and variance is in squared days.
+Cumulative statistics report an observation count; exponential statistics
+report `count=None` and their configured `alpha`. The returned snapshot does
+not change the model.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| An unsupported endpoint/query combination | `ValueError` rejects an ambiguous or incomplete derivation. | Use two source paths, one source with one fixed endpoint, or two fixed endpoints. |
+| Mixed aware/naive endpoints, invalid timestamps, or unsafe range conversion | `ValueError` reports that elapsed time cannot be derived. | Use compatible time semantics, a supported format, and representable endpoints. |
+| Months, years, or another unsupported granularity | Configuration validation rejects the unit. | Choose seconds, minutes, hours, days, or weeks. |
+
+### Footguns
+
+- **Relying on an implicit “now.”** Duration never reads the wall clock, and using today's cutoff for historical records changes their elapsed values. Supply each observation's decision-time cutoff explicitly and check the `(start, end)` order; the [endpoint contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/duration.py#L24) defines `end - start`.
+- **Leaking a target endpoint through another input.** `mask=True` hides the derived duration, not a separately declared field or query reading its future endpoint. Keep future outcome timestamps out of every context path, as well as omitting them from new requests. Duration [derives values before masking](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/duration.py#L130); the schema decides which other fields are inputs.
+- **Treating elapsed days as local calendar steps.** A day is exactly 86,400 seconds; daylight-saving transitions can make consecutive local midnights less or more than one elapsed day apart. Use consistently aware endpoints for absolute elapsed time, and Period for calendar cycles. Mixed aware and naive endpoints are rejected; inspect the [time-semantics checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_duration_time.py#L46) with representative offsets from your data.
+
+## Relevant evidence
+
+<LeafEvidence type="Duration" />
+
+The upstream [Duration API tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_duration.py)
+cover endpoint derivation, masking, ancestor broadcasting, normalization,
+persistence, and numeric output. The
+[time-semantics tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_duration_time.py)
+cover offsets, precision, missingness, and rejected timestamp inputs. These
+are API checks, separate from predictive-quality measurements.
+
+### Related types
+
+- [Number](/data-types/number/) reads an elapsed value that your source already computed.
+- [Period](/data-types/period/) represents recurring calendar positions such as weekday and hour, rather than elapsed time.
+- [Context branches](/concepts/branches/) explains how branches preserve collections of timestamped records and their parent context.
+
+</DataTypePage>

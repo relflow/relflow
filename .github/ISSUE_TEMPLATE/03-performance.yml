@@ -1,0 +1,56 @@
+name: Performance or resource usage
+description: Investigate latency, throughput, memory, serialization, or caching costs.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the workload and the improvement that matters. Include measurements
+        when available; a suspected bottleneck or completed benchmark is not required.
+        Remove credentials and private data from examples and logs.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What performance or resource problem affects your task?
+      description: Explain the impact, such as slow training, excessive memory, or large worker transfers.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What improvement would resolve this?
+      description: Name the metric and a target or decision criterion, if known.
+      placeholder: Worker loading should improve throughput over the same workload with num_workers=0.
+    validations:
+      required: true
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload and environment
+      description: |
+        Include data shape and distribution, collection sizes, model configuration, batch size,
+        workers, hardware/device, relflow revision, and relevant dependency versions.
+        Note whether data is synthetic and how it is generated or reused.
+  - type: textarea
+    id: baseline
+    attributes:
+      label: Baseline measurements and reproduction
+      description: |
+        Share the command, source revision, timings, peak memory, transferred bytes, or other
+        relevant measurements. Include failures and measurement units. Partial observations are useful.
+  - type: textarea
+    id: comparison
+    attributes:
+      label: How should we compare results?
+      description: |
+        Describe matched inputs, hardware, seeds, warmup, cache conditions, repetitions,
+        and timing boundaries when known. Include encoding and transfer costs when they affect the task.
+  - type: textarea
+    id: correctness
+    attributes:
+      label: What behavior must remain correct?
+      description: Identify output, numerical, structural, reproducibility, or resource lifecycle guarantees.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence or suspected bottleneck
+      description: Attach profiles, logs, benchmark artifacts, or optional investigation ideas.

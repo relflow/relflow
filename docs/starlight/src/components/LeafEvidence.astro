@@ -1,0 +1,107 @@
+---
+import { evidenceEntries, selection } from '../evidence/data';
+import { experimentsForType, question, type LeafType } from '../evidence/catalog';
+import { experimentURL, status } from '../evidence/presentation';
+
+interface Props {
+  type: LeafType;
+}
+
+const entries = experimentsForType(evidenceEntries, Astro.props.type).map((entry) => ({
+  ...entry,
+  state: status(entry),
+}));
+---
+
+<div class="leaf-evidence">
+  <p class="publication">
+    <a href="/evidence/selected.json">Publication {selection.version}</a>
+    <span> · revision <code>{selection.revision.slice(0, 7)}</code></span>
+  </p>
+  <table>
+    <caption class="sr-only">Learning checks for this leaf type in the selected publication</caption
+    >
+    <thead>
+      <tr
+        ><th scope="col">Proof ID</th><th scope="col">Hypothesis being tested</th><th scope="col"
+          >Status per release version</th
+        ></tr
+      >
+    </thead>
+    <tbody>
+      {
+        entries.length ? (
+          entries.map((entry) => (
+            <tr data-proof={entry.id}>
+              <th scope="row">
+                <a href={experimentURL(entry.id)} title={entry.description}>
+                  {entry.id}
+                </a>
+              </th>
+              <td>{question(entry)}</td>
+              <td>
+                <span class="result-status" data-outcome={entry.state.id}>
+                  {entry.state.label}
+                </span>
+              </td>
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td colspan="3">No dedicated learning experiment is declared for this leaf type.</td>
+          </tr>
+        )
+      }
+    </tbody>
+  </table>
+  <p class="scope">
+    Statuses describe the selected publication’s recorded checks. A declaration without a selected
+    run is not a measured result.
+  </p>
+</div>
+
+<style>
+  .publication,
+  .scope {
+    color: var(--rf-muted);
+    font-size: 0.78rem;
+    line-height: 1.6;
+  }
+
+  .publication {
+    margin-block: 0.75rem;
+  }
+
+  table {
+    width: 100%;
+  }
+
+  th[scope='row'] {
+    font-family: var(--sl-font-mono);
+    font-size: 0.78rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  td:last-child {
+    min-width: 6rem;
+    font-size: 0.78rem;
+  }
+
+  .result-status {
+    color: var(--rf-muted);
+  }
+
+  .result-status[data-outcome='met'] {
+    color: var(--sl-color-text-accent);
+  }
+
+  .result-status[data-outcome='not_met'],
+  .result-status[data-outcome='error'] {
+    color: var(--rf-ink);
+  }
+
+  .scope {
+    margin-block: 0.75rem 0;
+  }
+</style>

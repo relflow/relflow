@@ -1,0 +1,152 @@
+---
+title: Ordinal
+description: Model labels in a declared order or use integer ranks directly. Predictions return a discrete label or rank.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Ordinal` when a value has an ordered position: a priority level, an
+inspection grade, or an integer stage. It learns through numeric ranks, so
+larger rank errors carry a larger distance.
+
+<DataTypePage name="Ordinal">
+
+## Input values
+
+Choose one of two contracts:
+
+- **Declared labels:** `values=("low", "normal", "high")` maps labels to
+  consecutive ranks `0`, `1`, and `2`. Tuple order defines their meaning; names
+  do not supply an order or a distance. Every non-null input must match a
+  declared label exactly. The declaration does not grow during training.
+- **Integer ranks:** omit `values` to use source integers directly. Negative
+  ranks and ranks absent from training are valid. Gaps retain their size:
+  `10` to `20` is a ten-step difference. Booleans, floats, and numeric strings
+  are rejected in this mode, and ranks must lie within ±2^53.
+
+A declaration must contain unique labels of one scalar type: string, integer,
+finite float, Boolean, or bytes. With `values=(10, 20, 30)`, those integer labels
+instead occupy adjacent positions `0`, `1`, and `2`. Nulls keep a separate state;
+they are neither labels nor integer ranks. String spelling and case must match;
+Ordinal has no string-folding options.
+
+## Standardization and processor pipelines
+
+Declared labels map to their ordered integer positions; without a
+declaration, source integers are the ranks directly. Those ranks reuse
+Number’s raw and signed-log channels, online normalizers, Fourier features,
+and state embedding.
+
+Normalization learns from training ranks and is frozen during evaluation.
+Training jitter perturbs input ranks without changing their reconstruction
+targets. The declaration order, rather than label spelling, determines the
+numeric geometry.
+
+## How is this leaf trained?
+
+Ordinal reuses Number’s reconstruction objective on ranks before
+rounding. State classification uses cross-entropy. The default `"mae"`
+combines standardized signed-log rank error with a scaled source-rank
+absolute-error term; `"mse"` and `"huber"` use the original rank space.
+
+Output rounding and declaration-bound clipping happen when predictions
+are written. They are not multiclass classification losses and do not
+produce label probabilities.
+
+### Predictions
+
+An Ordinal target learns a numeric rank. Prediction writing rounds the readout
+to the nearest integer, with halfway values rounded to the nearest even rank:
+`0.5` becomes `0`, and `1.5` becomes `2`.
+
+With declared labels, the rank is clamped to the declaration's first and last
+positions and decoded back to the corresponding label. `content` preserves the
+label's scalar type, so integer labels remain integers. Without `values`,
+`content` is an integer rank clamped to ±2^53. Nonfinite readouts are rejected.
+
+The rich result also carries `state` and `inferred`. Ordinal does not return
+content probabilities or top-k candidates. Losses and numeric error metrics
+operate on ranks before output rounding. A target inside a branch gets one
+aligned result per supplied retained record.
+
+<ValueTree
+  id="ordinal-predictions"
+  {...outputs.ordinal}
+  predictions
+  heading="Illustrative prediction output"
+  label="Ordinal prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `values` | `None` | Declare an ordered tuple of labels, or leave unset for open integer ranks. Pass this option by keyword. |
+| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `objective` | `"mae"` | Choose `"mae"`, `"mse"`, or `"huber"` for numeric rank reconstruction. |
+| `alpha` | `None` | Use cumulative rank-normalization statistics, or a value in `(0, 1)` for exponential training updates. |
+| `jitter` | `rf.Jitter()` | Apply training-only noise to rank inputs while preserving targets. |
+| `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
+| `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
+
+Changing the declaration changes what learned ranks mean. A checkpoint with a
+different declaration is rejected rather than silently reinterpreting its
+learned state. Ordinal uses keyword `values=(...)`; the positional-label syntax
+shown for Enum does not apply here.
+
+### Request methods
+
+Inspect the numeric normalization of an Ordinal field with the inherited
+normalization helper. For a trained model with an Ordinal field at `/priority`:
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `normalization(model, address)` | Dictionary snapshot | Inspect the learned normalization statistics of this field's numeric ranks. |
+
+```python
+statistics: dict[str, float | int | None] = rf.Ordinal.normalization(
+    model, "/priority"
+)
+```
+
+The snapshot contains `mean`, `variance`, `std`, `count`, and `alpha`. For
+declared labels, these statistics refer to positions such as `0`, `1`, and
+`2`, rather than to the label text or the magnitudes of numeric labels.
+Editing the returned dictionary does not change the model. Ordinal has no
+vocabulary or per-label counts helper.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| Duplicate, mixed-type, or nonfinite declared labels | Declaration validation rejects the ordering. | Supply unique finite labels of one scalar type in the intended order. |
+| An undeclared label, non-integer bare rank, or rank outside ±2^53 | `ValueError` identifies the source contract violation. | Normalize labels, declare the full ordering, or use Number for continuous values. |
+| A checkpoint or encoded batch with a different declaration | `ValueError` rejects reinterpretation of existing ranks. | Use the matching model declaration and encode observations again. |
+
+### Footguns
+
+- **Assuming numeric labels keep their original spacing.** Declared `values=(10, 20, 30)` assigns consecutive ranks `0`, `1`, and `2`; declaration order defines the ordering. Omit `values` when source integers and their gaps should be ranks directly, and check that the resulting distances match your task. The [rank encoding tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_ordinal.py#L56) distinguish these contracts.
+- **Expecting a fractional rank to survive output writing.** The writer bounds the readout to the declared label range or supported integer range, then rounds to the nearest integer with ties to even. Inspect per-rank held-out errors and boundary behavior; use Number for a continuous readout. The [writer checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_ordinal.py#L224) cover rounding and saturation.
+- **Reading state probabilities as label confidence.** `state` describes valued, null, padded, masked, and other states; Ordinal `content` has no class-probability distribution or top-k candidates. Use Enum or Category when you need those outputs. See the [Ordinal output contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/ordinal.py).
+- **Treating accepted unseen ranks as demonstrated generalization.** Open integer ranks do not require vocabulary admission, but predictive quality on withheld ranks still needs evaluation. Hold out the ranks that matter in your application; [P100](/evidence/#P100) proposes this comparison and has no selected measurement in the retained publication.
+
+## Relevant evidence
+
+<LeafEvidence type="Ordinal" />
+
+The input, rounding, native-label, and normalization contracts are covered by
+the [Ordinal API tests at revision a1d0be3](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_ordinal.py).
+The output tree is illustrative, not an execution of those tests or a new
+learning measurement.
+
+### Related types
+
+- [Enum](/data-types/enum/) predicts one of several declared classes without imposing numeric rank distances.
+- [Category](/data-types/category/) learns a label vocabulary from training data.
+- [Number](/data-types/number/) predicts a continuous numeric measurement without discrete rank decoding.
+- [Quantile](/data-types/quantile/) represents numbers by position in a learned distribution rather than a declared order.
+
+</DataTypePage>

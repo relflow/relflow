@@ -1,0 +1,84 @@
+---
+title: Advanced usage
+description: Build custom data pipelines, register new leaf types, and manage learned state as your data changes.
+---
+
+Extend how data reaches a model, how a field represents information, or how
+learned state evolves between training runs. These guides follow the contracts
+behind the high-level modeling API.
+
+## Choose the boundary you need
+
+| You need to… | Start here | What you will control |
+| --- | --- | --- |
+| Configure prepared sources and preprocessing | [Data modules](/advanced/data-modules/) | Observation boundaries, source delivery, and preprocessing. |
+| Inspect learning and fitted field state | [Training and learned state](/advanced/training/) | Vocabularies, numeric state, training policies, and model artifacts. |
+| Vary training context and input representations | [Regularization](/advanced/regularization/) | Input masking, jitter, dropout, and sampled history windows. |
+| Read a specialized source, stream records, or own a loader | [Custom data modules](/advanced/custom-data-modules/) | Repeatable sources, explicit Arrow schemas, split delivery, and batch ownership. |
+| Introduce a new field representation or learning objective | [Custom leaf types](/advanced/custom-data-types/) | Accepted values, tensorization, neural components, objectives, and output contracts. |
+| Train with a changing population of labels | [Online vocabulary](/advanced/online-vocabulary/) | Admission, unknown values, training exposure, persistence, and synchronization. |
+| Evolve an existing model schema | [Mutations](/advanced/mutations/) | Selection, compatible state retention, temporary overrides, and retraining after an edit. |
+| Export learned context for another system | [Embeddings](/advanced/embeddings/) | Output selection, structural coordinates, reduction outputs, and representation identity. |
+| Train across devices or stream through several consumers | [Distributed training and streaming](/advanced/distributed-data/) | Rank and worker ownership, batch budgets, replay, and synchronization. |
+| Continue a run or version a trained artifact | [Checkpoints and model state](/advanced/checkpoints-and-state/) | Model artifacts, optimizer and loop resumption, external resources, and provenance. |
+| Learn from selected or partially hidden context | [Masking and pretraining](/advanced/masking-and-pretraining/) | Visibility, reconstruction objectives, task construction, and adaptation. |
+| Batch or serve a fitted model | [Inference and deployment](/advanced/inference-and-deployment/) | Streaming writers, request contracts, runtime resources, and serving boundaries. |
+| Inspect, check, predict, or serve from the shell | [Command-line workflows](/advanced/command-line/) | Artifact inspection, sampled preflight, file-backed jobs, run settings, and completion records. |
+
+## Keep the surrounding contract explicit
+
+An extension fits into a larger workflow. Define the observation and its cutoff,
+the information available at prediction time, and the outputs your application
+expects. Preserve record boundaries and target alignment as data moves through
+the pipeline.
+
+| Change | Owning layer |
+| --- | --- |
+| Join, filter, rename, sort, or derive source values | Source preparation or an `rf.Preprocessor`. |
+| Select values already present in the prepared observation | The schema’s explicit node queries. |
+| Deliver observations repeatedly for training and evaluation | A source factory or data module. |
+| Represent a new kind of value and learn from it | A tensorfield extension. |
+| Choose a decision from a prediction | Application policy or an `rf.Postprocessor`. |
+
+For example, grouping transactions into customer histories belongs to data
+preparation. Choosing how a new signal is encoded and embedded belongs to its
+field type. The [data flow guide](/concepts/data-flow/) explains how those
+operations meet at the model schema.
+
+## State is part of the model
+
+A deployed model has parameters and field-owned state. Vocabulary order,
+normalization statistics, and extension resources affect how source values are
+represented. Reusing a schema does not by itself establish that two model
+instances have the same learned state.
+
+The [online vocabulary guide](/advanced/online-vocabulary/) follows one concrete
+case: a new label can be admitted before the model has learned from it. The
+[checkpoint guide](/advanced/checkpoints-and-state/) connects those changes
+to model artifacts and full training resumption. The
+[mutation guide](/advanced/mutations/) covers intentional schema edits and
+the boundaries of compatible state retention.
+
+## Separate the learning task from its downstream use
+
+The [masking and pretraining guide](/advanced/masking-and-pretraining/) explains
+how visible context and reconstruction targets define a learning task.
+[Embeddings](/advanced/embeddings/) exposes learned context for a separate
+downstream use. Evaluate the target task and that downstream use independently.
+
+When you scale either workflow, coordinate the
+[distributed data plan](/advanced/distributed-data/), saved model state, and
+[inference contract](/advanced/inference-and-deployment/). Batch size, source
+ownership, and output identity belong to that plan as well as the model’s schema.
+
+## Follow the implementation boundary
+
+The guides link to the source definitions and contract tests behind their
+examples. The [API map](/api-map/) identifies the documented source revisions
+and the public extension bases. The [Evidence library](/evidence/) provides
+separately recorded learning experiments, with their original revisions and
+protocols.
+
+Start with the guide for the behavior you are extending, then test its contract
+with nested records, missing values, repeated passes, and saved state appropriate
+to that integration.

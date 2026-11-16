@@ -1,0 +1,43 @@
+---
+title: Modular modeling
+description: Extend relflow with custom data sources, leaf types, and transformations around the model.
+---
+
+Our vision with relflow is to create the predictive modeling framework for every possible task. We know that the standard data connectors and leaf types we build won’t always meet the complexities of enterprise scale modeling. In addressing this, we provide easily extensible solutions wherever possible.
+
+## Custom data sources
+
+Relative to [data sources and connectors](/advanced/custom-data-modules/), relflow allows for data ingress through any boundary, either batch or in-memory.
+
+:::tip[Interested in contributing?]
+
+[Join our Discord](https://discord.gg/DVyZUkvTFA) and [read the contributing guide](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/CONTRIBUTING.md).
+
+:::
+
+## Custom leaf types
+
+relflow modularity extends to leaf types as well. We provide several standard leaf types, each defined as a self-contained extension and registered through a plugin registry. The individual leaf type references describe their accepted values, options, and predictions. The [Leaf types concept guide](/concepts/data-types/) explains the representation and extension contracts they share. This same registration system and contract allow users to define custom leaf types with full support for relflow systems. These custom additions can be either proprietary implementations or open-source contributions for the relflow community.
+
+More information on implementing and registering a custom extension can be found in the [custom leaf type guide](/advanced/custom-data-types/).
+
+:::tip[Interested in contributing?]
+
+[Join our Discord](https://discord.gg/DVyZUkvTFA) and [read the contributing guide](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/CONTRIBUTING.md).
+
+:::
+
+## Custom data processors
+
+The modularity offered in custom data sources and in custom leaf types allows users to bring any data to the table, and to model it in any way desired.
+
+This last section of modularity allows users to provide transformations to existing data before it is passed to a relflow model or after it is emitted. This may be done in two ways:
+
+1. [Pre-processing](/advanced/data-modules/) for records before they are passed to a relflow model.
+2. [Post-processing](/api-map/#api-rf-postprocess) for records emitted by a relflow model.
+
+Additionally, users may choose to implement processors during training and/or inference. Users may utilize different processors during any [runtime](/concepts/runtime/) (training, validation, test, inference), and they may change the processors at any time.
+
+## Not enough?
+
+relflow was built to provide users with full control to make these models their own. If you feel that additional modularity would best serve the relflow community, please [open a ticket](https://github.com/relflow/relflow/issues/new/choose) and/or [share your ideas in our Discord](https://discord.gg/DVyZUkvTFA)!

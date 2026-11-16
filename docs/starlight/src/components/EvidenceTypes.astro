@@ -1,0 +1,50 @@
+---
+import { typesFor } from '../evidence/catalog';
+import type { EvidenceEntry } from '../evidence/data';
+interface Props {
+  entry: EvidenceEntry;
+}
+const types = typesFor(Astro.props.entry);
+---
+
+{
+  types.length > 0 && (
+    <ul class="evidence-types" aria-label="Primary leaf types">
+      {types.map((type) => (
+        <li>
+          <a href={`/evidence/?type=${type}`} title={`Find experiments about ${type}`}>
+            {type}
+          </a>
+        </li>
+      ))}
+    </ul>
+  )
+}
+<style>
+  .evidence-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    list-style: none;
+    padding: 0;
+    margin: 0.8rem 0;
+  }
+  .evidence-types a {
+    display: block;
+    padding: 0.15rem 0.6rem;
+    border: 1px solid var(--rf-border);
+    border-radius: 1rem;
+    color: var(--sl-color-text-accent);
+    font-size: 0.7rem;
+    line-height: 1.5;
+    text-decoration: none;
+  }
+  .evidence-types a:hover {
+    background: var(--rf-card);
+    border-color: var(--sl-color-text-accent);
+  }
+  a:focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+</style>

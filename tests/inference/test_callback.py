@@ -1,0 +1,373 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import polars as pl
+import pyarrow as pa
+import pyarrow.ipc as ipc
+import pyarrow.parquet as pq
+import pytest
+
+import relflow as rf
+
+
+def write(writer: rf.Writer, output: object, *, rank: int = 0, batch_idx: int = 0) -> None:
+    writer.write_on_batch_end(
+        trainer=SimpleNamespace(global_rank=rank),
+        pl_module=SimpleNamespace(),
+        output=output,
+        batch_indices=None,
+        batch=None,
+        batch_idx=batch_idx,
+        dataloader_idx=0,
+    )
+
+
+def test_writer_persists_the_written_arrow_table(tmp_path):
+    output = pa.table(
+        {
+            "inputs": pa.array([{"request_id": "a"}, {"request_id": "b"}]),
+            "predictions": pa.array([{"score": 0.25}, {"score": 0.75}]),
+        }
+    )
+    writer = rf.Writer(tmp_path)
+
+    write(writer, output, rank=7)
+    writer.on_predict_end(SimpleNamespace(), SimpleNamespace())
+
+    path = tmp_path / "rank-7.parquet"
+    assert path.exists()
+    assert not (tmp_path / "rank-0.parquet").exists()
+    assert pq.read_table(path).equals(output)
+    assert writer.writer is None
+
+
+@pytest.mark.parametrize("format", ["parquet", "ipc"])
+def test_finish_publishes_a_typed_empty_prediction(tmp_path, format):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    schema = pa.schema([("id", pa.string()), ("amount", pa.float64())])
+    writer = rf.Writer(tmp_path, format=format)
+    writer.finish(model, schema, retain=("id",))
+    path = tmp_path / ("rank-0.parquet" if format == "parquet" else "rank-0.arrow")
+    restored = pq.read_table(path) if format == "parquet" else ipc.open_file(path).read_all()
+    assert restored.num_rows == 0
+    assert restored.column_names == ["inputs", "predictions"]
+    assert restored.schema.field("inputs").type == pa.struct([("id", pa.string())])
+    assert restored.schema.metadata is not None
+    assert writer.source_rows == writer.written_rows == 0
+    assert not list(tmp_path.glob("*.partial"))
+
+
+def test_finish_requires_a_schema_for_an_empty_prediction(tmp_path):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(mask=True))
+    writer = rf.Writer(tmp_path, format="ipc")
+    with pytest.raises(RuntimeError, match="no processed schema"):
+        writer.finish(model, None)
+    assert not list(tmp_path.iterdir())
+
+
+def test_finish_does_not_replace_an_already_published_shard(tmp_path):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(mask=True))
+    writer = rf.Writer(tmp_path)
+    output = pa.table({"value": [1]})
+    writer.write(output)
+    writer.close()
+    writer.finish(model, None)
+    assert pq.read_table(tmp_path / "rank-0.parquet").equals(output)
+
+
+def test_ipc_writer_streams_sparse_vectors_and_structural_holes(tmp_path):
+    vector = pa.list_(pa.field("element", pa.float32()), 2)
+    item = pa.struct([("embedding", vector)])
+    output = pa.table(
+        {
+            "predictions": pa.array(
+                [None, [], [None], [{"embedding": None}], [{"embedding": [1.0, 2.0]}]],
+                type=pa.list_(pa.field("element", item)),
+            )
+        }
+    )
+    output = output.replace_schema_metadata({b"relflow.model_version": b"test"})
+    writer = rf.Writer(tmp_path, format="ipc", row_group_size=2)
+    write(writer, output.slice(0, 3))
+    assert not (tmp_path / "rank-0.arrow").exists()
+    write(writer, output.slice(3))
+    writer.close()
+    restored = ipc.open_file(tmp_path / "rank-0.arrow").read_all()
+    assert restored.equals(output, check_metadata=True)
+    assert writer.source_rows == writer.written_rows == 5
+    assert rf.source(str(tmp_path)).discover().schema.equals(output.schema)
+
+
+@pytest.mark.parametrize("format", ["parquet", "ipc"])
+def test_writer_discards_both_formats_on_schema_drift(tmp_path, format):
+    writer = rf.Writer(tmp_path, format=format)
+    write(writer, pa.table({"x": [1]}))
+    with pytest.raises(ValueError, match="schema differs"):
+        write(writer, pa.table({"x": ["changed"]}))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ipc_file_is_closed_before_publishing_the_shard(tmp_path, monkeypatch):
+    writer = rf.Writer(tmp_path, format="ipc")
+    write(writer, pa.table({"x": [1]}))
+    sink = writer.sink
+    assert sink is not None and not sink.closed
+    replace = type(tmp_path).replace
+
+    def publish(path, destination):
+        assert sink.closed, "Windows cannot rename a file with an open Arrow sink"
+        return replace(path, destination)
+
+    monkeypatch.setattr(type(tmp_path), "replace", publish)
+    writer.close()
+    assert writer.sink is None
+    assert ipc.open_file(tmp_path / "rank-0.arrow").read_all().to_pydict() == {"x": [1]}
+
+
+def test_ipc_discard_closes_its_sink_before_removing_the_partial(tmp_path):
+    writer = rf.Writer(tmp_path, format="ipc")
+    write(writer, pa.table({"x": [1]}))
+    sink = writer.sink
+    writer.discard()
+    assert sink is not None and sink.closed
+    assert writer.sink is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_ipc_construction_failure_closes_its_sink_and_removes_the_partial(tmp_path, monkeypatch):
+    opened = []
+
+    def fail(sink, schema):
+        opened.append(sink)
+        raise RuntimeError("could not initialize IPC writer")
+
+    monkeypatch.setattr(ipc, "new_file", fail)
+    writer = rf.Writer(tmp_path, format="ipc")
+    with pytest.raises(RuntimeError, match="could not initialize"):
+        write(writer, pa.table({"x": [1]}))
+    assert len(opened) == 1 and opened[0].closed
+    assert writer.sink is None
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("format", ["parquet", "ipc"])
+def test_writer_does_not_accumulate_empty_postprocessed_batches(tmp_path, format):
+    @rf.postprocess
+    def empty(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.head(0)
+
+    writer = rf.Writer(tmp_path, format=format, postprocessor=empty)
+    for _ in range(10):
+        write(writer, pa.table({"x": [1]}))
+    assert writer.pending == []
+    assert writer.source_rows == 10
+    assert writer.written_rows == 0
+    writer.close()
+    path = tmp_path / ("rank-0.parquet" if format == "parquet" else "rank-0.arrow")
+    table = pq.read_table(path) if format == "parquet" else ipc.open_file(path).read_all()
+    assert table.num_rows == 0
+
+
+def test_writer_applies_polars_postprocessors_in_order_before_persistence(tmp_path):
+    calls = []
+
+    @rf.postprocess
+    def compact(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("compact")
+        return frame.select(
+            request_id=pl.col("inputs").struct.field("request_id"),
+            score=pl.col("predictions").struct.field("score"),
+        )
+
+    @rf.postprocess
+    def decide(frame: pl.DataFrame) -> pl.DataFrame:
+        calls.append("decide")
+        return frame.select("request_id", review=pl.col("score") >= 0.5)
+
+    output = pa.table(
+        {
+            "inputs": pa.array([{"request_id": "a"}]),
+            "predictions": pa.array([{"score": 0.5}]),
+        }
+    )
+    writer = rf.Writer(tmp_path, postprocessor=[compact, decide])
+
+    write(writer, output)
+    writer.close()
+
+    assert calls == ["compact", "decide"]
+    assert writer.postprocessors == (compact, decide)
+    table = pq.read_table(tmp_path / "rank-0.parquet")
+    assert table.column_names == ["request_id", "review"]
+    assert table.to_pylist() == [{"request_id": "a", "review": True}]
+
+
+def test_writer_accepts_postprocessor_row_changes(tmp_path):
+    @rf.postprocess
+    def reorder(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.sort("score", descending=True).head(1)
+
+    writer = rf.Writer(tmp_path, postprocessor=reorder)
+    write(writer, pa.table({"score": [0.25, 0.75]}))
+    writer.close()
+
+    assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"score": [0.75]}
+
+
+def test_writer_locks_the_exact_first_batch_schema_and_discards_on_drift(tmp_path):
+    writer = rf.Writer(tmp_path)
+    write(writer, pa.table({"score": pa.array([1], type=pa.int64())}), batch_idx=0)
+    assert (tmp_path / "rank-0.parquet.partial").exists()
+
+    with pytest.raises(ValueError, match="schema differs from the first batch"):
+        write(writer, pa.table({"score": pa.array([1.0], type=pa.float64())}), batch_idx=1)
+
+    assert writer.writer is None
+    assert writer.schema is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_writer_locks_prediction_metadata_and_discards_on_provenance_drift(tmp_path):
+    writer = rf.Writer(tmp_path)
+    output = pa.table({"score": [0.25]}).replace_schema_metadata({b"relflow.model_version": b"first"})
+    write(writer, output)
+
+    with pytest.raises(ValueError, match="schema differs from the first batch"):
+        write(writer, output.replace_schema_metadata({b"relflow.model_version": b"second"}), batch_idx=1)
+
+    assert writer.writer is None
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_writer_preserves_metadata_through_postprocessing(tmp_path):
+    @rf.postprocess
+    def select(frame: pl.DataFrame) -> pl.DataFrame:
+        return frame.select("score")
+
+    output = pa.table({"score": [0.25], "other": [1]}).replace_schema_metadata({b"relflow.model_version": b"example"})
+    writer = rf.Writer(tmp_path, postprocessor=select)
+    write(writer, output)
+    writer.close()
+
+    restored = pq.read_table(tmp_path / "rank-0.parquet")
+    assert restored.column_names == ["score"]
+    assert restored.schema.metadata == output.schema.metadata
+
+
+@pytest.mark.parametrize("layout", ["null_fixed_list", "null_struct", "null_struct_in_list"])
+def test_writer_rejects_null_fixed_size_list_coordinates_before_creating_a_shard(tmp_path, layout):
+    vector = pa.list_(pa.field("element", pa.float32()), 4)
+    embedded = pa.struct([("embedding", vector)])
+    if layout == "null_fixed_list":
+        column = pa.array([None], type=vector)
+    elif layout == "null_struct":
+        column = pa.array([None], type=embedded)
+    else:
+        column = pa.array([[None]], type=pa.list_(pa.field("element", embedded)))
+    writer = rf.Writer(tmp_path)
+
+    with pytest.raises(ValueError, match="fixed-size lists.*use Arrow IPC"):
+        write(writer, pa.table({"predictions": column}))
+
+    assert writer.writer is None
+    assert not (tmp_path / "rank-0.parquet").exists()
+
+
+def test_writer_accepts_null_collection_and_null_struct_with_scalar_descendants(tmp_path):
+    result = pa.struct([("value", pa.float32())])
+    output = pa.table(
+        {
+            "predictions": pa.array(
+                [None, [], [None], [{"value": 0.5}, None]], type=pa.list_(pa.field("element", result))
+            )
+        }
+    )
+    writer = rf.Writer(tmp_path)
+    write(writer, output)
+    writer.close()
+
+    assert pq.read_table(tmp_path / "rank-0.parquet").equals(output)
+
+
+def test_writer_accepts_sliced_fixed_size_embeddings_in_nonnull_representation_rows(tmp_path):
+    vector = pa.list_(pa.field("element", pa.float32()), 4)
+    output = pa.table(
+        {
+            "representations": pa.array(
+                [None, [], [{"embedding": [1.0, 2.0, 3.0, 4.0]}]],
+                type=pa.list_(pa.field("element", pa.struct([("embedding", vector)]))),
+            )
+        }
+    ).slice(1)
+    writer = rf.Writer(tmp_path)
+    write(writer, output)
+    writer.close()
+
+    assert pq.read_table(tmp_path / "rank-0.parquet").equals(output)
+
+
+def test_writer_treats_identity_as_an_ordinary_user_column(tmp_path):
+    writer = rf.Writer(tmp_path)
+
+    write(writer, pa.table({"identity": ["user-owned"]}))
+    writer.close()
+
+    assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"identity": ["user-owned"]}
+
+
+def test_writer_requires_predict_step_to_return_arrow_table(tmp_path):
+    writer = rf.Writer(tmp_path)
+
+    with pytest.raises(TypeError, match="predict_step.*pyarrow.Table"):
+        write(writer, [{"score": 1.0}])
+
+    assert writer.writer is None
+
+
+def test_writer_renames_the_partial_shard_when_prediction_ends(tmp_path):
+    writer = rf.Writer(tmp_path)
+    write(writer, pa.table({"score": [0.5]}))
+
+    assert (tmp_path / "rank-0.parquet.partial").exists()
+    assert not (tmp_path / "rank-0.parquet").exists()
+
+    writer.on_predict_end(SimpleNamespace(), SimpleNamespace())
+
+    assert list(tmp_path.iterdir()) == [tmp_path / "rank-0.parquet"]
+    assert pq.read_table(tmp_path / "rank-0.parquet").to_pydict() == {"score": [0.5]}
+
+
+def test_writer_discards_the_partial_shard_on_exception_and_accepts_a_rerun(tmp_path):
+    writer = rf.Writer(tmp_path)
+    write(writer, pa.table({"score": pa.array([1], type=pa.int64())}))
+
+    writer.on_exception(SimpleNamespace(), SimpleNamespace(), RuntimeError("interrupted"))
+
+    assert list(tmp_path.iterdir()) == []
+    assert writer.schema is None
+
+    write(writer, pa.table({"score": pa.array([0.5], type=pa.float64())}))
+    writer.on_predict_end(SimpleNamespace(), SimpleNamespace())
+
+    restored = pq.read_table(tmp_path / "rank-0.parquet")
+    assert restored["score"].type == pa.float64()
+    assert restored.to_pydict() == {"score": [0.5]}
+
+
+def test_writer_buffers_batches_into_whole_row_groups(tmp_path):
+    writer = rf.Writer(tmp_path, row_group_size=4)
+
+    for start, pending in ((0, 3), (3, 2), (6, 1)):
+        write(writer, pa.table({"score": list(range(start, start + 3))}), batch_idx=start)
+        assert writer.rows == pending
+    writer.close()
+
+    shard = pq.ParquetFile(tmp_path / "rank-0.parquet")
+    assert [shard.metadata.row_group(index).num_rows for index in range(shard.num_row_groups)] == [4, 4, 1]
+    assert shard.read().to_pydict() == {"score": list(range(9))}
+
+
+def test_writer_rejects_a_non_positive_row_group_size(tmp_path):
+    with pytest.raises(ValueError, match="row_group_size must be a positive integer"):
+        rf.Writer(tmp_path, row_group_size=0)

@@ -1,0 +1,26 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import ApiReference from '../../components/ApiReference.astro';
+import { apiEntries, apiSlug, type ApiReference as Entry } from '../../api/reference';
+
+export function getStaticPaths() {
+  return apiEntries.map((entry) => ({ params: { symbol: apiSlug(entry.name) }, props: { entry } }));
+}
+
+interface Props {
+  entry: Entry;
+}
+const { entry } = Astro.props;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: entry.name,
+    description: entry.description,
+    editUrl: false,
+    prev: false,
+    next: false,
+  }}
+>
+  <ApiReference entry={entry} />
+</StarlightPage>

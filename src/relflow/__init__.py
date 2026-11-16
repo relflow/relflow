@@ -1,0 +1,233 @@
+"""Public `relflow` SDK surface.
+
+The top-level package exports the constructors and helpers used by most
+applications: `Model(...)` for model construction, tensorfield
+request constructors such as `Category` and `Number`, data modules, schema
+mutation predicates, and the `@preprocess` and `@postprocess` decorators.
+"""
+
+from typing import TYPE_CHECKING, Any
+
+from lightning.pytorch.callbacks import EarlyStopping
+
+from relflow import presets as presets
+from relflow._version import __version__
+from relflow.architecture.averaging import EMA
+from relflow.architecture.checkpoint import RollbackCheckpoint
+from relflow.architecture.mutations import MutationLockCallback, RuntimePlacementCallback
+from relflow.architecture.root import (
+    Model,
+    OptimizerConfig,
+    Scheduler,
+    SchedulerConfig,
+    SchedulerOptions,
+)
+from relflow.data.datasets import (
+    ArrowDataModule,
+    ArrowInput,
+    CustomDataModule,
+    DuckDBDataModule,
+    PolarsDataModule,
+    StratumConfig,
+    SyntheticDataModule,
+)
+from relflow.data.processors import (
+    Postprocessor,
+    PostprocessorInput,
+    Preprocessor,
+    PreprocessorInput,
+    PreprocessorProvider,
+    PreprocessorResult,
+    postprocess,
+    preprocess,
+)
+from relflow.data.ragged import RaggedField
+from relflow.data.sources import source
+from relflow.helpers.optimizers import adamw
+from relflow.inference.callback import Writer
+from relflow.inspection import check, inspect
+from relflow.structs.enums import (
+    AttentionInput,
+    AttentionMode,
+    Component,
+    Metric,
+    Overflow,
+    OverflowInput,
+    Strata,
+    StrataInput,
+    TensorKey,
+    Tokens,
+)
+from relflow.structs.experiment import (
+    NodeAttribute,
+    NodePredicate,
+    NodeSelector,
+    Schema,
+    SchemaField,
+    TreeFieldInput,
+    predicate,
+    where,
+)
+from relflow.structs.reduction import Attention, Mean, ReductionConfig
+from relflow.structs.structure import Branch, Mask
+from relflow.structs.tree import Address, Leaf, MaskInput
+from relflow.tensorfields import (
+    TENSORFIELDS,
+    BatchContext,
+    Context,
+    DecoderBase,
+    Derive,
+    EmbedderBase,
+    Extension,
+    RequestBase,
+    TensorFieldBase,
+    TensorInput,
+)
+from relflow.tensorfields.extensions.boolean import Request as Boolean
+from relflow.tensorfields.extensions.category import Request as Category
+from relflow.tensorfields.extensions.dateparts import Request as DateParts
+from relflow.tensorfields.extensions.dateparts import Request as Period
+from relflow.tensorfields.extensions.duration import Request as Duration
+from relflow.tensorfields.extensions.enum import Request as Enum
+from relflow.tensorfields.extensions.group import Request as Group
+from relflow.tensorfields.extensions.hashable import Request as Hash
+from relflow.tensorfields.extensions.number import Request as Number
+from relflow.tensorfields.extensions.ordinal import Request as Ordinal
+from relflow.tensorfields.extensions.quantile import Request as Quantile
+from relflow.tensorfields.extensions.set import Request as Set
+from relflow.tensorfields.extensions.text import Request as Text
+from relflow.tensorfields.extensions.vector import Request as Vector
+from relflow.tensorfields.shared.jitter import Jitter
+from relflow.tensorfields.shared.vocabulary import VocabularySyncCallback
+
+if TYPE_CHECKING:
+    from relflow.inference.deployment import (  # noqa: F401
+        Accelerator,
+        Deployment,
+        Input,
+        JSONBackend,
+        ModelSource,
+        UpdateOperation,
+    )
+
+# Serving names resolve lazily through ``__getattr__`` and stay out of ``__all__``
+# so star imports succeed without the serving extra.
+_SERVING_EXPORTS = {
+    "Accelerator",
+    "Deployment",
+    "Input",
+    "JSONBackend",
+    "ModelSource",
+    "UpdateOperation",
+}
+
+
+def __getattr__(name: str) -> Any:
+    if name not in _SERVING_EXPORTS:
+        raise AttributeError(f"module 'relflow' has no attribute {name!r}")
+
+    try:
+        from relflow.inference import deployment
+    except ModuleNotFoundError as error:
+        if error.name in {"fastapi", "orjson", "pydantic_settings", "uvicorn"}:
+            raise ModuleNotFoundError(
+                f"relflow.{name} requires the serving extra; install with `uv add 'relflow[serving]'`."
+            ) from error
+        raise
+
+    value = getattr(deployment, name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted([*globals(), *_SERVING_EXPORTS])
+
+
+__all__ = [
+    "__version__",
+    "Address",
+    "Attention",
+    "Branch",
+    "BatchContext",
+    "Boolean",
+    "AttentionMode",
+    "AttentionInput",
+    "ArrowDataModule",
+    "ArrowInput",
+    "Category",
+    "Component",
+    "Context",
+    "CustomDataModule",
+    "DuckDBDataModule",
+    "DateParts",
+    "Enum",
+    "EarlyStopping",
+    "EMA",
+    "DecoderBase",
+    "EmbedderBase",
+    "Group",
+    "Hash",
+    "Schema",
+    "Jitter",
+    "Leaf",
+    "Metric",
+    "Mask",
+    "MaskInput",
+    "Mean",
+    "Model",
+    "MutationLockCallback",
+    "NodeAttribute",
+    "NodePredicate",
+    "NodeSelector",
+    "Number",
+    "Ordinal",
+    "Duration",
+    "Derive",
+    "Quantile",
+    "OptimizerConfig",
+    "Overflow",
+    "OverflowInput",
+    "Extension",
+    "Period",
+    "PolarsDataModule",
+    "Postprocessor",
+    "PostprocessorInput",
+    "Preprocessor",
+    "PreprocessorInput",
+    "PreprocessorProvider",
+    "PreprocessorResult",
+    "RaggedField",
+    "RequestBase",
+    "ReductionConfig",
+    "RollbackCheckpoint",
+    "RuntimePlacementCallback",
+    "Set",
+    "SchedulerConfig",
+    "Scheduler",
+    "SchedulerOptions",
+    "SchemaField",
+    "SyntheticDataModule",
+    "Strata",
+    "StrataInput",
+    "StratumConfig",
+    "TENSORFIELDS",
+    "TensorFieldBase",
+    "TensorInput",
+    "TensorKey",
+    "Text",
+    "Tokens",
+    "TreeFieldInput",
+    "Vector",
+    "VocabularySyncCallback",
+    "Writer",
+    "adamw",
+    "check",
+    "inspect",
+    "predicate",
+    "postprocess",
+    "preprocess",
+    "presets",
+    "where",
+    "source",
+]

@@ -1,0 +1,24 @@
+---
+title: Data flow
+description: Follow one observation from loading and input preparation through the model to predictions or training updates.
+---
+
+import DataFlow from '../../../components/DataFlow.astro';
+
+Follow one observation from its source to the returned predictions. Choose a
+stage on the connected path, or use **Continue** to follow it step by step.
+Switch to **Train** to follow historical answers through loss, gradients, and
+parameter updates.
+
+<DataFlow />
+
+Preprocessing and postprocessing are optional; these examples use prepared
+records and pass through both stages. The records and predictions are shared
+illustrations. Intermediate views show data contracts and model structure.
+
+## Explore the contracts
+
+- [Data modules](/advanced/data-modules/) supply source records and model batches.
+- [Leaf types](/concepts/data-types/) define binding, representations, objectives, and outputs.
+- [Model trees](/concepts/models/) and [context branches](/concepts/branches/) organize related information.
+- [Runtime](/concepts/runtime/) covers fitting, evaluation, and reading the returned predictions.

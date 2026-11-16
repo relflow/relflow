@@ -1,0 +1,262 @@
+[project]
+name = "relflow"
+version = "0.5.0"
+description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
+readme = "README.md"
+authors = [
+    { name = "Grantham Taylor" },
+    { name = "Reid Taylor" },
+]
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.12"
+dependencies = [
+    "beartype>=0.21.0",
+    "pydantic>=2.11.7",
+    "pyyaml>=6.0.2",
+    "anytree>=2.13.0",
+    "pyarrow>=20.0.0",
+    "polars>=2,<3",
+    "numpy>=2.2.6",
+    "lightning>=2.6.4",
+    "tensordict>=0.10.0",
+    "torch>=2.7.1",
+    "torchmetrics>=1.9.0",
+    "typing-extensions>=4.12",
+    "rich>=14.0.0",
+    "typer>=0.29.1,<0.30",
+]
+
+[project.scripts]
+relflow = "relflow.cli:main"
+
+[project.optional-dependencies]
+torchjd = [
+    "torch>=2.9",
+    "torchjd[quadprog_projector]>=0.18,<0.19",
+]
+serving = [
+    "fastapi>=0.124.0",
+    "orjson>=3.10.0",
+    "pydantic-settings>=2.10.1",
+    "uvicorn>=0.38.0",
+]
+text = [
+    "transformers>=4.55.0",
+    "moka-py>=0.5,<0.6",
+]
+typing = [
+    "pyarrow-stubs>=20.0.0.20260819",
+    "types-PyYAML>=6.0.12",
+]
+duckdb = [
+    "duckdb>=1.5.0",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.12.12",
+    "pytest>=8.4.1",
+    "pytest-cov>=7.0.0",
+    "pytest-xdist>=3.8.0",
+    "coverage>=7.10.6",
+    "fastapi>=0.124.0",
+    "orjson>=3.10.0",
+    "pydantic-settings>=2.10.1",
+    "uvicorn>=0.38.0",
+    "pyrefly>=1.3.0,<2",
+    "pre-commit>=4.3.0",
+    "pyarrow-stubs>=20.0.0.20260819",
+    "types-PyYAML>=6.0.12",
+    "transformers>=4.55.0",
+    "moka-py>=0.5,<0.6",
+    "duckdb>=1.5.0",
+]
+
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.package-data]
+relflow = ["py.typed", "presets/provenance.json"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["relflow*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+pythonpath = ["."]
+addopts = ["-n", "0", "--strict-markers"]
+markers = [
+    "integration: real training loops, compilation, processes, external resources, optional encoders, or accelerators",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["relflow"]
+relative_files = true
+concurrency = ["multiprocessing"]
+patch = ["subprocess"]
+parallel = true
+sigterm = true
+
+[tool.coverage.paths]
+source = ["src/relflow", "*/src/relflow", "*/site-packages/relflow"]
+
+[tool.coverage.report]
+show_missing = true
+precision = 2
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
+
+[tool.ruff]
+line-length = 120
+extend-exclude = ["docs", "evidence", "research/**/output", "research/**/attempts", "research/**/evidence-plots"]
+lint.extend-select = ["I"]
+
+[tool.pyrefly]
+project-includes = ["src/relflow", "tests/typing"]
+search-path = ["src"]
+python-version = "3.12"
+preset = "default"
+
+# Repository ownership and file-type policy, enforced by scripts/tree.py.
+# Add a path deliberately when introducing a new repository responsibility.
+[tool.relflow.tree]
+max-bytes = 524288
+files = [
+    ".github/copilot-instructions.md",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".readthedocs.yaml",
+    "AGENTS.md",
+    "BIBLIOGRAPHY.md",
+    "CITATION.bib",
+    "CLAUDE.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "Makefile",
+    "NOTICE",
+    "README.md",
+    "docs/AGENTS.md",
+    "docs/README.md",
+    "docs/api.py",
+    "docs/assets/branding/README.md",
+    "docs/assets/branding/render.py",
+    "docs/assets/fonts/OFL.txt",
+    "docs/assets/fonts/README.md",
+    "docs/tests/__init__.py",
+    "docs/publish.py",
+    "docs/pyproject.toml",
+    "docs/starlight/.gitignore",
+    "docs/starlight/.prettierignore",
+    "docs/starlight/.prettierrc.json",
+    "docs/starlight/AGENTS.md",
+    "docs/starlight/README.md",
+    "docs/starlight/astro.config.mjs",
+    "docs/starlight/branding/README.md",
+    "docs/starlight/branding/header.typ",
+    "docs/starlight/branding/render.py",
+    "docs/starlight/ec.config.mjs",
+    "docs/starlight/package-lock.json",
+    "docs/starlight/package.json",
+    "docs/starlight/performance.json",
+    "docs/starlight/playwright.config.ts",
+    "docs/starlight/public/favicon.svg",
+    "docs/starlight/tsconfig.json",
+    "docs/uv.lock",
+    "evidence/AGENTS.md",
+    "evidence/README.md",
+    "evidence/SPEC.md",
+    "evidence/assets.py",
+    "evidence/diagnostics/README.md",
+    "evidence/diagnostics/views.json",
+    "evidence/evidence_ci.py",
+    "evidence/experiments/policies.py",
+    "evidence/experiments/reporting.py",
+    "evidence/experiments/run.py",
+    "evidence/experiments/source.py",
+    "evidence/hosted.md",
+    "evidence/hosted.py",
+    "evidence/observations.py",
+    "evidence/publication.py",
+    "evidence/record.py",
+    "evidence/releases.py",
+    "evidence/resolve.py",
+    "evidence/reuse.py",
+    "evidence/runtime.py",
+    "evidence/templates/experiment.py.txt",
+    "evidence/timings.json",
+    "evidence/visuals.py",
+    "evidence/worker.py",
+    "native/Cargo.lock",
+    "native/Cargo.toml",
+    "native/LICENSE",
+    "native/NOTICE",
+    "native/README.md",
+    "native/pyproject.toml",
+    "native/python/relflow_native/py.typed",
+    "native/src/cache/PROTOCOL.md",
+    "pyproject.toml",
+    "scripts/checkpoint.py",
+    "scripts/imports.py",
+    "scripts/release.py",
+    "scripts/tree.py",
+    "src/relflow/presets/provenance.json",
+    "src/relflow/py.typed",
+    "tests/typing/rejected.py.txt",
+    "uv.lock",
+]
+blocked = [
+    "**/__pycache__/**",
+    "**/node_modules/**",
+    "**/.venv*/**",
+    "**/.cache/**",
+    "**/.astro/**",
+    "**/.quarto/**",
+    "**/build/**",
+    "**/dist/**",
+    "**/target/**",
+    "evidence/runs/**",
+    "evidence/archives/**",
+    "docs/site/**",
+    "docs/evidence/**",
+    "docs/assets/diagrams/**",
+]
+
+[tool.relflow.tree.paths]
+".github/workflows/*" = [".yml"]
+".github/ISSUE_TEMPLATE/*" = [".yml"]
+"src/relflow/**" = [".py"]
+"tests/**" = [".py"]
+"docs/tests/test_*" = [".py"]
+"docs/assets/branding/**" = [".svg", ".png", ".typ"]
+"docs/assets/fonts/*" = [".otf", ".woff2"]
+"docs/starlight/src/**" = [".astro", ".css", ".json", ".md", ".mdx", ".mjs", ".ts", ".svg", ".woff2"]
+"docs/starlight/tests/**" = [".ts", ".mjs"]
+"docs/starlight/scripts/*" = [".ts", ".mjs"]
+"docs/starlight/public/benchmarks/*" = [".csv", ".json"]
+"docs/starlight/public/examples/*/*" = [".py", ".json", ".txt"]
+"evidence/experiments/*/*" = [".py"]
+"evidence/research/*/*" = [".py"]
+"evidence/diagnostics/*" = [".py"]
+"evidence/tests/**/test_*" = [".py"]
+"native/src/**" = [".rs"]
+"native/python/relflow_native/**" = [".py", ".pyi"]
+"native/tests/test_*" = [".py"]
+
+[tool.relflow.tree.sizes]
+"uv.lock" = 4194304
+"docs/starlight/package-lock.json" = 2097152

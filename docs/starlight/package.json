@@ -1,0 +1,38 @@
+{
+  "name": "relflow-docs-starlight",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.23.4"
+  },
+  "scripts": {
+    "dev": "astro dev --host 127.0.0.1 --port 4300",
+    "build": "astro build",
+    "preview": "astro preview --host 127.0.0.1 --port 4300",
+    "check": "astro check",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "test:browser": "playwright test",
+    "check:performance": "node --experimental-strip-types scripts/performance.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "dependencies": {
+    "@astrojs/markdown-satteri": "0.4.9",
+    "@astrojs/starlight": "0.42.11",
+    "astro": "7.4.11",
+    "smol-toml": "1.9.1",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.12",
+    "@expressive-code/core": "0.44.3",
+    "@playwright/test": "1.65.0",
+    "es-module-lexer": "1.7.0",
+    "parse5": "8.1.1",
+    "prettier": "3.10.1",
+    "prettier-plugin-astro": "0.14.1",
+    "typescript": "6.0.3"
+  }
+}

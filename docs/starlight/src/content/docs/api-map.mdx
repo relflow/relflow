@@ -1,0 +1,34 @@
+---
+title: API map
+description: Find the classes, methods, and extension contracts for each step of building and using a relflow model.
+---
+
+import ApiMap from '../../components/ApiMap.astro';
+import { apiSources } from '../../api/reference';
+
+Find an API by the job you need to do, or search for a name you already know.
+Names use `import relflow as rf`; `model` means an instance of your model class.
+Select a name for its full reference: signatures, defaults, type hints, and
+source docstrings. Each entry also links to its source and a guide where available.
+
+To understand how the declarations fit together, start with [Model trees](/concepts/models/).
+For field inputs, outputs, and options, use the individual **Leaf types** reference pages.
+
+<ApiMap />
+
+## Reading the map
+
+Defining a model class declares its schema. Instantiating that class builds an
+untrained network; `model.fit(...)` learns from examples, and `model.predict(...)`
+uses the trained model. The schema also determines where nested predictions
+belong in the returned Polars DataFrame.
+
+Entries marked **serving** require the optional [`relflow[serving]` installation](/installation/#optional-dependencies).
+Supporting type aliases and extension contracts are listed separately so you can
+find them when integrating your own code.
+
+The reference is generated from the Python source in this documentation version.
+Its source links identify the exact checkout revision: <a href={apiSources.schema}>schemas and model workflows</a> and
+<a href={apiSources.fields}>field implementations</a>.
+Use [the command line](/advanced/command-line/) to inspect a saved model, check
+its data contract, stream predictions, or start an HTTP deployment.

@@ -1,0 +1,357 @@
+---
+title: Custom leaf types
+description: Own a field’s Arrow contract, tensor representation, neural modules, and optional prediction output through explicit extension roles.
+---
+
+import DataViews from '../../../components/DataViews.astro';
+import { bearingSchema } from '../../../data/schema-examples';
+
+A custom leaf type changes how one kind of value enters the network, learns,
+or becomes a prediction. Its implementation belongs to the field extension;
+the shared model and data pipeline continue to handle structure, batches, and
+routing.
+
+Start with a [built-in type](/concepts/data-types/) when its representation fits. Use a
+preprocessor to join, filter, rename, or derive application data. Write an
+extension when the **meaning of the value requires a different representation
+or objective**. A circular bearing, for example, has a different geometry from
+an ordinary scalar: 359 degrees and 1 degree are near each other.
+
+## Choose the capability you need
+
+Registration names a component’s role explicitly. Python class and function
+names do not select their roles.
+
+| Capability | Components and responsibility |
+| --- | --- |
+| Declare a field | `Request`: a `rf.RequestBase` subclass with a stable `type` discriminator and declared configuration fields. |
+| Derive a field from source values | Optional `derive`: validate source projections and return one Arrow value and presence flag per owner record before observation and masking. |
+| Supply input context | `TensorField`: encode prepared Arrow values and retain state and routing masks. `Embedder`: turn compact field coordinates into a neural parcel. |
+| Learn a supervised target | Add `Decoder` and `loss` together. The decoder produces the extension’s tensor payload; the objective trains the selected field coordinates. |
+| Return a decoded result | `output` declares the extension-owned Arrow fields; `write` materializes that exact schema. |
+| Maintain learned field state | `observe`, `learn`, and `bind` separate observations, model-owned updates, and worker-local bindings. |
+| Own external resources | The embedder’s `context`, optional decoder `attach`, and extension `callbacks` coordinate field resources and their lifecycle. |
+
+An input-only type defines its request and provides tensorization and an embedder. It does not acquire a
+supervised decoder simply because its request accepts the common `mask` and
+`embed` options. relflow checks the requested capabilities when constructing or
+mutating the graph. The [extension contract tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L223)
+cover missing decoder/loss pairs and the separate leaf-embedding requirement.
+
+## Define a source contract
+
+The example below adds an **input-only bearing in degrees**. It accepts finite
+numeric scalars in `[0, 360)` and encodes each as sine and cosine. A learned
+projection then places those two coordinates in the model’s context space.
+Nulls remain field states; they do not become a zero-degree bearing.
+
+<DataViews id="bearing-source" schema={bearingSchema} leaves={{ Bearing: "Circular bearing in degrees, encoded with sine and cosine." }} dataset={{
+  id: 'route-bearing',
+  label: 'Route delay',
+  observation: 'One route with its direction and distance known before travel.',
+  description: 'A circular direction and distance provide context for a historical delay target.',
+  entities: [{
+    id: 'route', name: 'Route',
+    description: 'The source record supplied to the model.',
+    columns: [
+      { name: 'direction', type: 'number', description: 'Finite bearing in degrees, from zero inclusive to 360 exclusive. The custom field supplies its circular representation.' },
+      { name: 'distance_km', type: 'number', description: 'Route distance in kilometres, known when making the prediction.' },
+      { name: 'delay_minutes', type: 'number', role: 'target', description: 'Observed delay in minutes. This built-in Number target is a historical training label and is omitted from new requests.' },
+    ],
+  }],
+  relations: [],
+}} />
+
+`Extension.types` declares **canonical Arrow terminal families**, using their
+Python equivalents after any extension-owned derivation. `types=(int | float,)` permits a numeric family; it does
+not validate a bearing’s range or make an Arrow list a valid scalar bearing.
+The tensorizer owns those semantic checks.
+
+Separate entries such as `(str, bytes)` declare incompatible families. A union
+such as `(int | float,)` permits compatible atoms within one family. Do not
+declare `list`, `np.ndarray`, or `None` as atom types: containers are structural,
+and null is represented by state. Dictionary and compatible union wrappers
+are prepared before tensorization. These boundaries are enforced by the
+[registration and Arrow-family tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/test_base_extension.py).
+
+## Implement the input-only field
+
+Save this module as `bearing.py`. Importing it registers the type; it does not
+construct a model. The example uses the same tensorfield and compact-embedder
+protocols as the [third-party extension fixture](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L27).
+
+```python
+from __future__ import annotations
+
+from typing import Literal, cast
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+import torch
+from tensordict import TensorDict, tensorclass
+
+import relflow as rf
+from relflow.structs.packages import Parcel
+
+
+bearing = rf.Extension(name="acme_bearing", types=(int | float,))
+
+
+@bearing.register(rf.Component.Request)
+class Bearing(rf.RequestBase):
+    """An input-only circular bearing in degrees."""
+
+    type: Literal["acme_bearing"] = "acme_bearing"
+
+
+@bearing.register(rf.Component.TensorField)
+@tensorclass
+class BearingField(rf.TensorFieldBase[torch.Tensor]):
+    """Circular coordinates with the field's original state and masks."""
+
+    content: torch.Tensor
+    state: torch.Tensor
+    present: torch.Tensor
+    trainable: torch.Tensor
+    inferred: torch.Tensor
+    targets: TensorDict
+
+    @classmethod
+    def new(
+        cls,
+        input: rf.RaggedField,
+        target: rf.RaggedField,
+        present: torch.Tensor,
+        trainable: torch.Tensor,
+        inferred: torch.Tensor,
+        address: rf.Address,
+        schema: rf.Schema,
+        strata: rf.Strata,
+        context: rf.Context,
+    ) -> BearingField:
+        values = input.values
+        encoded = np.empty((0, 2), dtype=np.float32)
+        if len(values):
+            if not (
+                pa.types.is_integer(values.type)
+                or pa.types.is_floating(values.type)
+            ):
+                raise ValueError(
+                    f"bearing at '{address}' expects numeric scalars; "
+                    f"got {values.type}"
+                )
+            degrees = pc.cast(values, pa.float64(), safe=True).to_numpy(
+                zero_copy_only=False
+            )
+            valid = np.isfinite(degrees) & (degrees >= 0) & (degrees < 360)
+            if not valid.all():
+                raise ValueError(
+                    f"bearing at '{address}' expects finite degrees "
+                    "in [0, 360); normalize the source before encoding"
+                )
+            radians = np.deg2rad(degrees)
+            encoded = np.column_stack(
+                (np.sin(radians), np.cos(radians))
+            ).astype(np.float32)
+
+        return cls(
+            content=torch.from_numpy(
+                input.place(encoded, fill=0.0, value_shape=(2,))
+            ),
+            state=torch.from_numpy(input.dense),
+            present=present,
+            trainable=trainable,
+            inferred=inferred,
+            targets=TensorDict({}, batch_size=input.shape),
+            batch_size=input.batch_size,
+        )
+
+
+@bearing.register(rf.Component.Embedder)
+class BearingEmbedder(rf.EmbedderBase):
+    """Project circular coordinates and represent non-valued field states."""
+
+    def __init__(self, schema: rf.Schema, address: rf.Address) -> None:
+        super().__init__(schema=schema, address=address)
+        self.projection = torch.nn.Linear(2, self.d_model, bias=False)
+        self.states = torch.nn.Embedding(len(rf.Tokens), self.d_model)
+
+    def forward(self, batch: rf.TensorInput) -> Parcel:
+        content = cast(torch.Tensor, batch.content)
+        payload = self.projection(content) + self.states(batch.state)
+        return Parcel(
+            payload=payload,
+            present=torch.ones(
+                len(payload), dtype=torch.bool, device=payload.device
+            ),
+            origin=self.address,
+            destination=self.destination,
+            batch_size=len(payload),
+        )
+```
+
+The third-party parcel type is imported from its defining module; the extension
+constructors and base classes are available from `relflow` directly. The
+component classes have ordinary Python names. Their decorators bind them to
+the registered `Request`, `TensorField`, and `Embedder` roles.
+
+### Preserve geometry and state
+
+`RaggedField.values` contains the retained valued atoms, not a dense array with
+nulls or padding filled in. Its `placement` maps them into `shape`.
+`input.place(..., value_shape=(2,))` restores those positions with a trailing
+two-coordinate feature axis. `input.dense` retains the original value states.
+
+Keep the provided `present`, `trainable`, and `inferred` masks. Do not derive
+record presence from `content != 0`: a bearing of zero degrees is a legitimate
+value, and null, masked, and padded positions have separate meanings. Branch
+geometry remains owned by the shared data pipeline. The field can therefore
+be placed inside a nested branch without reconstructing its parent’s offsets.
+See the [RaggedField contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L95).
+
+The base embedder compacts present coordinates before calling `forward`. This
+implementation receives `K` states and a `[K, 2]` content tensor, and returns a
+`[K, d_model]` payload with Boolean presence of shape `[K]`. The base restores
+the field’s geometry afterward. Returning a dense branch-shaped tensor from
+this compact call would violate the contract. The
+[base embedder](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/base.py#L213)
+checks payload shape, presence shape, and origin/destination addresses.
+
+## Use the field in a class schema
+
+This application expects prepared Parquet records with the fields shown above.
+It uses the custom bearing as context and a built-in `Number` as the target.
+
+```python
+import relflow as rf
+
+from bearing import Bearing
+
+
+class RouteModel(rf.Model):
+    """A known route and its historical travel delay."""
+
+    direction = Bearing
+    distance_km = rf.Number
+    delay_minutes = rf.Number(mask=True)
+
+
+if __name__ == "__main__":
+    model = RouteModel(preset="small")
+    data = rf.ArrowDataModule(
+        train="routes/train.parquet",
+        validate="routes/validation.parquet",
+    )
+    model.fit(data, batch_size=128, max_epochs=20)
+```
+
+The `bearing.py` implementation is input-only. Do not use `Bearing(mask=True)`
+or request a decoded leaf embedding with `Bearing(embed=True)`: the extension
+does not register the necessary decoder. A model containing it can still learn
+other targets and request a model-root embedding. Registering this type does
+not establish a predictive advantage; evaluate the representation against your
+existing model on your own split.
+
+The class-schema application follows the
+[0.5.0 schema API](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/root.py#L113).
+The registration, tensorfield, and embedder interfaces use that same source
+revision.
+
+## Add supervised outputs deliberately
+
+An output-capable extension owns the whole result contract:
+
+1. A `rf.DecoderBase` implementation decodes context into the extension’s
+   tensors. It must follow the decoder’s target-coordinate and batch contract.
+2. A `rf.Component.loss` callable receives the model, prediction, tensorfield,
+   and split, and returns the scalar objective for that field. Loss and decoder
+   are required together for reconstruction.
+3. A `rf.Component.output` callable returns the Arrow struct type of the
+   extension-owned result fields. A `rf.Component.write` callable materializes
+   those fields with that exact type. List children use Arrow’s `element` name.
+
+Use the [Vector decoder, loss, and writer](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/vector.py)
+as a complete supervised implementation. It keeps scalar field states separate
+from vector content and handles a fixed trailing feature axis. Copying only its
+decoder would omit the objective, public result schema, and writing behavior.
+
+Do not add a branch for your type in shared model, batching, masking, or writing
+code. The extension should be usable inside arbitrary schema branches through
+its registered capabilities.
+
+## Own resources and serialization
+
+The minimal bearing has no vocabulary, cache, or external encoder. Stateful
+extensions need explicit lifecycle boundaries:
+
+- **Encoding context:** an embedder’s `context` is supplied through `rf.Context`
+  during tensorization. A decoder can receive the live resource through
+  `attach(context)`. If worker-local encodings need reconciliation with model
+  resources, implement the registered `bind` protocol rather than changing
+  parameters inside a loader worker.
+- **Learning state:** `observe` summarizes pristine Arrow values; `learn`
+  applies the resulting observations to model-owned training state. The
+  [online vocabulary guide](/advanced/online-vocabulary/) explains why observing
+  a new identity and learning a useful representation are separate events.
+- **Callbacks and dependencies:** declare callback classes or factories through
+  `Extension(callbacks=...)` and optional import requirements through
+  `Extension(requires={...})`. Every distributed rank must declare the same
+  callbacks. Keep resource teardown and flushing with the extension that owns
+  those resources.
+- **Stable registration:** keep a package-specific extension name and matching
+  request `type`. Import the registration module before constructing a model or
+  loading its schema/checkpoint, including in serving and worker processes.
+  A saved request cannot install the Python implementation. Reusing a registered
+  name replaces that registry entry and emits a warning.
+
+For a custom Python atom, declare its Arrow physical matcher explicitly, such
+as `arrow={Decimal: pa.types.is_decimal}` alongside `types=(Decimal,)`. This
+declares accepted storage; it does not provide semantic validation or a neural
+representation for Decimal. The
+[custom atom tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/test_base_extension.py#L186)
+also cover Arrow extension types and storage fallback.
+
+## Derive a value from several source fields
+
+Register `rf.Component.derive` when derivation is part of the field type's
+meaning. For example, [Duration](/data-types/duration/) owns the interpretation
+of two timestamp operands. Application-specific joins and business-window
+calculations still belong in source preparation or a preprocessor. The bearing
+example consumes one numeric source directly and does not need this hook.
+
+A deriving request can declare a tuple of `query` paths. The callable receives
+their Arrow source projections in that order, plus the request, address, and
+owner-row count. It validates its operand types and returns a source projection
+with exactly one value and one non-null Boolean presence flag per owner row.
+The extension's `types` contract applies to those derived values.
+
+Each `../` prefix selects a source from one enclosing branch, aligned with the
+retained child records. It does not perform a relational join, and a path cannot
+ascend past the model root. Tuple queries require a registered derive component;
+an ordinary field uses one source query. The
+[derivation protocol](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/base.py#L76)
+and [source projection checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L567)
+define this boundary.
+
+## Check the extension boundary
+
+Before using a new type in a larger model, check its independent contracts:
+
+- Validate accepted Arrow families and rejected physical layouts, including an
+  all-null typed column and an empty retained field.
+- Encode nulls, masked inputs, and ragged branches without losing field state,
+  record alignment, or the trailing value axis.
+- Exercise compact input with zero, one, and several present coordinates.
+  Check CPU/device transfer and that a zero-valued measurement stays distinct
+  from structural absence.
+- For targets, verify loss selection and the exact decoded Arrow schema,
+  including null result containers and list child names.
+- Round-trip schemas and checkpoints after registering the extension in a new
+  process; check that its configuration and owned resources are restored.
+
+The [third-party contract tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py)
+provide existing examples for missing capabilities, live context attachment,
+late schema registration, nested tensor content, compact presence, and empty
+inputs. These are API contract checks, separate from measured learning
+[Evidence](/evidence/).

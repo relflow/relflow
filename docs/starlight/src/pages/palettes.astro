@@ -1,0 +1,286 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { palettes, paletteFamilies } from '../data/palettes';
+import { codeThemes } from '../styles/code-themes.mjs';
+import logo from '../assets/branding/header.light.svg?url';
+import '../code/notes.css';
+import '../palettes/gallery.css';
+
+const sample = `import relflow as rf
+
+class Delivery(rf.Model):
+    """An order's delivery estimate."""
+    amount = rf.Number
+    days = rf.Number(mask=True)`;
+const roles = Object.keys(palettes[0].light);
+const schemeStyles = (palette: (typeof palettes)[number]) =>
+  ['light', 'dark']
+    .flatMap((mode) =>
+      Object.entries(palette[mode as 'light' | 'dark']).map(
+        ([key, value]) => `--p-${key}-${mode}:${value}`,
+      ),
+    )
+    .join(';');
+const roleRules = roles
+  .flatMap((role) => [
+    `.palette-sample{--p-${role}:var(--p-${role}-light)}`,
+    `body[data-mode="dark"] .palette-sample{--p-${role}:var(--p-${role}-dark)}`,
+  ])
+  .join('\n');
+const syntaxRules = codeThemes
+  .flatMap((theme) => [
+    [theme.colors['editor.foreground'], 'text'],
+    ...theme.tokenColors.map((token) => [
+      token.settings.foreground,
+      token.scope.includes('comment')
+        ? 'comment'
+        : token.scope.includes('string')
+          ? 'string'
+          : token.scope.includes('constant.numeric')
+            ? 'number'
+            : 'keyword',
+    ]),
+  ])
+  .map(
+    ([hex, role]) =>
+      `.palette-sample .expressive-code span[style*="${hex}" i]{color:var(--p-${role})!important}`,
+  )
+  .join('\n');
+---
+
+<!doctype html>
+<html lang="en" data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Palette lab · relflow</title>
+    <link rel="canonical" href={Astro.url} />
+    <link rel="icon" href="/favicon.svg" />
+    <style is:global set:html={roleRules + syntaxRules}></style>
+  </head>
+  <body class="palette-lab" data-mode="light" data-pagefind-ignore>
+    <header class="lab-header">
+      <a class="lab-brand" href="/"
+        ><img src={logo} alt="relflow" width="122" height="32" /><span>/ palette lab</span></a
+      >
+      <a class="back-link" href="/data-types/number/"
+        >Back to the docs <span aria-hidden="true">↗</span></a
+      >
+    </header>
+    <main class="lab-main">
+      <section class="lab-intro" aria-labelledby="lab-title">
+        <p class="lab-eyebrow">
+          One neutral theme · {palettes.length} accent colors · light and dark
+        </p>
+        <h1 id="lab-title">Same docs. A different accent.</h1>
+        <p>
+          The current theme, with neutral surfaces throughout. Compare accent colors on links, code
+          keywords, and controls while the backgrounds and typography stay consistent. Open a docs
+          preview, or star a few favorites.
+        </p>
+      </section>
+      <section class="lab-controls" aria-label="Filter and compare palettes">
+        <div class="control-row">
+          <div class="mode-switch" role="group" aria-label="Preview color mode">
+            <button type="button" data-mode-select="light" aria-pressed="true">Light</button>
+            <button type="button" data-mode-select="dark" aria-pressed="false">Dark</button>
+          </div>
+          <label class="family-filter"
+            ><span>Family</span><select id="palette-family"
+              ><option value="">All families</option>{
+                paletteFamilies.map((family) => <option value={family}>{family}</option>)
+              }</select
+            ></label
+          >
+          <label class="search-filter"
+            ><span class="visually-hidden">Search accent colors</span><input
+              id="palette-search"
+              type="search"
+              placeholder="Find an accent…"
+            /></label
+          >
+          <button type="button" id="shortlist-filter" class="shortlist-filter" aria-pressed="false"
+            >Shortlist <span id="shortlist-count">0</span></button
+          >
+        </div>
+        <div class="control-caption">
+          <p id="palette-count" role="status" aria-live="polite">
+            Showing all {palettes.length} accents
+          </p><p>Same neutral surfaces. Matching light and dark accents.</p>
+        </div>
+      </section>
+      <section id="palette-grid" class="palette-grid" aria-label="Documentation palettes">
+        {
+          palettes.map((palette, index) => (
+            <article class="palette-card" data-palette-card={palette.id}>
+              <header class="card-heading">
+                <div>
+                  <>
+                    <p class="card-family">
+                      {String(index + 1).padStart(2, '0')} · {palette.family}
+                    </p>
+                    <h2>{palette.name}</h2>
+                  </>
+                </div>
+                <button
+                  type="button"
+                  class="star-button"
+                  data-shortlist={palette.id}
+                  aria-pressed="false"
+                  aria-label={`Add ${palette.name} to shortlist`}
+                  title="Add to shortlist"
+                >
+                  <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                    <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9Z" />
+                  </svg>
+                </button>
+              </header>
+              <p class="card-description">{palette.description}</p>
+              <div
+                class="palette-sample"
+                style={schemeStyles(palette)}
+                data-palette-id={palette.id}
+                aria-label={`${palette.name} documentation sample`}
+              >
+                <div class="sample-topbar">
+                  <>
+                    <span class="sample-brand">relflow</span>
+                    <span class="sample-search">
+                      Search docs <span aria-hidden="true">⌘ K</span>
+                    </span>
+                  </>
+                </div>
+                <div class="sample-layout">
+                  <nav class="sample-sidebar" aria-label={`${palette.name} navigation sample`}>
+                    <>
+                      <span class="sample-group">Get started</span>
+                      <span>First model</span>
+                      <span class="sample-group">Leaf Types</span>
+                      <span class="sample-active">Number</span>
+                      <span>Category</span>
+                      <span>Set</span>
+                    </>
+                  </nav>
+                  <div class="sample-content">
+                    <>
+                      <h3>Number</h3>
+                      <p>Learn a value in its original units.</p>
+                    </>
+                    <div class="sample-code">
+                      <Code code={sample} lang="python" />
+                    </div>
+                    <aside class="sample-note">
+                      <>
+                        <strong>Note</strong>
+                        <p>A target stays out of the inputs.</p>
+                      </>
+                    </aside>
+                    <span class="sample-link">
+                      Request Methods <span aria-hidden="true">→</span>
+                    </span>
+                  </div>
+                </div>
+                <div class="sample-swatches" aria-label="Link and code keyword accents">
+                  {['accent', 'keyword'].map((role) => (
+                    <span
+                      style={`background:var(--p-${role})`}
+                      title={role === 'accent' ? 'Links and controls' : 'Code keywords'}
+                    />
+                  ))}
+                </div>
+              </div>
+              <footer class="card-actions">
+                <>
+                  <button type="button" class="preview-button" data-preview={palette.id}>
+                    Open docs preview <span aria-hidden="true">↗</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="copy-button"
+                    data-copy={palette.id}
+                    aria-label={`Copy ${palette.name} colors`}
+                    title="Copy palette colors"
+                  >
+                    <span data-copy-label>Copy colors</span>
+                  </button>
+                </>
+              </footer>
+            </article>
+          ))
+        }
+      </section>
+      <p id="palette-empty" class="palette-empty" hidden>
+        No accents match. Try another family or clear the search.
+      </p>
+      <p class="lab-footer">
+        Palette exploration only. The documentation’s selected theme stays as it is.
+      </p>
+    </main>
+    <dialog
+      id="palette-preview"
+      class="preview-dialog"
+      aria-label="Full documentation palette preview"
+    >
+      <div class="preview-toolbar">
+        <div class="preview-cycle">
+          <button type="button" data-preview-step="-1" aria-label="Previous palette">←</button
+          ><label
+            ><span class="visually-hidden">Palette</span><select id="preview-palette"
+              >{
+                paletteFamilies.map((family) => (
+                  <optgroup label={family}>
+                    {palettes
+                      .filter((palette) => palette.family === family)
+                      .map((palette) => (
+                        <option value={palette.id}>{palette.name}</option>
+                      ))}
+                  </optgroup>
+                ))
+              }</select
+            ></label
+          ><button type="button" data-preview-step="1" aria-label="Next palette">→</button>
+        </div>
+        <div class="mode-switch" role="group" aria-label="Full preview color mode">
+          <button type="button" data-mode-select="light" aria-pressed="true">Light</button><button
+            type="button"
+            data-mode-select="dark"
+            aria-pressed="false">Dark</button
+          >
+        </div>
+        <label class="preview-page-label"
+          ><span class="visually-hidden">Documentation page</span><select id="preview-page"
+            ><option value="/data-types/number/">Number</option><option value="/installation/"
+              >Installation</option
+            ><option value="/evidence/">Learning experiments</option><option value="/">Home</option
+            ></select
+          ></label
+        >
+        <button
+          type="button"
+          id="close-preview"
+          class="close-preview"
+          aria-label="Close full preview">✕</button
+        >
+      </div>
+      <p id="preview-status" class="preview-status" role="status" aria-live="polite">
+        Loading docs preview…
+      </p>
+      <iframe
+        id="preview-frame"
+        title="Documentation in the selected palette"
+        allow="clipboard-read; clipboard-write"></iframe>
+      <footer class="preview-footer">
+        <div id="preview-swatches" class="preview-swatches"></div><details>
+          <summary>Color tokens</summary><pre id="preview-tokens"></pre>
+        </details><button type="button" id="copy-current" class="copy-button"
+          ><span data-copy-label>Copy palette</span></button
+        >
+      </footer>
+    </dialog>
+    <script>
+      import '../palettes/gallery';
+      import '../code/notes-client';
+    </script>
+  </body>
+</html>

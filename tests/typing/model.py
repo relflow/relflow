@@ -1,0 +1,160 @@
+"""Static contracts for the public model facade; checked without training."""
+
+from pathlib import Path
+from typing import Any, assert_type
+
+import polars as pl
+import pyarrow as pa
+import torch
+from lightning.pytorch.utilities.types import LRSchedulerConfigType
+from tensordict import TensorDict
+
+import relflow as rf
+from relflow.architecture.runtime import Output
+from relflow.structs.packages import Prediction
+
+
+class Classifier(rf.Model):
+    def label(self) -> str:
+        return "classifier"
+
+
+def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
+    model = Classifier(
+        d_model=32,
+        n_layers=1,
+        n_heads=4,
+        amount=rf.Number,
+        age=rf.Duration(query=("created_at", "observed_at"), granularity="hours"),
+        since=rf.Duration(query="observed_at", start="2026-01-01", objective="huber"),
+        label=rf.Category(mask=True),
+    )
+    assert_type(model.compile(encoders=True, pools=False), Classifier)
+    assert_type(model.save("model.ckpt"), str)
+    assert_type(model.save(Path("model.ckpt")), Path)
+    assert_type(Classifier.load("model.ckpt"), Classifier)
+    assert_type(Classifier.from_yaml("model.yaml"), Classifier)
+    assert_type(rf.Model.from_yaml(Path("model.yaml"), d_model=32, optimizer=rf.adamw(1e-3)), rf.Model)
+    assert_type(Classifier(preset="small", amount=rf.Number, label=rf.Category(mask=True)), Classifier)
+    assert_type(Classifier(preset="small", amount=rf.Number, n_heads=2), Classifier)
+    assert_type(Classifier(preset="medium", amount=rf.Number, reduction=None), Classifier)
+    assert_type(Classifier(preset="medium", amount=rf.Number, attention=None), Classifier)
+    assert_type(Classifier(preset="medium", amount=rf.Number, dropout=None, optimizer=rf.adamw(1e-3)), Classifier)
+    assert_type(rf.Model(preset="medium", fields={"size": rf.Number}, scheduler=schedule), rf.Model)
+    assert_type(Classifier(preset="application-preset", amount=rf.Number, n_layers=2), Classifier)
+    assert_type(model.track(("loss", "train"), loss), torch.Tensor)
+    assert_type(model.track(("throughput", "train"), loss, on_step=True, on_epoch=False), torch.Tensor)
+    assert_type(model.track(("loss", "train_epoch"), loss, on_step=False, on_epoch=True, logger=False), torch.Tensor)
+    assert_type(model.encode(table), TensorDict)
+    assert_type(model.encode(pl.DataFrame({"amount": [1.0]})), TensorDict)
+    assert_type(rf.Enum.vocabulary(model, rf.Address("label")), tuple[bool | int | float | str | bytes, ...])
+    assert_type(
+        rf.Enum.vocabulary(model.interprocess_encoding_context, "/label"),
+        tuple[bool | int | float | str | bytes, ...],
+    )
+    assert_type(rf.Enum.counts(model, rf.Address("label")), dict[bool | int | float | str | bytes, int])
+    assert_type(rf.Quantile.normalization(model, rf.Address("amount")), dict[str, int | float | None])
+    assert_type(
+        rf.Quantile.normalization(model.interprocess_encoding_context, "/amount"), dict[str, int | float | None]
+    )
+    assert_type(model(batch, strata="train"), list[Prediction])
+    assert_type(model.training_step(batch, 0), Output | None)
+    assert_type(model.validation_step(batch, 0), Output)
+    assert_type(model.predict(table), pl.DataFrame)
+    assert_type(model.predict(pl.DataFrame({"amount": [1.0]})), pl.DataFrame)
+    assert_type(model.predict([{"amount": 1.0}]), pl.DataFrame)
+    data = rf.ArrowDataModule(train=table, validate=table, test=table, predict=table)
+    assert_type(model.fit(data, scheduler=schedule, log_every_n_steps=50), Classifier)
+    assert_type(model.fit(data, preset="small", ema_decay=None), Classifier)
+    assert_type(model.fit(data, preset="medium", ema_decay=0.99, max_epochs=12), Classifier)
+    assert_type(
+        model.fit(
+            data,
+            learning_rate=1e-3,
+            weight_decay=0.02,
+            betas=(0.9, 0.95),
+            eps=1e-8,
+            fused=None,
+            decay_bias=False,
+            decay_1d=False,
+            no_decay_name_fragments=("norm",),
+        ),
+        Classifier,
+    )
+    assert_type(model.validate(data), list[dict[str, float]])
+    assert_type(model.test(data), list[dict[str, float]])
+    assert_type(model.predict(datamodule=data, devices=1), pl.DataFrame)
+    assert_type(model.predict(data, devices=1), pl.DataFrame)
+    assert_type(model.predict(datamodule=data, return_predictions=False, callbacks=[rf.Writer("output")]), None)
+    assert_type(model.write([], source=table), pl.DataFrame)
+    assert_type(model.write([], source=pl.DataFrame(schema={"amount": pl.Float64})), pl.DataFrame)
+    rf.Model(model.schema, optimizer=rf.adamw(1e-3))
+    rf.Model(schema=model.schema, optimizer=rf.adamw(1e-3))
+    rf.Model(d_model=32, n_heads=4, n_layers=1, fields={"name": rf.Number, "batch_size": rf.Boolean})
+    rf.Model(d_model=32, n_heads=4, n_layers=1, name=rf.Category())
+    model.extend(rf.where("address") == "/", risk_score=rf.Number)
+    model.extend(fields={"fields": rf.Number})
+
+
+def schedule(model: rf.Model, optimizer: torch.optim.Optimizer) -> torch.optim.lr_scheduler.StepLR:
+    return torch.optim.lr_scheduler.StepLR(optimizer, step_size=1)
+
+
+def schedulers(schema: rf.Schema, optimizer: torch.optim.Optimizer) -> None:
+    rf.Model(schema, optimizer=optimizer, scheduler=schedule)
+    rf.Model(schema, optimizer=optimizer, scheduler=torch.optim.lr_scheduler.StepLR(optimizer, step_size=1))
+    rf.Model(
+        schema,
+        optimizer=optimizer,
+        scheduler={"scheduler": torch.optim.lr_scheduler.StepLR(optimizer, step_size=1), "interval": "step"},
+    )
+
+
+def wrapper(field: rf.TreeFieldInput, mask: rf.MaskInput, attention: rf.AttentionInput) -> rf.Model:
+    return rf.Model(d_model=32, n_layers=1, n_heads=4, field=field, mask=mask, attention=attention)
+
+
+class CustomScheduler:
+    def __init__(self, optimizer: torch.optim.Optimizer) -> None:
+        self.optimizer = optimizer
+
+    def state_dict(self) -> dict[str, Any]:
+        return {}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        pass
+
+
+def custom_scheduler(schema: rf.Schema, optimizer: torch.optim.Optimizer) -> None:
+    scheduler = CustomScheduler(optimizer)
+    rf.Model(schema, optimizer=optimizer, scheduler=scheduler)
+    rf.Model(schema, optimizer=optimizer, scheduler={"scheduler": scheduler, "interval": "step"})
+
+
+def lightning_scheduler(schema: rf.Schema, scheduler: LRSchedulerConfigType) -> rf.Model:
+    return rf.Model(schema, scheduler=scheduler)
+
+
+def batches(model: Classifier, data: rf.ArrowDataModule, table: pa.Table, batch_size: int | None) -> None:
+    assert_type(model.batch_size, int)
+    model.batch_size = 32
+    assert_type(model.fit(data, batch_size=batch_size, learning_rate=1e-3), Classifier)
+    assert_type(model.validate(data, batch_size=batch_size), list[dict[str, float]])
+    assert_type(model.test(data, batch_size=batch_size), list[dict[str, float]])
+    assert_type(model.predict(table, batch_size=batch_size), pl.DataFrame)
+    assert_type(model.predict(pl.DataFrame({"amount": [42.75]}), batch_size=batch_size), pl.DataFrame)
+    assert_type(model.predict([{"amount": 42.75}], batch_size=batch_size), pl.DataFrame)
+    assert_type(model.predict(datamodule=data, batch_size=batch_size, devices=1), pl.DataFrame)
+    assert_type(model.predict(data, batch_size=batch_size, return_predictions=True, devices=1), pl.DataFrame)
+    assert_type(
+        model.predict(
+            datamodule=data,
+            batch_size=batch_size,
+            return_predictions=False,
+            callbacks=[rf.Writer("output")],
+        ),
+        None,
+    )
+    assert_type(
+        model.predict(data, batch_size=batch_size, return_predictions=False, callbacks=[rf.Writer("output")]), None
+    )

@@ -1,0 +1,110 @@
+name: Evidence
+
+on:
+  workflow_call:
+    outputs:
+      run_attempt:
+        value: ${{ jobs.run.outputs.run_attempt }}
+    inputs:
+      suite_ref:
+        type: string
+        required: true
+      distribution_artifact:
+        type: string
+        default: python-package-distributions
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  wheels:
+    name: Build exact candidate and baseline wheels
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check out the trusted runtime resolver
+        uses: actions/checkout@v4
+        with:
+          repository: relflow/relflow
+          ref: '9251126e0059a0da30539778a382cfab7793142f'
+          path: executor
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: '3.12'
+          version: '0.13.7'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Build supplied revisions for the isolated CPU suite
+        id: inputs
+        env:
+          CANDIDATE_SHA: ${{ github.sha }}
+          SUITE_REF: ${{ inputs.suite_ref }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "executor/evidence")
+          from releases import comparison, event_base
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          name = os.environ["GITHUB_EVENT_NAME"]
+          candidate = os.environ["CANDIDATE_SHA"]
+          selection = comparison(
+              Path("candidate"), candidate, event_base(Path("candidate"), candidate, event, name),
+              forced=name == "push" and event.get("forced") is True,
+          )
+          request = {
+              "candidate": candidate,
+              "baseline": selection["baseline"],
+              "suite": os.environ["SUITE_REF"],
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "run_attempt": int(os.environ["GITHUB_RUN_ATTEMPT"]),
+              "event": name,
+          }
+          Path("inputs").mkdir(exist_ok=True)
+          for filename, value in (("comparison", selection), ("request", request)):
+              Path(f"inputs/{filename}.json").write_text(json.dumps(value, sort_keys=True, indent=2) + "\n")
+          print(json.dumps(selection, sort_keys=True))
+          PY
+          BASELINE_SHA="$(python -c 'import json; print(json.load(open("inputs/request.json"))["baseline"])')"
+          git -C candidate worktree add --detach "$GITHUB_WORKSPACE/baseline" "$BASELINE_SHA"
+          python candidate/scripts/release.py verify package --source-sha "$CANDIDATE_SHA"
+          mkdir -p inputs/candidate inputs/baseline
+          cp package/* inputs/candidate/
+          if [[ "$BASELINE_SHA" == "$CANDIDATE_SHA" ]]; then
+            cp inputs/candidate/*.whl inputs/baseline/
+          else
+            (cd baseline && python scripts/release.py licensing)
+            uv build --project "$GITHUB_WORKSPACE/baseline" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/baseline"
+          fi
+          python executor/evidence/resolve.py --project "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/inputs"
+          echo "baseline_sha=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: evidence-inputs-attempt-${{ github.run_attempt }}
+          path: inputs/
+          retention-days: 7
+          if-no-files-found: error
+    outputs:
+      baseline_sha: ${{ steps.inputs.outputs.baseline_sha }}
+
+  run:
+    name: Run full paired suite on GitHub
+    needs: wheels
+    permissions:
+      contents: read
+      actions: read
+    with:
+      suite_ref: ${{ inputs.suite_ref }}
+      baseline_sha: ${{ needs.wheels.outputs.baseline_sha }}
+    uses: relflow/relflow/.github/workflows/evidence-hosted.yml@5402aea9ccb7aefd02c57e03da10bbf0e6572927

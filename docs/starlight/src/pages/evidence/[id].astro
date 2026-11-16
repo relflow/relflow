@@ -1,0 +1,27 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+import { description, question } from '../../evidence/catalog';
+import EvidenceReport from '../../components/EvidenceReport.astro';
+import { evidenceEntries, type EvidenceEntry } from '../../evidence/data';
+
+export function getStaticPaths() {
+  return evidenceEntries.map((entry) => ({ params: { id: entry.id }, props: { entry } }));
+}
+
+interface Props {
+  entry: EvidenceEntry;
+}
+const { entry } = Astro.props;
+---
+
+<StarlightPage
+  frontmatter={{
+    title: question(entry),
+    description: description(entry),
+    editUrl: false,
+    prev: false,
+    next: false,
+  }}
+>
+  <EvidenceReport entry={entry} />
+</StarlightPage>

@@ -1,0 +1,267 @@
+---
+title: Online vocabulary
+description: Understand label admission, cold starts, mutable training state, vocabulary growth, and deployment boundaries.
+---
+
+import DataViews from '../../../components/DataViews.astro';
+import { categoryExamples } from '../../../data/examples/category';
+
+A new product category can appear halfway through a training stream. relflow
+can give it a vocabulary entry and grow the affected model storage during the
+same fit. Learning a useful representation still requires training examples.
+Serving a prediction does not perform that learning step.
+
+Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
+Class declarations, field state, and fit calls use that same 0.5.0 source.
+The [Category](/data-types/category/), [Set](/data-types/set/), and
+[Group](/data-types/group/) references describe their individual contracts.
+
+## Follow one field through its lifecycle
+
+An online vocabulary belongs to a **field address**, such as `/next_category`.
+It maps labels to model-owned rows. Repeated records at that address use the
+same field state; a different Category field has its own vocabulary even when
+some strings happen to match.
+
+| Phase | Vocabulary and field state | Parameters |
+| --- | --- | --- |
+| Encoding a training batch | Capture batch-local labels and pristine exposure for the supplied records. | No optimizer step occurs. |
+| Binding before forward | Resolve local IDs against the owning model and admit new labels. | Allocate additional rows when needed. |
+| Training batch start | Use the committed label-to-row mapping. | Initialize still-zero admitted content rows before learning uses them. |
+| Training forward and optimization | Apply pristine observation statistics to the model. | Gradients update representations and requested prediction heads. |
+| Validation, test, prediction | Look up existing labels without automatic admission or training-count updates. | Use the fitted parameters. |
+| Save and load | Restore label identity and storage alongside model state. | Restore the corresponding learned rows. Full optimizer continuation requires a training checkpoint. |
+
+In the ordinary data path, the `strata` passed to encoding determines whether
+admission and observation learning are enabled. `model.encode(...,
+strata="train")` therefore changes training state even without `fit` or a
+backward pass. Treat it as a mutation, rather than a dry-run inspection.
+Torch's training/evaluation flag does not replace the encoding split.
+
+These phases are implemented separately by
+[observation and binding](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/category.py#L188)
+and [model-owned learning](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/category.py#L395).
+
+## Continue fitting on a later cohort
+
+Consider the shopping example: use a customer's known region, preferred
+channel, and account age to predict their next shopping category. Both the
+context fields and the target can encounter new labels in a later cohort.
+
+<DataViews id="online-shopping-data" dataset={categoryExamples[0].dataset} schema={categoryExamples[0].schema} />
+
+Prepare these application-supplied files before running the example:
+
+| Path | Contents |
+| --- | --- |
+| `cohorts/initial/train.parquet` | Initial historical observations with known `next_category` labels. |
+| `cohorts/initial/validation.parquet` | Separate initial evaluation observations and their known answers. |
+| `cohorts/update/train.parquet` | Later labeled observations, including examples from older categories you still need to support. |
+| `cohorts/update/validation.parquet` | Separate evaluation observations for the update. |
+
+The files use the explorer's field names and string label types. Each row is
+a customer at a defined cutoff; context is available then, and the label
+describes the next observed shopping category. Keep a separate, fixed test
+cohort to compare the initial and updated models on the same decisions.
+
+```python
+from pathlib import Path
+
+import relflow as rf
+
+
+class ShoppingModel(rf.Model):
+    """A customer at a cutoff and their next shopping category."""
+
+    region = rf.Category
+    preferred_channel = rf.Category
+    account_age_days = rf.Number
+    next_category = rf.Category(mask=True, topk=[3])
+
+
+def fit_cohort(model: rf.Model, directory: Path) -> None:
+    """Fit one prepared cohort using a fresh data module for this model."""
+    data = rf.ArrowDataModule(
+        train=directory / "train.parquet",
+        validate=directory / "validation.parquet",
+        num_workers=0,
+        pin_memory=False,
+    )
+    model.fit(
+        data,
+        batch_size=128,
+        learning_rate=1e-4,
+        max_epochs=8,
+    )
+
+
+if __name__ == "__main__":
+    model = ShoppingModel(preset="small")
+    fit_cohort(model, Path("cohorts/initial"))
+    before: tuple[str, ...] = rf.Category.vocabulary(
+        model, "/next_category"
+    )
+
+    fit_cohort(model, Path("cohorts/update"))
+    after: tuple[str, ...] = rf.Category.vocabulary(
+        model, "/next_category"
+    )
+    admitted: set[str] = set(after) - set(before)
+    exposure: dict[str, int] = rf.Category.counts(
+        model, "/next_category"
+    )
+
+    print(admitted)
+    print(exposure)
+    model.save("shopping-updated.rf")
+```
+
+The second fit keeps the model's existing vocabulary and learned state while
+starting a new optimizer run. It can learn new categories and revise older
+representations. Vocabulary retention alone does not preserve old-cohort
+quality: include representative older examples and evaluate those cohorts
+explicitly. The [training lifecycle](/advanced/training/) explains full
+checkpoint continuation through `ckpt_path`.
+
+The inspection calls return snapshots. Editing `exposure` or constructing a
+different tuple does not edit the model. Counts describe accumulated training
+exposure, including repeated epochs and repeated training-mode encoding;
+they are not unique-customer counts or a confidence score. Input augmentation
+does not erase the original exposure. See the
+[snapshot and counter implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/category.py#L60).
+
+## Admission leaves a neutral row until training starts
+
+Category and Set content rows start at zero. When training-mode encoding
+admits another label, its new content row also stays at zero. Merely finding
+a label in `vocabulary(...)` is therefore insufficient evidence that its
+representation has learned anything.
+
+At training-batch start, the registered callback gives every still-zero
+assigned content row a deterministic random initialization. Already nonzero
+rows keep their values. The callback prevents many newly admitted labels
+from remaining indistinguishable zero vectors throughout learning. Decoder
+growth initially uses silent output rows as well.
+
+This is why zero content rows after a standalone training-mode `encode`
+are expected. Resume the normal training lifecycle before interpreting the
+new labels as learned. Direct custom training loops must retain the binding,
+initialization, and statistics lifecycle supplied by relflow's registered
+components and callbacks.
+
+The exact row behavior is specified by the
+[admitted-row callback](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/shared/vocabulary.py#L572)
+and its [initialization tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_vocabulary_growth.py#L725).
+Growth tests compare existing logits with floating-point tolerance when
+matrix dimensions change; admission is not a promise of bit-for-bit equality
+for every returned probability.
+
+## Separate unknown content from missing values
+
+| Value at evaluation | Meaning |
+| --- | --- |
+| A known Category label | A valued field with a vocabulary-specific content representation. |
+| A previously unseen Category label | A valued field with unavailable content; other known context can still inform the prediction. |
+| A null Category field | The field's separate null state. |
+| Floating-point NaN in Category | The `other` state, without vocabulary admission. |
+| An empty Set | A valued set containing no members. |
+| A Set containing unknown members | Known members remain usable; unknown-member presence uses the shared learned unavailable representation. Their unseen identities cannot be recovered from it. |
+
+An unfamiliar Category label contributes no label-specific content vector.
+Its valued state remains distinct from null. Set has an additional learned
+unavailable representation, so a set with unknown members can differ from
+an empty set. The
+[Category embedding](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/category.py#L293)
+and [Set pooling](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/set.py#L329)
+own these different fallback behaviors.
+
+`p_unavailable` simulates unavailable known input content during training.
+It leaves the reconstruction answer intact. This trains fallback behavior;
+it does not add a new identity to the output vocabulary during prediction.
+Keep source scalar types and any `strip`/`cased` policy consistent between
+training and serving: folding changes the keys and written labels.
+
+For a Category target, the model can only name populated vocabulary labels.
+Evaluate answer coverage alongside performance on known labels. Set also
+returns populated labels, with independent probabilities. Its output
+`threshold` filters returned pairs without changing the training objective;
+`threshold=None` keeps all populated entries. An empty filtered result does
+not establish that unseen memberships are impossible.
+
+## Budget for labels and allocation separately
+
+Storage grows geometrically as new labels arrive. **Populated labels** and
+**allocated rows** are different quantities: spare capacity is not another
+class, does not belong in `vocabulary(...)`, and must not enlarge a reported
+top-k result. Use `len(rf.Category.vocabulary(model, "/next_category"))`
+when you need the number of populated labels.
+
+There is no public `size` or `capacity` constructor option on these fields.
+Automatic growth removes a fixed allocation ceiling; memory consumption
+still grows with the state you retain. The
+[storage contract tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_vocabulary_storage.py#L62)
+cover spare allocation, schema/checkpoint preservation, and top-k limits.
+
+| Type | Identity state and output support |
+| --- | --- |
+| [Category](/data-types/category/) | Learns label-specific representations and grows a target's named output support. |
+| [Set](/data-types/set/) | Learns memberships over a growing vocabulary; returned probabilities are independent. |
+| [Enum](/data-types/enum/) | Uses a fixed declared label set. An undeclared non-null value is an error, including during evaluation. |
+| [Group](/data-types/group/) | Keeps a fixed group count, but stores trainable assignment logits for each admitted identity. Vocabulary memory still grows. |
+| [Hash](/data-types/hash/) | Represents identifier matching without a persistent learned identity vocabulary; it does not learn a personal profile for every new ID. |
+
+Group's explicit `assign` and `override` helpers have their own mutation
+rules and can admit identities outside the automatic training path. Use
+them on an idle model with unshared vocabulary state, as described in
+[Group's Request Methods](/data-types/group/#request-methods).
+
+## Preserve ownership across workers, ranks, and checkpoints
+
+Prefetched batches carry a batch-local label dictionary. Before forward,
+the owning model binds those local IDs to its live vocabulary. Training
+growth gathers new labels across participating distributed ranks before
+publishing their model-owned IDs. Vocabulary integers are therefore internal
+addresses, not durable business identifiers.
+
+Keep encoded batches attached to the model and binding lifecycle that owns
+them. When extending the loader, preserve the full encoded batch and its
+bindings rather than copying leaf tensors into an unrelated model. The
+[binding implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/shared/vocabulary.py#L128)
+and [prefetch/rebinding tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_vocabulary_growth.py#L156)
+define that boundary.
+
+Live growth migrates the affected parameters, gradients, and supported
+optimizer state together. Existing optimizer groups and scheduler objects
+remain in place within one fit. An application that replaces an embedding
+parameter directly can leave its optimizer pointing at the old tensor;
+use the framework's lifecycle instead. The
+[resize contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/shared/resize.py#L68)
+supports Adam/AdamW moments and SGD momentum and rejects unsupported state
+entries before applying a change. The
+[distributed growth test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_distributed_vocabulary_growth.py#L227)
+exercises CPU DDP with prefetched workers and gradient accumulation; other
+parallel strategies need their own validation.
+
+Save and restore label metadata together with its learned rows. Independently
+trained models can assign different row numbers to the same label. Loading
+only selected weight tensors or hand-copying a vocabulary dictionary loses
+that relationship. `model.save` / `rf.Model.load` preserve model state;
+resuming optimizer, scheduler, and Trainer progress uses a full Lightning
+checkpoint. The [growth and resume tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_vocabulary_growth.py#L484)
+exercise restoring training state before further admissions.
+
+## Diagnose coverage, exposure, and retention separately
+
+Use vocabulary snapshots to answer **can the model name this label?**
+Use training counts to answer **has this label been observed during
+training?** Use held-out cohorts to answer **does the current model predict
+it usefully?** None of those questions substitutes for the other two.
+
+The selected [Evidence library](/evidence/) keeps measurements tied to their
+recorded release and protocol. Start with the checks on
+[admission followed by continued learning](/evidence/P059/),
+[unknown target coverage](/evidence/P056/), and
+[retention when old examples stop arriving](/evidence/P086/).
+Inspect their selected CI records and controls; they do not establish the
+quality of a new deployment cohort or silently become measurements of the
+implementation described above.

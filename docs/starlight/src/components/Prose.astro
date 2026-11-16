@@ -1,0 +1,83 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { createSatteriMarkdownProcessor } from '@astrojs/markdown-satteri';
+
+interface Props {
+  text: string;
+  sourceDocstring?: boolean;
+}
+const { text, sourceDocstring = false } = Astro.props;
+const processor = await createSatteriMarkdownProcessor({ syntaxHighlight: false });
+const parts = text.split(/(^```[^\n]*\n[\s\S]*?^```[ \t]*$)/gm).filter((part) => part.trim());
+const blocks = await Promise.all(
+  parts.map(async (part) => {
+    const fence = part.match(/^```([^\n]*)\n([\s\S]*?)^```[ \t]*$/m);
+    if (fence)
+      return { code: fence[2].replace(/\n$/, ''), lang: fence[1].trim() || 'text', html: '' };
+    const prose = sourceDocstring
+      ? part
+          .replace(/``([^`\n]+)``/g, '`$1`')
+          .split(/(`[^`]*`)/g)
+          .map((text, index) => (index % 2 ? text : text.replace(/\bRelFlow\b/g, 'relflow')))
+          .join('')
+      : part;
+    return { code: '', lang: '', html: (await processor.render(prose)).code };
+  }),
+);
+---
+
+<div class="reference-prose">
+  {
+    blocks.map((block) =>
+      block.lang ? (
+        <Code code={block.code} lang={block.lang} wrap preserveIndent={false} hangingIndent={2} />
+      ) : (
+        <Fragment set:html={block.html} />
+      ),
+    )
+  }
+</div>
+
+<style>
+  .reference-prose {
+    font-size: 0.92rem;
+    line-height: 1.8;
+    overflow-wrap: anywhere;
+  }
+  .reference-prose :global(p) {
+    margin: 0.8rem 0;
+  }
+  .reference-prose :global(:is(h3, h4)) {
+    margin: 1.4rem 0 0.6rem;
+    color: var(--rf-ink);
+    line-height: 1.45;
+  }
+  .reference-prose :global(h3) {
+    font-size: 1.08rem;
+  }
+  .reference-prose :global(h4) {
+    font-size: 0.95rem;
+  }
+  .reference-prose :global(:is(ul, ol)) {
+    padding-left: 1.5rem;
+    margin-block: 0.8rem;
+  }
+  .reference-prose :global(li) {
+    margin-block: 0.35rem;
+  }
+  .reference-prose :global(a) {
+    color: var(--sl-color-text-accent);
+    text-underline-offset: 0.2em;
+  }
+  .reference-prose :global(.expressive-code) {
+    margin-block: 1rem;
+  }
+  .reference-prose :global(code:not(pre code)) {
+    font-size: 0.88em;
+  }
+  .reference-prose :global(table) {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+</style>

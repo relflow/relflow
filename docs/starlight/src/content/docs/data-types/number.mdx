@@ -1,0 +1,156 @@
+---
+title: Number
+description: Represent numeric measurements and predict values in their original units.
+---
+
+import TypeChoice from '../../../components/TypeChoice.astro';
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Number` for a measurement whose magnitude matters: an amount, count,
+distance, or elapsed time. It learns from the supplied numbers and manages its
+own numeric normalization.
+
+<TypeChoice group="numeric" />
+
+<DataTypePage name="Number">
+
+## Input values
+
+The `Number` leaf accepts integer or floating-point typed data.
+Supply numeric scalars such as `29.95`, `4`, or `-2.5`. Zero is a value;
+`None` represents a null. Keep units consistent within a field.
+
+Source values, statistics, and numeric readouts retain float64 precision on
+CPU and CUDA; MPS uses float32. Special cases are handled as follows:
+
+- A floating-point NaN takes the `other` state, so it is not embedded or penalized as a valued number.
+- Infinite values remain `valued`; the numeric embedding bounds their representation, and numeric reconstruction excludes them.
+- Integers beyond ±2^53 are rejected because float64 cannot preserve every integer there. Use [Hash](/data-types/hash/) for large identifiers.
+
+## Standardization and processor pipelines
+
+Numbers are encoded through two channels:
+
+1. A normalized representation of the value
+2. A normalized representation of the signed-log-scaled value
+
+Each channel maintains its own online mean and variance from finite training
+values. Validation, test, and prediction reuse those learned statistics.
+The signed log is `sign(x) × log(1 + abs(x))`; you do not need to select a
+log transform in a separate preprocessing pipeline.
+
+Each normalized representation is encoded through sine/cosine Fourier
+features. A learned projection combines them with the field’s state embedding,
+while scalar channels retain access to magnitude. `n_bands` and `offset`
+set the base-two frequency exponents from `-n_bands` through `offset`,
+inclusive, before multiplication by π. Unsafe Fourier inputs are clamped
+to keep the embedding finite. Training jitter perturbs inputs while retaining
+pristine reconstruction targets.
+
+## How is this leaf trained?
+
+The state head is trained with cross-entropy. Content loss uses only
+finite, valued reconstruction targets.
+
+By default, `objective="mae"` combines absolute error in standardized signed-log
+units with a bounded source-unit absolute-error term, scaled by the raw
+training spread. `objective="mse"` and `"huber"` instead penalize errors in
+the original value space, standardized by its training scale. Numeric
+predictions and reported error metrics return to the source units.
+
+### Predictions
+
+A numeric prediction returns in the same units as its training labels. For a
+field named `delivery_days`, `predictions.delivery_days.content` contains the
+predicted number of days. The surrounding result also carries the field's state and whether it was
+inferred. See [Runtime](/concepts/runtime/) for how targets fit into
+the output record.
+
+Error metrics are reported in the original units.
+
+<ValueTree
+  id="number-predictions"
+  {...outputs.number}
+  predictions
+  heading="Illustrative prediction output"
+  label="Number prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `objective` | `"mae"` | Choose `"mae"`, `"mse"`, or `"huber"` for numeric reconstruction. |
+| `alpha` | `None` | Use cumulative normalization statistics, or a value between 0 and 1 for exponential training updates. |
+| `jitter` | `rf.Jitter()` | Configure training-only noise while preserving reconstruction targets. |
+| `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
+| `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
+
+### Request methods
+
+Inspect the training normalization of a Number field.
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `normalization(model, address)` | Dictionary snapshot | Inspect the field's source-unit normalization statistics. |
+
+For a trained model with a Number field at `/order_total`:
+
+```python
+statistics: dict[str, float | int | None] = rf.Number.normalization(
+    model, "/order_total"
+)
+```
+
+The returned dictionary contains `mean`, `variance`, `std`, `count`, and
+`alpha`. `std` is the standardizing scale, including a small numerical floor.
+With cumulative statistics, `count` is the observation count and `alpha` is
+`None`. With exponential updates, `count` is `None` and `alpha` reports the
+configured update rate. The method returns a snapshot, so editing the
+dictionary does not change the model.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| A list or record supplied as one numeric value | `ValueError`: Number expects scalar Arrow values. | Use a branch for repeated records or Vector for fixed-width coordinates. |
+| An integer outside ±2^53 | `ValueError`: float64 cannot represent the integer exactly. | Use Hash for identifiers, or rescale an actual measurement before encoding. |
+| Invalid `alpha`, Fourier extent, or objective | Configuration validation rejects the option. | Keep `alpha` unset or in `(0, 1)`, Fourier extents positive, and select a listed objective. |
+
+### Footguns
+
+- **Using a learned sum as exact bookkeeping.** The retained six-number
+  experiment learned an approximation with nonzero error; it did not establish
+  exact addition. Compute balances and other exact arithmetic in preprocessing.
+  [P039: six-number sum](/evidence/#P039)
+- **Replacing missing measurements with zero.** This merges two distinct inputs.
+  In the controlled null-versus-zero task, filling nulls removed the only useful
+  signal. Preserve nulls when absence carries meaning.
+  [P038: null-versus-zero controls](/evidence/#P038)
+- **Sending integers beyond ±2^53.** Number rejects these values because its
+  float64 representation cannot preserve every integer there. Use Hash for
+  identifiers; keep exact large-integer arithmetic in your data preparation.
+  [Precision-boundary test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_number.py#L807-L810)
+- **Choosing a numeric representation from one average score.** In P079's
+  generated heavy-tail task, error relative to the known optimum was higher in
+  the tail than in the bulk, and changed with the training budget. Check your
+  important value ranges separately, using errors in their original units.
+  [P079: bulk, tail, and budget comparisons](/evidence/#P079)
+
+## Relevant evidence
+
+<LeafEvidence type="Number" />
+
+### Related types
+
+- [Quantile](/data-types/quantile/) represents a scalar by its position within the training distribution.
+- [Ordinal](/data-types/ordinal/) represents ordered labels or integer ranks.
+- [Duration](/data-types/duration/) derives a numeric elapsed value from timestamps.
+- [Vector](/data-types/vector/) holds a fixed collection of numeric coordinates.
+- [Period](/data-types/period/) encodes recurring calendar context.
+- [Hash](/data-types/hash/) represents identifier relationships without a numeric magnitude.
+
+</DataTypePage>

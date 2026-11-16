@@ -1,0 +1,74 @@
+---
+title: License
+description: AGPL licensing, project attribution, and the scope of source-sharing obligations.
+---
+
+import license from '../../../../../LICENSE?raw';
+import notice from '../../../../../NOTICE?raw';
+
+Public relflow releases beginning with **0.5.0** use the **GNU Affero General
+Public License, version 3 only** (`AGPL-3.0-only`). Copyright 2024–2026 Grantham
+Taylor and Reid Taylor.
+
+## What is covered?
+
+Unless a file states otherwise, the license covers project-authored source code,
+documentation, examples, schema machinery, cache implementations, and preset
+definitions. Third-party components retain their own licenses. The bundled
+Libertinus font retains its SIL Open Font License.
+
+Previously granted Apache-2.0 permissions remain effective for code made
+available under those terms, including earlier development snapshots. Changing
+the license of a later release does not withdraw those permissions.
+
+## Using and modifying relflow
+
+AGPL allows commercial use, modification, and redistribution under its terms.
+Redistributing a covered modified version carries source-sharing obligations.
+Section 13 also requires a modified version that supports remote network
+interaction to prominently offer its corresponding source to those users.
+Corresponding source includes the material needed to build, install, run, and
+modify the covered work; a link to an unrelated or unmodified revision does not
+describe a custom deployment.
+
+Local private modifications do not carry a general publication requirement.
+AGPL does not require submitting improvements upstream. A combined application
+that imports or links to relflow may itself be a covered work; the boundary
+depends on the integration. Review that boundary before distributing or serving
+a proprietary application.
+
+## Data and trained artifacts
+
+Using relflow does not automatically apply AGPL to all inputs or outputs.
+Section 2 covers output only when its content constitutes a covered work.
+Datasets, schemas supplied by users, predictions, weights, and checkpoints need
+to be considered according to their contents and any other applicable licenses.
+Their treatment is distinct from the licensing of a training or serving
+application that incorporates relflow code.
+
+## Additional permissions and contributions
+
+Additional licensing permissions require written approval from **both Grantham
+Taylor and Reid Taylor**, together with the necessary rights for all included
+contributions. This page grants no additional permissions. Ownership of relflow
+does not waive the licenses of third-party dependencies.
+
+Before merging outside contributions, the maintainers require a separate written
+grant covering the necessary contribution rights. Submitting a pull request or
+publishing a fork under AGPL does not by itself grant proprietary relicensing
+rights.
+
+## License text and attribution
+
+The text below is included directly from this checkout's license and notice.
+The full license controls the permissions and obligations described above.
+
+<details>
+  <summary>GNU Affero General Public License, version 3</summary>
+  <pre>{license}</pre>
+</details>
+
+<details>
+  <summary>Project notice</summary>
+  <pre>{notice}</pre>
+</details>

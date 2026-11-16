@@ -1,0 +1,248 @@
+name: Tests
+
+on:
+  workflow_call:
+    inputs:
+      distribution_artifact:
+        type: string
+        default: python-package-distributions
+
+permissions:
+  contents: read
+
+env:
+  OMP_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  POLARS_MAX_THREADS: "2"
+  HF_HUB_OFFLINE: "1"
+  TOKENIZERS_PARALLELISM: "false"
+  PYTEST_ADDOPTS: "-v --maxfail=1 -o faulthandler_timeout=120"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  imports:
+    name: Minimal wheel / optional plotting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install only the wheel and its required dependencies
+        run: |
+          uv venv .venv-imports
+          uv pip install --python .venv-imports/bin/python --torch-backend cpu package/*.whl
+      - name: Model without Matplotlib and reproduce an incomplete namespace
+        run: |
+          .venv-imports/bin/python scripts/imports.py --plotting absent
+          .venv-imports/bin/python scripts/imports.py --plotting namespace
+      - name: Verify the complete plotting-stack remedy
+        run: |
+          uv pip install --python .venv-imports/bin/python matplotlib==3.10.7
+          .venv-imports/bin/python scripts/imports.py --plotting installed
+
+  checkpoint:
+    name: Produce current-release checkpoint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install locked dependencies and shared package wheel
+        run: |
+          uv sync --locked --all-extras --no-install-project
+          uv pip install --python .venv --no-deps package/*.whl
+      - name: Create trained checkpoint and expected predictions
+        run: uv run --no-sync python scripts/checkpoint.py create --output checkpoint-baseline
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checkpoint-baseline-attempt-${{ github.run_attempt }}
+          path: checkpoint-baseline/
+          if-no-files-found: error
+          retention-days: 7
+
+  suite:
+    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    needs: checkpoint
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: ${{ matrix.python }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            python: "3.12"
+            coverage: true
+          - os: ubuntu-24.04
+            python: "3.13"
+          - os: ubuntu-24.04
+            python: "3.14"
+          - os: windows-2025
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install locked dependencies and shared package wheel
+        run: |
+          uv sync --locked --all-extras --no-install-project
+          uv pip install --python .venv --no-deps package/*.whl
+      - name: Verify wheel installation and record environment
+        run: |
+          uv run --no-sync python - <<'PY' > environment.txt
+          import os
+          import platform
+          import sys
+          import sysconfig
+          from pathlib import Path
+          import relflow
+          assert ".".join(map(str, sys.version_info[:2])) == os.environ["UV_PYTHON"]
+          assert Path(relflow.__file__).resolve().is_relative_to(Path(sysconfig.get_paths()["purelib"]).resolve())
+          print(sys.version)
+          print(platform.platform(), platform.machine())
+          print("RelFlow", relflow.__version__, relflow.__file__)
+          PY
+          uv pip freeze >> environment.txt
+      - name: Check formatting, lint, and types
+        if: matrix.coverage
+        run: |
+          uv run --no-sync ruff format --check
+          uv run --no-sync ruff check
+          uv run --no-sync pyrefly check
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-baseline-attempt-${{ github.run_attempt }}
+          path: checkpoint-baseline
+      - name: Load, predict, resave, and resume cross-platform checkpoint
+        run: uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
+      - name: Run complete suite
+        env:
+          COLLECT_COVERAGE: ${{ matrix.coverage || false }}
+        run: |
+          if [ "$COLLECT_COVERAGE" = "true" ]; then
+            uv run --no-sync pytest --full -n 2 --cov --cov-report=term-missing --cov-report=html --cov-report=xml --cov-report=json --junitxml=junit.xml
+          else
+            uv run --no-sync pytest --full -n 2 --junitxml=junit.xml
+          fi
+      - name: Coverage summary
+        if: always() && matrix.coverage
+        run: uv run --no-sync coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-${{ matrix.os }}-py${{ matrix.python }}-attempt-${{ github.run_attempt }}
+          path: |
+            environment.txt
+            junit.xml
+            checkpoint-check/report.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload coverage reports
+        if: always() && matrix.coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-attempt-${{ github.run_attempt }}
+          path: |
+            coverage.xml
+            coverage.json
+            htmlcov/
+          if-no-files-found: warn
+          retention-days: 14
+
+  preview:
+    name: Python 3.15 preview
+    needs: checkpoint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    continue-on-error: true
+    env:
+      UV_PYTHON: "3.15"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.15"
+      - uses: astral-sh/setup-uv@v10.3.0
+        with:
+          enable-cache: true
+      - name: Record preview interpreter
+        run: |
+          python -VV > environment.txt
+          python -c "import platform; print(platform.platform(), platform.machine())" >> environment.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.distribution_artifact }}
+          path: package/
+      - name: Verify the shared CI distributions
+        env:
+          SOURCE_SHA: ${{ github.sha }}
+        run: python scripts/release.py verify package --source-sha "$SOURCE_SHA"
+      - name: Install preview dependencies with nightly CPU Torch
+        run: |
+          uv venv
+          uv pip install --no-deps --index https://download.pytorch.org/whl/nightly/cpu --prerelease allow torch 2>&1 | tee torch-resolution.log
+          uv pip install --python .venv --group dev -r pyproject.toml --all-extras --only-binary torch --only-binary duckdb --prerelease if-necessary-or-explicit 2>&1 | tee resolution.log
+          uv pip install --python .venv --no-deps package/*.whl
+      - name: Record resolved dependencies
+        run: uv pip freeze >> environment.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: checkpoint-baseline-attempt-${{ github.run_attempt }}
+          path: checkpoint-baseline
+      - name: Exercise cross-platform checkpoint and complete suite
+        run: |
+          uv run --no-sync python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoint-check
+          uv run --no-sync pytest --full -n 2 --junitxml=junit.xml
+      - name: Upload preview environment and test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tests-python-3.15-preview-attempt-${{ github.run_attempt }}
+          path: |
+            environment.txt
+            torch-resolution.log
+            resolution.log
+            junit.xml
+            checkpoint-check/report.json
+          if-no-files-found: warn
+          retention-days: 14

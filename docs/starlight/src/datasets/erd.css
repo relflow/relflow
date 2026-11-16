@@ -1,0 +1,301 @@
+.erd-scroll:focus-visible {
+  outline: 2px solid var(--sl-color-text-accent);
+  outline-offset: 3px;
+}
+.data-explorer {
+  min-width: 0;
+}
+.data-explorer > .dataset-observation {
+  margin: 0 0 1rem;
+  padding-left: 0.8rem;
+  border-left: 2px solid var(--sl-color-text-accent);
+  color: var(--rf-muted);
+  font-size: 0.83rem;
+  line-height: 1.75;
+}
+.dataset-observation strong {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--rf-ink);
+}
+.erd-figure {
+  margin: 0;
+  border: 1px solid var(--rf-border);
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+.erd-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--rf-border);
+  background: var(--sl-color-bg);
+  font-size: 0.65rem;
+  line-height: 1.6;
+  color: var(--rf-muted);
+}
+.erd-legend b {
+  margin-right: 0.2rem;
+  font-family: var(--sl-font-mono);
+  font-size: 0.6rem;
+  color: var(--rf-ink);
+}
+.erd-legend .erd-target-key {
+  color: var(--sl-color-text-accent);
+}
+.erd-scroll-hint {
+  margin-left: auto;
+  color: var(--sl-color-text-accent);
+}
+.erd-scroll-hint[hidden] {
+  display: none;
+}
+.erd-column-help {
+  color: var(--rf-muted);
+}
+.erd-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  background-color: var(--rf-card);
+  background-image: radial-gradient(var(--rf-border) 0.7px, transparent 0.7px);
+  background-size: 16px 16px;
+}
+.erd-canvas {
+  position: relative;
+  box-sizing: border-box;
+  min-width: 100%;
+  width: max-content;
+  padding: 1.25rem 1rem 1.25rem 1.5rem;
+}
+.erd-layout {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4rem;
+}
+.erd-level {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.erd-entity {
+  position: relative;
+  z-index: 1;
+  width: 252px;
+  box-sizing: border-box;
+  border: 1px solid var(--rf-border);
+  border-radius: 0.4rem;
+  background: var(--sl-color-bg);
+  box-shadow: 0 3px 10px #00000008;
+  overflow: hidden;
+}
+.erd-entity > header {
+  padding: 0.65rem;
+  border-bottom: 1px solid var(--rf-border);
+  background: var(--rf-surface);
+}
+.erd-entity :is(h3, h4, h5, h6) {
+  margin: 0;
+  color: var(--rf-ink);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  letter-spacing: -0.01em;
+}
+.erd-entity header p {
+  margin: 0.25rem 0 0;
+  font-size: 0.69rem;
+  line-height: 1.6;
+  color: var(--rf-muted);
+}
+.erd-columns {
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+}
+.erd-columns > li {
+  margin: 0;
+  padding: 0;
+}
+.erd-column {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.3rem;
+  width: 100%;
+  box-sizing: border-box;
+  border: 0;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  cursor: pointer;
+  background: none;
+  color: var(--sl-color-text);
+  font-family: var(--sl-font-mono);
+  line-height: 1.6;
+}
+.erd-column:hover,
+.erd-column[data-note-open] {
+  background: var(--rf-surface);
+}
+.erd-column:focus-visible {
+  z-index: 1;
+  outline-offset: -3px !important;
+}
+.erd-column-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.2rem;
+  min-width: 0;
+}
+.erd-column-name {
+  text-decoration: underline dotted var(--rf-muted);
+  text-underline-offset: 0.28em;
+  font-size: 0.7rem;
+  overflow-wrap: anywhere;
+}
+.erd-column-type {
+  flex-shrink: 0;
+  font-size: 0.58rem;
+  color: var(--rf-muted);
+}
+.erd-role {
+  display: inline-block;
+  flex: 0 0 1rem;
+  width: 1rem;
+  font-size: 0.5rem;
+  font-weight: 600;
+  color: var(--rf-muted);
+}
+.erd-column[data-role='target'] {
+  color: var(--sl-color-text-accent);
+}
+.erd-column[data-role='target'] .erd-role {
+  color: var(--sl-color-text-accent);
+}
+.erd-column[data-field-active] {
+  background: var(--sl-color-accent-low);
+}
+.erd-edges {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  width: 100%;
+  height: 100%;
+  color: var(--rf-muted);
+}
+.erd-edges path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+.erd-edges g[data-edge-active] {
+  color: var(--sl-color-text-accent);
+}
+.erd-edges g[data-edge-active] path {
+  stroke-width: 2;
+}
+.erd-relationships {
+  padding: 0.75rem;
+  border-top: 1px solid var(--rf-border);
+  background: var(--sl-color-bg);
+}
+.erd-relationships p {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.2rem 0.7rem;
+  margin: 0.35rem 0;
+  color: var(--rf-muted);
+  font-size: 0.66rem;
+  line-height: 1.65;
+}
+.erd-relationships p > span:first-child {
+  color: var(--rf-ink);
+}
+.erd-relationships b {
+  font-weight: 400;
+  color: var(--sl-color-text-accent);
+  margin-inline: 0.3rem;
+  white-space: nowrap;
+}
+.erd-tooltip {
+  position: fixed;
+  z-index: 100;
+  inset: auto;
+  box-sizing: border-box;
+  width: 20rem;
+  max-width: calc(100vw - 24px);
+  margin: 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--rf-border);
+  border-radius: 0.4rem;
+  background: var(--sl-color-bg);
+  color: var(--sl-color-text);
+  box-shadow: 0 6px 24px #00000020;
+  font-family: var(--sl-font);
+}
+.erd-tooltip[hidden] {
+  display: none;
+}
+.erd-tooltip-name {
+  margin: 0;
+  color: var(--rf-ink);
+  font-family: var(--sl-font-mono);
+  font-size: 0.75rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.erd-tooltip-meta {
+  margin: 0.2rem 0 0.5rem;
+  color: var(--sl-color-text-accent);
+  font-size: 0.65rem;
+  line-height: 1.5;
+}
+.erd-tooltip-description {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.7;
+}
+.erd-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 600px) {
+  .erd-legend {
+    font-size: 0.6rem;
+  }
+  .erd-canvas {
+    width: 100%;
+  }
+  .erd-layout {
+    display: block;
+  }
+  .erd-level {
+    margin-left: calc(var(--erd-level) * 0.35rem);
+    gap: 1.25rem;
+  }
+  .erd-level + .erd-level {
+    margin-top: 1.25rem;
+  }
+  .erd-entity {
+    width: 100%;
+  }
+  .erd-relationships p {
+    display: block;
+  }
+  .erd-relationships p > span {
+    display: block;
+  }
+}

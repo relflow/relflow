@@ -1,0 +1,253 @@
+---
+title: Checkpoints and model state
+description: Separate model artifacts from full training resumes, preserve learned encoding state, and keep external resources and data provenance aligned.
+---
+
+Saving a trained model, resuming an interrupted optimizer run, and reproducing
+an input stream are three different jobs. Choose the artifact for the job
+before continuing training or deploying a model.
+
+Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
+
+## Choose a model artifact or a training checkpoint
+
+| Operation | Restores | Use it for |
+| --- | --- | --- |
+| `model.save(path)` then `rf.Model.load(path)` | Saved schema, model tensor state, current batch size, preset metadata, and recorded relflow version. | Inference or a new training run starting from learned model state. |
+| A full Lightning checkpoint plus `fit(..., ckpt_path=path)` | Model state and the framework's saved optimization, loop, and matching stateful callback state. | Continuing the original training run. |
+| A versioned source manifest and replay plan | Application data selection, ordering, cutoffs, and any external cursor state you record. | Reconstructing the observations supplied to either run. |
+
+The filename suffix does not determine which fields exist. Renaming a file
+written by `model.save` to `.ckpt` does not add optimizer or Trainer state.
+The [model artifact implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/checkpoint.py#L63)
+saves a model state dictionary and relflow metadata, not a running Trainer.
+
+Inspect an existing artifact before constructing its neural graph:
+
+```bash
+relflow inspect artifacts/customer.rf --json
+```
+
+The report includes stored tensor bytes, the saved schema, model version, and
+whether optimizer and loop state are present for resumption. It reads the
+checkpoint on CPU without fitting or predicting. See
+[command-line workflows](/advanced/command-line/) for inspection and preflight
+from either the shell or Python.
+
+## Save and load the current model
+
+Save an already fitted `model`. This example uses a customer model with a
+future-purchase target and an application-prepared request file:
+
+```python
+from pathlib import Path
+
+import polars as pl
+import relflow as rf
+
+
+artifact: Path = Path("artifacts/customer.rf")
+model.save(artifact)
+
+loaded: rf.Model = rf.Model.load(artifact)
+requests: pl.DataFrame = pl.read_parquet("data/requests.parquet")
+predictions: pl.DataFrame = loaded.predict(
+    requests,
+    batch_size=128,
+    retain=("customer_id",),
+)
+```
+
+`model` here is the fitted customer model. The request file supplies matching
+known inputs without the future-purchase label. Retaining `customer_id` keeps
+results identifiable; the ID need not be a modeled input.
+
+Loading reconstructs the graph from the saved resolved schema. Calling
+`SomeSchema.load(...)` does not merge newly edited class declarations into that
+saved graph. Likewise, loading a model does not create a new supervised task
+merely because the surrounding Python file now declares another target.
+
+The artifact includes registered model parameters, buffers, and extension state
+owned by the model's state dictionary. That includes learned encoding state
+such as vocabulary metadata and numeric normalizers. A vocabulary index is
+meaningful only beside the corresponding embedding and decoder rows; do not
+rebuild or reorder the vocabulary separately after loading. See the
+[grown-vocabulary checkpoint test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_vocabulary_growth.py#L254).
+
+## Start a new fit from learned state
+
+An ordinary second `fit` creates a fresh optimizer run over the current model
+parameters. It retains learned model state but does not recover the previous
+optimizer moments, scheduler position, or Trainer loop merely because the model
+was loaded from disk.
+
+```python
+continued: rf.Model = rf.Model.load("artifacts/customer.rf")
+new_data = rf.ArrowDataModule(
+    train="data/new-train.parquet",
+    validate="data/new-validation.parquet",
+)
+continued.fit(
+    new_data,
+    batch_size=128,
+    learning_rate=1e-4,
+    max_epochs=4,
+    early_stopping=False,
+    rollback=False,
+)
+```
+
+Create a new data module for the loaded model. A built-in module already bound
+to another model cannot be rebound to it. This workflow is appropriate for a
+new fine-tuning run or a deliberate change of optimization policy; it is not a
+full interrupted-run resume.
+
+## Save a full optimization checkpoint
+
+Configure a full checkpoint callback when starting the run. This example imports
+`Customer` from the [standalone Python example](/examples/repeat-purchase/repeat_purchase.py).
+Keep `repeat_purchase.py` beside the script. Prepare the Parquet files at the
+paths shown below with matching inputs and historical `returns_in_30d` labels.
+
+```python
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+import relflow as rf
+from repeat_purchase import Customer
+
+
+if __name__ == "__main__":
+    model = Customer(preset="small")
+    data = rf.ArrowDataModule(
+        train="data/train.parquet",
+        validate="data/validation.parquet",
+    )
+    checkpoints = ModelCheckpoint(
+        dirpath="checkpoints/customer",
+        monitor="loss/validate",
+        mode="min",
+        save_top_k=1,
+        save_last=True,
+        save_weights_only=False,
+    )
+    model.fit(
+        data,
+        callbacks=[rf.EMA(decay=0.99), checkpoints],
+        batch_size=128,
+        learning_rate=1e-3,
+        max_epochs=8,
+        early_stopping=False,
+        rollback=False,
+    )
+```
+
+Use the callback's saved last checkpoint for the continuation point and its
+best checkpoint for the monitored selection point. `rollback=False` leaves
+the current final model in memory; it does not automatically replace it with
+`checkpoints.best_model_path`.
+
+The convenience fit policy can also create a `RollbackCheckpoint`. Its job is
+to restore selected model state at fit end, which is different from resuming
+the complete Trainer at that step. A training-only dataset needs an appropriate
+training monitor or disabled validation-dependent stopping and rollback.
+
+## Resume through the full checkpoint
+
+Load the saved graph first, construct fresh data loaders, and pass the same
+full checkpoint to `fit`. Recreate the stateful callback types and compatible
+optimizer/scheduler configuration expected by that run.
+
+```python
+resume_path = "checkpoints/customer/last.ckpt"
+resumed: rf.Model = rf.Model.load(resume_path)
+resume_data = rf.ArrowDataModule(
+    train="data/train.parquet",
+    validate="data/validation.parquet",
+)
+resume_checkpoints = ModelCheckpoint(
+    dirpath="checkpoints/customer",
+    monitor="loss/validate",
+    mode="min",
+    save_top_k=1,
+    save_last=True,
+    save_weights_only=False,
+)
+resumed.fit(
+    resume_data,
+    callbacks=[rf.EMA(decay=0.99), resume_checkpoints],
+    learning_rate=1e-3,
+    max_epochs=12,
+    ckpt_path=resume_path,
+    early_stopping=False,
+    rollback=False,
+)
+```
+
+This snippet continues the imports from the previous example. `max_epochs=12`
+is the run's total epoch target, not twelve additional epochs after the saved
+position. Saved optimizer and scheduler state take part in the continuation;
+changing the learning-rate argument is not a substitute for deliberately
+changing a restored optimizer's schedule.
+
+If the original run used a scheduler, a precision plugin with state, or other
+stateful callbacks, recreate compatible components so their saved state has
+an owner during restoration. A model-only artifact lacks those framework
+states. The [fit implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/root.py#L686)
+forwards `ckpt_path` to Lightning; it does not implement a second resume format.
+
+## Know which weights averaging saves
+
+`rf.EMA` averages learned parameters after optimizer updates. Validation and
+checkpoint selection use those averages, and fitting finishes with averaged
+learned parameters. Frozen resources, normalizers, counters, and vocabulary
+metadata retain their current values rather than being exponentially averaged.
+
+A full checkpoint with EMA exports averaged inference weights and separately
+retains live parameters for optimizer-consistent continuation. On resume, the
+EMA callback restores the live snapshot before training resumes. Recreate the
+callback; `rf.Model.load` alone loads the exported model weights, not a Trainer
+and its averaging lifecycle. See the
+[full-resume test with growing vocabularies](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_averaging.py#L325).
+
+Replacing a parameter or changing its shape starts a new average for that
+tensor. Do not assume that an old averaged prefix can be copied to newly
+arranged vocabulary rows. `ema_decay=None` disables a fit preset's default
+averaging; an explicitly supplied EMA callback replaces that default.
+
+## Keep artifacts, data, and resources aligned
+
+- **Source replay is separate.** A full optimization checkpoint is not a
+  snapshot of an external reader, message offset, shuffle buffer, or source
+  manifest. The Arrow data module's local epoch counters and source settings
+  are not a persisted input-stream cursor. Record the source snapshot and
+  consumer plan, and validate replay after resuming rather than claiming exact
+  interrupted-stream continuation from `ckpt_path` alone.
+- **Custom code remains a dependency.** Register custom leaf types before
+  reconstructing their schemas. Keep extension implementations, preprocessor
+  code, and connector configuration versioned beside the artifact. Serialized
+  model state does not package their Python implementations or data sources.
+- **External resources keep their own identity.** A model artifact does not
+  package frozen text-encoder weights, cache entries, or a data warehouse.
+  Keep the required encoder configuration and assets available in the target
+  environment. The automatic [Text cache](/data-types/text/) can start cold and
+  refill from that encoder; its persisted results are reusable computation,
+  rather than learned task state. When caching is enabled, supply a writable
+  cache location separately from the checkpoint.
+- **Schema changes are deliberate.** Loading uses the saved schema. Apply
+  mutations as a separate operation and start a new fit when changing task or
+  graph ownership; a pre-mutation optimizer checkpoint is not automatically a
+  resume for the edited graph.
+- **Recorded version is provenance.** `model.version` preserves the artifact's
+  relflow version, while `rf.__version__` identifies the installed package.
+  Loading does not use their equality as a compatibility gate. Validate the
+  artifact in the intended runtime rather than treating version metadata as a
+  compatibility guarantee.
+
+The [checkpoint version tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_checkpoint_version.py#L68)
+and [transactional restore tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_checkpoint_restore.py#L74)
+pin the model-state behavior described here.
+
+Continue with [online vocabulary](/advanced/online-vocabulary/) for encoding
+state changes, [distributed training and streaming](/advanced/distributed-data/)
+for consumer ownership, and [mutations](/advanced/mutations/) for intentional
+schema edits.

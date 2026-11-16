@@ -1,0 +1,305 @@
+---
+title: Masking and pretraining
+description: Build reconstruction objectives, select hidden coordinates, and adapt learned context to a supervised task.
+---
+
+import DataViews from '../../../components/DataViews.astro';
+import { scenarios } from '../../../data/concepts/scenarios';
+import { observationDatasets } from '../../../data/observations';
+
+Masking defines which values the encoder can see and which answers a loss
+should teach. That makes it useful for more than a permanently hidden target:
+you can reconstruct selected sensor readings, train several objectives from
+shared context, and then adapt that learned model to a different task.
+
+Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
+Start with [Targets and masking](/concepts/targets/) for the supervised case
+and [Regularization](/advanced/regularization/) for input dropout and noise.
+
+## Separate selection, visibility, and supervision
+
+Every node stores a canonical tuple of `rf.Mask` policies. A policy first
+selects coordinates, then applies its visibility and reconstruction settings.
+
+| Setting | Meaning |
+| --- | --- |
+| `query` | Read one explicit, non-null Boolean per owner record to choose eligible coordinates. |
+| `rate` | Uniformly sample eligible coordinates at the supplied rate. It is a sampling probability, not a loss weight. |
+| `skip` | Omit selected coordinates from encoder participation rather than retaining masked placeholders. |
+| `dropout` | Treat the policy as training-only input augmentation. It defaults to the opposite of `reconstruct`. |
+| `reconstruct` | Use selected, observed answers as a reconstruction objective during training/evaluation; request their inference during applicable prediction policies. |
+
+`dropout=True` and `reconstruct=True` cannot be combined in one policy.
+Neural attention/feed-forward `dropout` is a separate node configuration.
+The [Mask declaration and normalization](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/structs/tree.py#L19)
+define these combinations.
+
+```python
+# Permanently hidden supervised answer; never embedded as input.
+failure_30d = rf.Boolean(mask=True)
+
+# Training-only input masking, without another learning objective.
+load = rf.Number(mask=0.1)
+
+# Mask and reconstruct a sampled part of a supplied numeric field.
+temperature = rf.Number(
+    mask=rf.Mask(rate=0.15, reconstruct=True),
+    weight=0.25,
+)
+```
+
+`mask=True` normalizes to `Mask(skip=True, dropout=False,
+reconstruct=True)`. A float normalizes to a policy with that `rate` and the
+default `dropout=True`. Use `mask=False` to remove every policy. An explicit
+rate of zero is removed during normalization; a rate of one becomes an
+always-selected policy without a rate.
+
+## Know which policies run in each split
+
+| Policy | Train | Validate / test | Predict |
+| --- | --- | --- | --- |
+| Input dropout, such as `mask=0.1` | Sample and hide inputs. | Disabled. | Disabled. |
+| Sampled reconstruction, such as `Mask(rate=0.15, reconstruct=True)` | Sample and reconstruct. | Sample and score reconstruction. | Rate-backed policy disabled. |
+| Always-hidden target, `mask=True` | Learn from hidden answers. | Score hidden answers. | Request the target, without needing its source field. |
+| Query reconstruction without a rate | Reconstruct selected coordinates. | Score selected coordinates. | Request selected coordinates; preserve the selector and required source structure. |
+
+Validation/test sampling fixes its effective epoch while training sampling
+uses the current epoch. Draws also depend on seed, split, batch ordinal,
+address, and selection settings. Repeating the same batch plan repeats its
+masks; changing row order or batching can change them. A rate specifies a
+probability, not an exact number of selected records.
+
+Small batches, empty histories, or a query that selects nothing can leave a
+training batch without a participating reconstruction objective. Inspect
+eligibility and selected targets when diagnosing that case; a configured
+rate does not guarantee usable supervision in every batch.
+
+The [activation and sampling rules](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L618)
+and [configuration matrix tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_mask_policies.py#L30)
+cover all four splits.
+
+## Pretrain on context, then add the business target
+
+Use the maintenance example's observation boundary: one asset at an assessment
+cutoff, with sensor readings and completed work known then. The eventual
+supervised task predicts failure within the next 30 days.
+
+<DataViews id="pretraining-maintenance-data" dataset={observationDatasets.maintenance} schema={scenarios.filter((item) => item.id === 'maintenance')[0].schema} />
+
+The explorer describes the final task. The pretraining schema below uses its
+context fields without `failure_30d`: sampled temperature and load readings
+supply reconstruction answers directly from the observed history.
+
+Prepare `maintenance/pretrain/train.parquet` and
+`maintenance/pretrain/validation.parquet` with those context fields. Every
+retained reading must precede the assessment cutoff. Keep histories ordered
+oldest to newest so `overflow="tail"` keeps the most recent retained records.
+
+```python
+import relflow as rf
+
+
+class SensorReading(rf.Branch):
+    """One sensor observation available at the asset assessment."""
+
+    hour = rf.Period("hour_of_day")
+    vibration = rf.Number
+    temperature = rf.Number(
+        mask=rf.Mask(rate=0.15, reconstruct=True),
+        weight=0.25,
+    )
+    load = rf.Number(
+        mask=rf.Mask(rate=0.15, reconstruct=True),
+        weight=0.25,
+    )
+
+
+class WorkOrder(rf.Branch):
+    """One completed maintenance job known at the assessment."""
+
+    type = rf.Category
+    parts_replaced = rf.Set
+    age_days = rf.Number
+
+
+class AssetPretraining(rf.Model):
+    """An asset whose observed sensor context supplies pretraining tasks."""
+
+    asset_type = rf.Category
+    age_years = rf.Number
+    sensor_readings = SensorReading(length=168, overflow="tail")
+    work_orders = WorkOrder(length=32, overflow="tail")
+
+
+if __name__ == "__main__":
+    model = AssetPretraining(preset="small")
+    pretraining = rf.ArrowDataModule(
+        train="maintenance/pretrain/train.parquet",
+        validate="maintenance/pretrain/validation.parquet",
+    )
+    model.fit(
+        pretraining,
+        batch_size=128,
+        learning_rate=1e-4,
+        max_epochs=8,
+    )
+    model.save("asset-context.rf")
+```
+
+The two reconstruction addresses are `/sensor_readings/temperature` and
+`/sensor_readings/load`. Their known source values are retained as answers
+while selected encoder values are hidden. The default `skip=False` retains
+masked placeholders for those coordinates.
+
+The validation objective here measures reconstruction of held-out sensor
+values. It does not measure the future failure task. Compare fine-tuning
+against training that final task from scratch using the same evaluation
+cohort and budget.
+
+The sampled policies also do not request public prediction outputs by
+themselves. Add the supervised target below before using `predict`, or request
+[embeddings](/advanced/embeddings/) explicitly when you want learned context
+representations from the pretrained artifact.
+
+### Switch to the supervised objective between fits
+
+Now prepare `maintenance/failure/train.parquet` and
+`maintenance/failure/validation.parquet` with the same known context plus
+settled `failure_30d` labels. That label keeps the original definition:
+failure in the 30 days after assessment. The prediction requests file contains
+known context without the answer.
+
+```python
+import polars as pl
+import relflow as rf
+
+
+model: rf.Model = rf.Model.load("asset-context.rf")
+
+for field in ("temperature", "load"):
+    address = rf.Address("sensor_readings", field)
+    model.update(
+        rf.where("address") == address,
+        mask=False,
+        weight=1.0,
+    )
+
+root = rf.where("address") == rf.Address()
+model.extend(root, failure_30d=rf.Boolean(mask=True))
+
+fine_tuning = rf.ArrowDataModule(
+    train="maintenance/failure/train.parquet",
+    validate="maintenance/failure/validation.parquet",
+)
+model.fit(
+    fine_tuning,
+    batch_size=128,
+    learning_rate=5e-5,
+    max_epochs=8,
+)
+model.save("asset-failure.rf")
+
+requests: pl.DataFrame = pl.read_parquet("maintenance/failure/requests.parquet")
+predictions: pl.DataFrame = model.predict(requests, batch_size=256)
+```
+
+This makes temperature and load ordinary context again and adds one fresh
+Boolean head. Compatible learned state can survive the schema rebuild;
+the new head still needs the supervised fit. The unqualified `model.fit`
+starts a new optimizer run on the current parameters.
+
+Perform edits outside active Trainer/forward/inference operations. Use
+[Mutations](/advanced/mutations/) to understand what is retained or reset,
+and [Checkpoints and state](/advanced/checkpoints-and-state/) when continuing
+a training run rather than starting a new adaptation phase. Calling
+`model.reset(...)` deliberately discards selected learned runtime state;
+it is not required just to change masking policy.
+
+## Drive selection from a source Boolean
+
+Use a query when the application already knows which coordinates should be
+hidden. For example, add a non-null `reconstruct_temperature` Boolean to
+each sensor-reading source record. The selector is control data read by
+the mask; it does not need to be declared as an embedded model field.
+
+This alternative declaration builds on the classes above:
+
+```python
+class SelectedReading(SensorReading):
+    """A reading with explicit temperature reconstruction selection."""
+
+    temperature = rf.Number(
+        mask=rf.Mask(
+            query="reconstruct_temperature",
+            reconstruct=True,
+        )
+    )
+
+
+class SelectedAsset(AssetPretraining):
+    """An asset whose temperature targets follow source selectors."""
+
+    sensor_readings = SelectedReading(length=168, overflow="tail")
+```
+
+The query runs against the mask owner's records: here, each retained sensor
+reading. It must return one structurally present Boolean per owner record,
+without nulls. A query is relflow's structural path syntax, not an arbitrary
+Python expression. Compute joins, ranks, time windows, or eligibility in a
+preprocessor or source pipeline, and provide the resulting Boolean column.
+
+Adding `rate=0.2` samples only among records where that query is true. Putting
+the policy on a branch instead applies each selected owner decision to its
+descendant fields together. Every descendant reached by reconstruction must
+support its own decoder and loss.
+
+For query-backed prediction, retain the selector and the queried source
+structure; place nulls in selected value positions when appropriate rather
+than assuming the entire field may disappear. Automatic omission of a source
+target is supported by unconditional reconstruction such as `mask=True`.
+The [selector validation tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_dynamic_masking.py#L191)
+and [branch selection tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_mask_policies.py#L208)
+cover these boundaries.
+
+## Combine objectives deliberately
+
+Several policies can be supplied as a tuple on one node. Each policy has
+its own selection and effects. Reconstruction selections combine at a
+field address; multiple selected coordinates or overlapping policies do
+not create independent objective names for that same field.
+
+By default, relflow computes one extension-owned loss per participating
+reconstruction address, multiplies it by the field's positive `weight`,
+and sums those weighted losses. A masking rate therefore changes which
+coordinates participate; `weight` changes the contribution of an objective.
+Different types, units, and reconstruction tasks need separate evaluation.
+The [loss aggregation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/runtime.py#L330)
+defines that distinction.
+
+The optional `jacobian=True` constructor policy uses TorchJD UPGrad to
+combine weighted reconstruction objectives. It requires `relflow[torchjd]`,
+dense objective gradients, and single-device or unsharded DDP training.
+Enable it before compilation; it is a session policy that must be selected
+again after loading a model. See the
+[policy validation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/jacobian.py#L29)
+before integrating it with a custom training loop.
+
+## Keep the prediction cutoff outside the mask
+
+Random reconstruction allows other retained records to inform a selected
+answer. For the maintenance task, ensure the source history was already
+cut at the assessment time. Hiding a value does not remove future records,
+join leakage, or an answer duplicated in another input field.
+
+A reconstruction mask controls value visibility and objective selection;
+it does not introduce a causal attention policy or generate a sequence of
+future records. The [attention implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/attention.py#L69)
+uses the retained context. Build an explicit prefix/cutoff task when the
+evaluation question requires past-only information.
+
+Masking also leaves pristine training observation intact: the vocabulary
+and numeric statistics can still learn from the source values before the
+masked input projection. Use validation/test splits to freeze that state,
+rather than treating hidden training values as a held-out population.
+See the [pristine-observation tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_dynamic_masking.py#L90)
+and [Online vocabulary](/advanced/online-vocabulary/) for that lifecycle.

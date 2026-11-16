@@ -1,0 +1,295 @@
+"""The merge gate rejects incomplete jobs, and releases consume exact successful main CI."""
+
+import itertools
+import json
+import os
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+import yaml
+
+WORKFLOWS = Path(__file__).resolve().parents[1] / ".github/workflows"
+GATE = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())["jobs"]["required"]["steps"][0]["run"]
+RELEASE = yaml.safe_load((WORKFLOWS / "release.yml").read_text())["jobs"]["detect_version"]["steps"][0]["with"][
+    "script"
+]
+EVENTS = ["pull_request", "merge_group", "push", "workflow_dispatch"]
+
+
+@pytest.fixture
+def gate(monkeypatch):
+    def run(event, results, head="relflow/relflow", package_attempt="2", evidence_attempt="2"):
+        monkeypatch.setenv("EVENT_NAME", event)
+        monkeypatch.setenv("REPOSITORY", "relflow/relflow")
+        monkeypatch.setenv("PR_REPOSITORY", head)
+        monkeypatch.setenv("RUN_ATTEMPT", "2")
+        monkeypatch.setenv("PACKAGE_ATTEMPT", package_attempt)
+        monkeypatch.setenv("EVIDENCE_ATTEMPT", evidence_attempt)
+        monkeypatch.setenv("RESULTS", json.dumps({name: {"result": result} for name, result in results.items()}))
+        exec(compile(GATE, "ci.yml:required", "exec"), {})
+
+    return run
+
+
+@pytest.mark.parametrize("event", EVENTS)
+def test_complete_jobs_satisfy_the_gate(gate, event):
+    gate(
+        event,
+        {
+            "tests": "success",
+            "docs": "success",
+            "evidence": "success",
+            "package": "success",
+            "structure": "success",
+            "native": "success",
+        },
+    )
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_normal_tests_are_always_required(gate, event, status):
+    results = {
+        "tests": status,
+        "docs": "success",
+        "evidence": "success",
+        "package": "success",
+        "structure": "success",
+        "native": "success",
+    }
+    with pytest.raises(AssertionError):
+        gate(event, results)
+
+
+@pytest.mark.parametrize(
+    "event,status",
+    itertools.product(EVENTS, ["failure", "cancelled", "skipped"]),
+)
+def test_evidence_errors_or_skips_never_satisfy_validation(gate, event, status):
+    with pytest.raises(AssertionError):
+        gate(
+            event,
+            {
+                "tests": "success",
+                "docs": "success",
+                "evidence": status,
+                "package": "success",
+                "structure": "success",
+                "native": "success",
+            },
+        )
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_documentation_is_required_for_every_event(gate, event, status):
+    results = {
+        "tests": "success",
+        "docs": status,
+        "evidence": "success",
+        "package": "success",
+        "structure": "success",
+        "native": "success",
+    }
+    with pytest.raises(AssertionError):
+        gate(event, results)
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_shared_package_is_required_for_every_event(gate, event, status):
+    with pytest.raises(AssertionError):
+        gate(
+            event,
+            {
+                "tests": "success",
+                "docs": "success",
+                "evidence": "success",
+                "package": status,
+                "structure": "success",
+                "native": "success",
+            },
+        )
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_native_checks_are_required_for_every_event(gate, event, status):
+    results = {name: "success" for name in ("tests", "docs", "evidence", "package", "structure")}
+    results["native"] = status
+    with pytest.raises(AssertionError):
+        gate(event, results)
+
+
+@pytest.mark.parametrize("event,status", itertools.product(EVENTS, ["failure", "cancelled", "skipped"]))
+def test_repository_structure_is_required_for_every_event(gate, event, status):
+    results = {name: "success" for name in ("tests", "docs", "evidence", "package", "native")}
+    results["structure"] = status
+    with pytest.raises(AssertionError):
+        gate(event, results)
+
+
+def test_forks_and_missing_jobs_cannot_report_a_passing_gate(gate):
+    with pytest.raises(AssertionError):
+        gate(
+            "pull_request",
+            {
+                "tests": "success",
+                "docs": "success",
+                "evidence": "success",
+                "package": "success",
+                "structure": "success",
+                "native": "success",
+            },
+            head="fork/relflow",
+        )
+    with pytest.raises(AssertionError):
+        gate("pull_request", {"tests": "success", "evidence": "success"})
+
+
+@pytest.mark.parametrize("event", EVENTS)
+@pytest.mark.parametrize("package,evidence", [("1", "2"), ("2", "1"), ("", "2"), ("2", "")])
+def test_partial_ci_retries_require_a_complete_current_attempt(gate, event, package, evidence):
+    with pytest.raises(AssertionError, match="re-run all jobs"):
+        gate(
+            event,
+            {name: "success" for name in ("tests", "docs", "evidence", "package", "native", "structure")},
+            package_attempt=package,
+            evidence_attempt=evidence,
+        )
+
+
+@pytest.fixture
+def release():
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to execute the GitHub-script release guard")
+
+    def run(change=None, manual=False, available=True):
+        candidate = {
+            "id": 123,
+            "run_attempt": 2,
+            "conclusion": "success",
+            "event": "push",
+            "head_branch": "main",
+            "head_sha": "main-sha",
+            "head_repository": {"full_name": "relflow/relflow"},
+            "path": ".github/workflows/ci.yml",
+        }
+        candidate.update(change or {})
+        fixture = {"source": RELEASE, "run": candidate, "manual": manual, "available": available}
+        harness = """
+        const fixture = JSON.parse(process.env.RELEASE_FIXTURE);
+        const outputs = {};
+        const context = {repo: {owner: 'relflow', repo: 'relflow'}, payload: fixture.manual ? {} : {workflow_run: fixture.run}};
+        const github = {rest: {
+          git: {getRef: async () => ({data: {object: {sha: 'main-sha'}}})},
+          actions: {listWorkflowRuns: async () => ({data: {workflow_runs: fixture.available ? [fixture.run] : []}})},
+        }};
+        const core = {setOutput: (key, value) => {outputs[key] = value}, info: () => {}};
+        const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+        await new AsyncFunction('github', 'context', 'core', fixture.source)(github, context, core);
+        process.stdout.write(JSON.stringify(outputs));
+        """
+        return subprocess.run(
+            [node, "--input-type=module", "-e", harness],
+            env=dict(os.environ, RELEASE_FIXTURE=json.dumps(fixture)),
+            capture_output=True,
+            text=True,
+        )
+
+    return run
+
+
+@pytest.mark.parametrize("manual", [False, True])
+def test_release_selects_the_successful_run_of_the_exact_main_commit(release, manual):
+    result = release(manual=manual)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) == {
+        "run_id": "123",
+        "source_sha": "main-sha",
+        "distribution_artifact": "python-package-distributions-attempt-2",
+        "current": "true",
+    }
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"conclusion": "failure"},
+        {"event": "pull_request"},
+        {"head_branch": "feature"},
+        {"head_repository": {"full_name": "fork/relflow"}},
+        {"path": ".github/workflows/other.yml"},
+        {"run_attempt": None},
+        {"run_attempt": 0},
+        {"run_attempt": True},
+    ],
+)
+def test_release_rejects_runs_outside_the_trusted_main_ci_boundary(release, change):
+    assert release(change).returncode != 0
+
+
+def test_release_skips_superseded_main_and_rejects_missing_validation(release):
+    stale = release({"head_sha": "older-main"})
+    assert stale.returncode == 0
+    assert json.loads(stale.stdout) == {"current": "false"}
+    assert release(manual=True, available=False).returncode != 0
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+@pytest.mark.parametrize(
+    "branch,accepted", [("main", True), ("stage/0.5.0", True), ("stage/0.6.0", True), ("feature/docs", False)]
+)
+def test_full_ci_includes_staging_branches(event, branch, accepted):
+    from fnmatch import fnmatchcase
+
+    workflow = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert any(fnmatchcase(branch, pattern) for pattern in triggers[event]["branches"]) is accepted
+    assert set(workflow["jobs"]) == {"structure", "package", "tests", "docs", "native", "evidence", "required"}
+
+
+@pytest.mark.parametrize(
+    "event,ref,run_id,version,source,expected",
+    [
+        ("workflow_run", "refs/heads/main", "123", "0.5.0", "a" * 40, True),
+        ("workflow_dispatch", "refs/heads/main", "123", "0.5.0", "a" * 40, True),
+        ("pull_request", "refs/pull/102/merge", "123", "0.5.0", "a" * 40, False),
+        ("workflow_dispatch", "refs/heads/stage/0.5.0", "123", "0.5.0", "a" * 40, False),
+        ("workflow_run", "refs/heads/main", "", "0.5.0", "a" * 40, False),
+        ("workflow_run", "refs/heads/main", "123", "", "a" * 40, False),
+        ("workflow_run", "refs/heads/main", "123", "0.5.0", "", False),
+    ],
+)
+def test_evidence_publication_requires_the_release_caller_and_complete_main_inputs(
+    event, ref, run_id, version, source, expected
+):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is required to execute GitHub Actions publication conditions")
+    workflow = yaml.safe_load((WORKFLOWS / "publish-evidence.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"workflow_call"}
+    assert set(workflow["jobs"]) == {"publish"}
+    fixture = {
+        "condition": workflow["jobs"]["publish"]["if"],
+        "inputs": {"library_run_id": run_id, "version": version, "source_sha": source},
+        "github": {"event_name": event, "ref": ref},
+    }
+    result = subprocess.run(
+        [
+            node,
+            "--input-type=module",
+            "-e",
+            """
+        const fixture = JSON.parse(process.env.PUBLICATION_FIXTURE);
+        const value = new Function('inputs', 'github', `return (${fixture.condition});`)(fixture.inputs, fixture.github);
+        process.stdout.write(JSON.stringify(Boolean(value)));
+        """,
+        ],
+        env=dict(os.environ, PUBLICATION_FIXTURE=json.dumps(fixture)),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout) is expected

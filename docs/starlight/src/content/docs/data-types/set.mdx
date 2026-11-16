@@ -1,0 +1,153 @@
+---
+title: Set
+description: Represent several unordered labels on one record and learn their membership probabilities.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Set` for unordered membership: interests, product tags, permissions,
+or several reasons a record needs attention. A record can contain none, one,
+or many labels.
+
+<DataTypePage name="Set">
+
+## Input values
+
+Supply a list of scalar labels. The supported label types are strings,
+integers, floats, Booleans, and bytes; use one compatible scalar type per
+field. Order and duplicates do not change membership.
+
+An empty list is a known empty set. A null collection has a separate state.
+Null members and floating-point NaN members are dropped. The vocabulary grows
+during training and is reused for validation, test, and prediction. Unknown
+members share an unavailable representation, so their individual identities
+cannot be recovered from it.
+
+Use a branch when each member has its own fields, such as a purchase with an
+amount and timestamp. A set of product labels does not preserve those
+per-purchase relationships. See [Context branches](/concepts/branches/).
+
+## Standardization and processor pipelines
+
+Optional string folding is applied before vocabulary lookup. The encoder
+deduplicates membership labels and maps known members to learned embedding
+rows. It averages their content embeddings and adds a shared unavailable
+representation when unfamiliar members are present, then combines that
+content with the field’s state embedding.
+
+An empty valued set and a null collection remain distinct. During training,
+`p_unavailable` can hide known positive input members while leaving the full
+reconstruction target unchanged.
+
+## How is this leaf trained?
+
+State classification uses cross-entropy. Content reconstruction uses
+binary cross-entropy independently for each populated vocabulary label:
+present members are positives and absent known members are negatives.
+The content term is averaged across the selected known memberships.
+
+Unseen target members have no named output class. The writer’s `threshold`
+filters results after prediction and does not change this objective.
+
+### Predictions
+
+For a decoded target, `content` contains label/probability pairs for populated
+vocabulary labels. Labels are written as strings. Each probability describes
+membership independently; the probabilities do not need to sum to one.
+
+`threshold=0.5` keeps pairs whose probability is at least `0.5`. The default,
+`threshold=None`, includes every populated label. This is an output filter;
+it leaves the training loss and metrics unchanged. An empty filtered result
+means no known label met the selected threshold.
+
+<ValueTree
+  id="set-predictions"
+  {...outputs.set}
+  predictions
+  heading="Illustrative prediction output"
+  label="Set prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `threshold` | `None` | Filter written label/probability pairs at a threshold in `[0, 1]`; `None` includes every populated label. |
+| `strip` | `False` | Trim surrounding whitespace from string members. |
+| `cased` | `True` | Set `cased=False` to lowercase string members before lookup. |
+| `p_unavailable` | `0.01` | Independently drop known positive input labels at this rate during training, while preserving targets. |
+
+String matching is exact by default. Folding affects vocabulary snapshots
+and written labels as well as input lookup.
+
+### Request methods
+
+Use `rf.Set.vocabulary` to inspect all unique labels admitted to one field
+across its observed training data.
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `vocabulary(source, address)` | An immutable tuple of populated labels | Read this field's unique vocabulary in its stored order. |
+
+```python
+labels: tuple[str, ...] = rf.Set.vocabulary(model, "/purchased_categories")
+unique_label_count: int = len(labels)
+```
+
+The address identifies the Set field, rather than one customer's set of
+values. Each Set field maintains its own vocabulary. The tuple preserves label
+types and configured string folding, excludes the unavailable sentinel, and
+does not change when later training admits more labels; call the method again
+for a fresh snapshot.
+
+`source` may be the model or its `interprocess_encoding_context`. The field must
+exist at the supplied absolute address and have the Set type.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| A threshold outside `[0, 1]` | Configuration validation rejects the threshold. | Use an allowed probability or `None` to keep all populated labels. |
+| Nested records or incompatible scalar label families | The source does not satisfy the membership-label contract. | Supply scalar labels of one compatible type; use a branch for members with fields. |
+| An inspection helper targets a missing or different leaf | `KeyError` or `TypeError` identifies the field/context mismatch. | Pass the Set field’s absolute schema address and a supported source. |
+
+### Footguns
+
+- **Dropping unfamiliar members and calling the result empty.** Preserve
+  the distinction between an empty set, a null, and members outside the learned
+  vocabulary. Test disjoint-label inputs: in recorded 0.4.2
+  [P064](/evidence/#P064), transfer on its nonempty-set task depended on
+  training the unavailable-member fallback.
+- **Scoring only members the vocabulary can name.** Report member coverage
+  and complete-set coverage alongside quality, and count unseen target members
+  in external evaluation. Recorded 0.4.2 [P063](/evidence/#P063) includes
+  partially known and entirely unfamiliar target sets to expose this gap.
+- **Renormalizing membership probabilities to sum to one.** Several labels
+  can be likely together; renormalization changes what their scores mean.
+  Evaluate membership decisions separately. Recorded 0.4.2
+  [P063](/evidence/#P063) learns two overlapping prevalence rates rather
+  than a single competing-class distribution.
+- **Reading a filtered empty result as a known empty answer.** No vocabulary
+  label may have reached your output threshold. Inspect unfiltered scores with
+  `threshold=None` and check vocabulary coverage before interpreting the empty
+  list; the [threshold writer test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_set.py#L219)
+  demonstrates that this option filters the written candidates.
+
+## Relevant evidence
+
+<LeafEvidence type="Set" />
+
+### Related types
+
+- [Category](/data-types/category/) learns one label from a vocabulary discovered during training.
+- [Enum](/data-types/enum/) chooses one label from a fixed declaration.
+- [Boolean](/data-types/boolean/) predicts one true-or-false fact.
+
+For admission, unknown labels, and continued training, see
+[Online vocabulary](/advanced/online-vocabulary/).
+
+</DataTypePage>

@@ -1,0 +1,366 @@
+---
+title: Inference and deployment
+description: Stream batch predictions, bound direct requests, preserve output contracts, and tune the optional JSON/Arrow serving runtime.
+---
+
+import DataViews from '../../../components/DataViews.astro';
+import { repeatPurchaseSchema } from '../../../data/schema-examples';
+import { repeatPurchase } from '../../../data/observations';
+
+Choose the inference path by what must stay in memory and how callers receive
+the result. A direct prediction returns one collected eager Polars frame. A prediction
+data module can read prepared sources in batches and write each batch without
+collecting the job’s outputs. The optional HTTP runtime exposes the same
+prediction contract through JSON and Arrow IPC.
+
+All examples assume an existing fitted model saved as `customer.rf`. The
+customer-specific examples use the record shape below and predict
+`returns_in_30d`. Supply application-prepared request files without that future
+label; substitute your own artifact and matching inputs for another model.
+
+<DataViews id="inference-purchase-data" dataset={repeatPurchase} schema={repeatPurchaseSchema} />
+
+## Bound a direct prediction
+
+Use direct prediction when the request table and its complete output fit in
+memory. `batch_size` limits the rows encoded and forwarded together; it does
+not turn that in-memory call into a file scanner.
+
+```python
+import polars as pl
+
+import relflow as rf
+
+
+model = rf.Model.load("customer.rf")
+requests: pl.DataFrame = pl.read_parquet("purchase-requests.parquet")
+result: pl.DataFrame = model.predict(
+    requests,
+    batch_size=128,
+    retain=("customer_id",),
+)
+```
+
+The call preprocesses the **whole supplied input once**, chunks the processed
+Arrow rows, combines their prediction tables, then postprocesses the combined
+result once. A dataset-wide preprocessing expression therefore sees the full
+request table rather than an arbitrary model microbatch. Its memory cost still
+belongs to the full request. Omitting `batch_size` processes the direct input
+as one batch; supplying it also updates the model’s current batch size.
+
+Direct inputs accept eager Polars frames, Arrow tables, record batches, or a
+nonempty sequence of small Python mappings. Collect a `LazyFrame` before passing
+it directly. Put file paths, Arrow Datasets, and repeatable streams on an
+`ArrowDataModule`. For zero observations, supply a Polars frame or Arrow object
+with an explicit schema. See the
+[direct prediction implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/root.py#L1006).
+
+## Stream a prediction job to files
+
+Put the files on the data module’s prediction split, retain an application key,
+and attach a prediction writer. Disable collection with
+`return_predictions=False`.
+
+```python
+import relflow as rf
+
+
+if __name__ == "__main__":
+    model = rf.Model.load("customer.rf")
+    data = rf.ArrowDataModule(
+        predict="purchase-requests/*.parquet",
+        retain=("customer_id",),
+        num_workers=2,
+        persistent_workers=False,
+        pin_memory=False,
+    )
+    writer = rf.Writer(
+        "purchase-predictions/run-001",
+        row_group_size=8192,
+    )
+    model.predict(
+        datamodule=data,
+        batch_size=128,
+        callbacks=[writer],
+        return_predictions=False,
+        accelerator="cpu",
+        devices=1,
+    )
+```
+
+Preprocessing and retention belong on the data module in this path. A writer
+can receive its own ordered postprocessors through `postprocessor=...`; these
+run on each prediction batch rather than once on the whole job. A dataset-scoped
+preprocessor can still materialize a split, so streaming files alone does not
+make every preprocessing operation streaming.
+Passing direct-call `preprocess`, `postprocess`, or `retain` arguments alongside
+`datamodule` is rejected. The
+[streaming loop test](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_model_loops.py#L258)
+checks that disabling return collection leaves no retained prediction-loop
+tables.
+
+`rf.Writer` writes one `rank-N.parquet` shard per rank by default. Set
+`format="ipc"` to write `rank-N.arrow` files instead. Pending rows are buffered
+into Parquet row groups or IPC record batches, with a final remainder at completion.
+`row_group_size` counts root observations, not bytes or nested items: a few
+large histories can still produce a large buffer. The first batch locks the
+rank’s exact Arrow schema, including metadata; later drift is an error.
+
+Use a fresh output directory for each run. A rank writes a `.partial` shard
+while prediction is running and promotes it to the final name when complete.
+Failures remove that partial shard. This is a per-rank completion boundary;
+check the whole job before treating all rank files as one finished dataset.
+
+Distributed prediction requires a writer and `return_predictions=False`.
+Retain identifiers and reconstruct the desired global order downstream rather
+than inferring it from rank filenames. See
+[distributed data pipelines](/advanced/distributed-data/) for rank and worker
+ownership, and [custom data modules](/advanced/custom-data-modules/) for custom
+loader contracts.
+
+### Preserve sparse vector outputs with Arrow IPC
+
+PyArrow Parquet cannot round-trip fixed-size-list descendants beneath null
+containers reliably. The writer rejects such batches instead of silently
+changing vector width or erasing null records. This can affect a Vector result
+or retained vector input beneath a null struct. Scalar descendants and nonnull
+fixed-width vectors remain supported by Parquet.
+
+Choose IPC on the same streaming writer when a job needs this structure:
+
+```python
+writer = rf.Writer(
+    "purchase-predictions/run-002",
+    format="ipc",
+    row_group_size=8192,
+)
+model.predict(
+    datamodule=data,
+    batch_size=128,
+    callbacks=[writer],
+    return_predictions=False,
+    accelerator="cpu",
+    devices=1,
+)
+```
+
+The writer keeps canonical Arrow prediction batches and their metadata in a
+file readable by `pyarrow.ipc.open_file`. It uses the same locked-schema,
+buffering, and `.partial` completion rules as the Parquet path. For the collected
+Polars result from the direct example, a standalone export is also available:
+
+```python
+result.write_ipc("purchase-predictions.arrow")
+```
+
+The
+[sparse fixed-list tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/inference/test_callback.py#L259)
+cover the rejected null layouts.
+
+## Serve the trained artifact
+
+Install the optional [`relflow[serving]` extra](/installation/#optional-dependencies) at the same relflow revision as the
+application. `rf.Deployment`, `rf.Accelerator`, and `rf.JSONBackend` are lazy
+exports that require that extra; ordinary batch inference does not load it.
+
+This server accepts the nested customer request shape shown above. The explicit request
+signature constrains the supplied history before it reaches the model. The
+model’s schema still owns the field types and target contract.
+
+```python
+from pydantic import BaseModel, Field
+
+import relflow as rf
+
+
+class OrderRequest(BaseModel):
+    """One order available at the prediction cutoff."""
+
+    amount: float
+    category: str
+    days_ago: float
+
+
+class CustomerRequest(BaseModel):
+    """A known customer and a bounded order history."""
+
+    customer_id: str
+    days_since_signup: float
+    orders: list[OrderRequest] = Field(max_length=32)
+
+
+if __name__ == "__main__":
+    deployment = rf.Deployment(
+        checkpoint="customer.rf",
+        accelerator=rf.Accelerator.cpu,
+        max_batch_size=32,
+        batch_timeout=0.002,
+        max_queue_size=256,
+        workers=1,
+        retain=("customer_id",),
+        json_backend=rf.JSONBackend.orjson,
+        host="127.0.0.1",
+        port=8000,
+    ).forge(request=CustomerRequest)
+    deployment.serve()
+```
+
+`serve()` starts the configured server. `app()` builds the FastAPI application
+for integration into an application-owned ASGI deployment. Both load and place
+the model during startup. Import any custom field registration modules before
+loading their checkpoints in that process.
+
+`workers` controls server processes, not simultaneous calls into one model.
+The runtime serializes model prediction calls within each process. More
+processes load separate model resources. The bundled multi-process `serve()` path
+requires a checkpoint path and rejects in-process request/response signatures,
+preprocessors, postprocessors, and queued schema updates. The example uses one
+worker because it attaches a signature with `forge`. See the
+[deployment implementation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/inference/deployment.py#L400)
+for those startup boundaries.
+
+## Choose the wire format explicitly
+
+`POST /predict` selects the representation from `Content-Type`. Successful
+responses use the same representation; `Accept` does not independently select
+an output format.
+
+| Request | Response and validation |
+| --- | --- |
+| `application/json`: one object | One prediction-row object. Optional Pydantic signatures validate the JSON representation. |
+| `application/json`: an array of objects | An array preserving request positions. Valid rows can be microbatched with other ready requests. |
+| `application/vnd.apache.arrow.stream`: Arrow IPC stream | Arrow IPC stream with the selected output schema. Arrow input is validated through preprocessing and the model; JSON signatures are not applied. |
+
+For a small JSON client request:
+
+```python
+import json
+from urllib.request import Request, urlopen
+
+
+payload = {
+    "customer_id": "customer-17",
+    "days_since_signup": 240,
+    "orders": [
+        {"amount": 64.0, "category": "home", "days_ago": 42},
+        {"amount": 28.0, "category": "books", "days_ago": 8},
+    ],
+}
+request = Request(
+    "http://127.0.0.1:8000/predict",
+    data=json.dumps(payload).encode("utf-8"),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+with urlopen(request, timeout=10) as response:
+    row = json.load(response)
+    if row.get("error") is not None:
+        raise ValueError(row["error"]["message"])
+    probability: float = row["predictions"]["returns_in_30d"][
+        "content"
+    ]["probability"]
+```
+
+JSON settles dates, times, and durations to ISO 8601, bytes to URL-safe base64,
+decimals to strings, and nonfinite numeric values to null. Arrow preserves its
+typed schema. The `json_backend` changes the encoder, not these settled JSON
+semantics.
+
+### Distinguish row errors from transport failures
+
+JSON request-local failures occupy their original response slot as
+`predictions: null` plus an `error` containing `status_code` and `message`. A
+well-formed JSON batch can return HTTP 200 while one row contains such an
+error. Inspect the row before accessing its prediction fields.
+
+Malformed bodies receive 400, unsupported content types receive 415, and
+top-level invalid request shapes receive 422. An invalid Arrow prediction
+fails that Arrow request rather than producing per-row JSON slots. Queue
+admission failures return 503 with `Retry-After: 1`.
+
+Processors used for serving must preserve request identity and order and
+produce one final output row for each valid request. The runtime checks row
+count; equal counts cannot detect reordered identities. On a JSON data error,
+the runtime may bisect a microbatch and retry its subsets to isolate the bad
+row. Keep preprocessing and postprocessing repeatable for those subsets.
+The [HTTP tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/inference/test_deployment_batching.py)
+cover request isolation, schemas, row ordering, and queue capacity.
+
+## Tune the whole request path
+
+| Control | What it bounds or changes |
+| --- | --- |
+| Direct `batch_size` | Encoded/forwarded root observations after whole-input preprocessing. It does not bound the already supplied table or combined output. |
+| Data-module `batch_size` | Per-device model batch size. File scanning and writer buffering have separate memory costs. |
+| Branch `length` and `overflow` | Retained child-record context. Batch row count alone does not bound nested history size. |
+| `max_batch_size` | JSON microbatch size; also the encoded row chunk size within an Arrow HTTP request. |
+| `batch_timeout` | Additional time allowed to gather a partially filled JSON microbatch, in seconds. |
+| `max_queue_size` | Pending JSON records. An array consumes one slot per element; this is not an HTTP body-byte limit. |
+| `workers` | Independent server processes with separate model resources. |
+| `accelerator` | `auto`, `cpu`, `cuda`, or `mps` model placement. |
+
+The Arrow HTTP endpoint reads the whole request body and IPC table before
+predicting. Its model calls share the process’s inference lock, but it does not
+use the JSON row queue. Bound request bodies and concurrent Arrow requests at
+the application boundary as well as bounding encoded batches and branch widths.
+
+Compilation is optional and selects specific tensor regions:
+
+```python
+model = rf.Model.load("customer.rf").to("cpu")
+model.eval()
+model.compile(encoders=True, pools=True)
+
+# requests is a nonempty representative Polars frame from the direct example.
+warmup = requests.slice(0, 32)
+model.predict(warmup, batch_size=32)
+```
+
+Compilation is lazy on real input. It covers selected branch encoders and
+learned attention pools; data conversion, field tensorization, routing, and
+writing retain their execution paths. Shape variation and custom modules affect
+which regions are eligible. Schema mutations, model copies, and checkpoint
+rebuilds clear the compiled selection; configure it again on the final serving
+model after edits or loading. See
+[mutations](/advanced/mutations/) and the
+[compile contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/root.py#L408).
+
+The built-in server does not compile or issue a warmup prediction automatically.
+`GET /health` reports server health; it does not prove that a representative
+forward pass or external encoder/cache miss has completed. For an in-process
+deployment, an application can load, place, configure, and warm the model before
+passing it as `rf.Deployment(model=model, ...)` with one worker.
+
+Measure cold start separately from steady-state requests. Include queue wait,
+source preparation, encoding, device execution, output writing, and transport in
+the latency appropriate to your caller. Record request sizes and nested history
+distributions, hardware, checkpoint identity, precision, and batch settings when
+comparing latency and throughput. A larger microbatch can improve throughput
+while increasing the wait for an individual caller; compilation alone does not
+establish either outcome.
+
+## Keep the output contract and provenance
+
+The selected `predictions`, `representations`, and retained `inputs` columns
+are shared by direct, persisted, and successful HTTP results. Unconfigured
+columns are omitted. Postprocessing can deliberately define a narrower
+application response; preserve identifiers when clients need to match results
+to their requests. See [embeddings](/advanced/embeddings/) for the separate
+representation records.
+
+The collected Python result is a Polars frame. Read `model.version` when
+recording its model's package provenance; converting the frame to Arrow is not
+a replacement for the writer's canonical metadata contract. Writer-produced
+Arrow files carry the recorded package version under `relflow.model_version`,
+and HTTP mirrors it as `X-RelFlow-Model-Version`. That is a package/checkpoint
+version marker, not a unique fingerprint of trained weights.
+Keep an application artifact identifier or hash with the model and its
+deployment configuration. The
+[transport parity tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/inference/test_transport_parity.py)
+check selected columns and metadata across direct, Parquet, Arrow, and JSON
+boundaries. For restoration and training continuation, follow
+[checkpoints and state](/advanced/checkpoints-and-state/).
+
+For file-backed jobs and saved-model serving from the shell, use
+[command-line workflows](/advanced/command-line/). They reuse these data-module,
+writer, and HTTP contracts and add run settings and prediction-job receipts.

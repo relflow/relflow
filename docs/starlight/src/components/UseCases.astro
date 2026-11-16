@@ -1,0 +1,123 @@
+---
+import cases from '../data/use-cases.json';
+import { datasets } from '../data/datasets';
+import ExampleSelection from './ExampleSelection.astro';
+import CasePicker from './CasePicker.astro';
+import DataViews from './DataViews.astro';
+
+const examples = cases.map((item) => {
+  const dataset = datasets.find((dataset) => dataset.id === item.id);
+  if (!dataset) throw new Error(`Homepage use case ${item.id} needs a matching example dataset.`);
+  return { ...item, dataset };
+});
+
+const choices = examples.map((item) => ({
+  id: item.id,
+  panel: `case-${item.id}`,
+  label: item.label,
+  summary: item.structure,
+}));
+---
+
+<section class="use-cases not-content" aria-label="Example use cases" data-use-cases>
+  <ExampleSelection choices={choices} persistent />
+  <header class="cases-intro">
+    <p>Choose a use case to explore its records, relationships, and prediction targets.</p>
+  </header>
+  <CasePicker choices={choices} />
+  <p class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-case-status></p>
+  <div class="case-examples">
+    {
+      examples.map((item) => (
+        <section
+          id={`case-${item.id}`}
+          class="case-example"
+          aria-labelledby={`case-${item.id}-title`}
+          data-case={item.id}
+        >
+          <div class="case-heading">
+            <h3 id={`case-${item.id}-title`}>{item.title}</h3>
+            <p>{item.description}</p>
+          </div>
+          <DataViews
+            id={`case-${item.id}`}
+            dataset={item.dataset}
+            schema={item.code}
+            headingLevel={4}
+          />
+        </section>
+      ))
+    }
+  </div>
+  <p class="cases-next">
+    <a href="/featureless/#example">Compare data and model ERDs →</a>, or <a
+      href="/concepts/models/"
+    >
+      follow this use case through Core Concepts →
+    </a>.
+  </p>
+</section>
+
+<script>
+  import '../concepts/selection';
+</script>
+
+<style>
+  .use-cases {
+    margin-block: var(--rf-section-gap);
+    min-width: 0;
+  }
+  .cases-intro p {
+    color: var(--rf-muted);
+    font-size: 0.95rem;
+    line-height: 1.7;
+    margin: 0;
+  }
+  .case-examples {
+    min-width: 0;
+  }
+  .case-example {
+    min-width: 0;
+    margin-block: 1.5rem;
+    scroll-margin-top: 6rem;
+  }
+  .case-heading {
+    margin-bottom: 1rem;
+  }
+  .case-heading h3 {
+    font-size: 1.12rem;
+    line-height: 1.4;
+    letter-spacing: -0.015em;
+    margin: 0 0 0.5rem;
+  }
+  .case-heading p {
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+    margin: 0;
+  }
+  [data-prepared] .case-example,
+  [data-ready] .case-example {
+    margin: 0;
+  }
+  [data-ready] .case-example[aria-hidden='true'] {
+    display: none;
+  }
+  .cases-next {
+    margin: 1rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.85rem;
+    line-height: 1.7;
+  }
+  .cases-next a {
+    color: var(--sl-color-text-accent);
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

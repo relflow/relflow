@@ -1,0 +1,13 @@
+---
+import { checkSections } from '../datatypes/page';
+
+interface Props {
+  name: string;
+}
+
+const { name } = Astro.props;
+const body = await Astro.slots.render('default');
+checkSections(body, name);
+---
+
+<Fragment set:html={body} />

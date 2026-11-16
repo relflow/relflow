@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, "stage/**"]
+  merge_group:
+    types: [checks_requested]
+    branches: [main, "stage/**"]
+  push:
+    branches: [main, "stage/**"]
+  workflow_dispatch:
+    inputs:
+      evidence_ref:
+        description: Optional full repository commit SHA for an explicit suite validation
+        type: string
+        required: false
+      evidence_base:
+        description: Optional full comparison-base SHA for manual Evidence validation
+        type: string
+        required: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.evidence_ref || '' }}
+  cancel-in-progress: true
+
+jobs:
+  structure:
+    name: Repository structure
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/tree.py --tracked
+      - name: Check licensing before package and documentation builds
+        run: python scripts/release.py licensing
+
+  package:
+    name: Package
+    needs: structure
+    uses: ./.github/workflows/package.yml
+
+  tests:
+    name: Tests
+    needs: package
+    uses: ./.github/workflows/tests.yml
+    with:
+      distribution_artifact: ${{ needs.package.outputs.artifact_name }}
+
+  docs:
+    name: Documentation
+    needs: structure
+    permissions:
+      contents: read
+    uses: ./.github/workflows/docs.yml
+
+  native:
+    name: Native
+    needs: package
+    uses: ./.github/workflows/native.yml
+    with:
+      distribution_artifact: ${{ needs.package.outputs.artifact_name }}
+
+  evidence:
+    name: Evidence
+    needs: package
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/evidence.yml
+    with:
+      suite_ref: ${{ inputs.evidence_ref || github.sha }}
+      distribution_artifact: ${{ needs.package.outputs.artifact_name }}
+
+  required:
+    name: CI / required
+    if: always()
+    needs: [structure, tests, docs, evidence, package, native]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require all jobs for this event
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPOSITORY: ${{ github.repository }}
+          PR_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          PACKAGE_ATTEMPT: ${{ needs.package.outputs.run_attempt }}
+          EVIDENCE_ATTEMPT: ${{ needs.evidence.outputs.run_attempt }}
+        shell: python
+        run: |
+          import json
+          import os
+          event = os.environ["EVENT_NAME"]
+          assert event in {"push", "pull_request", "merge_group", "workflow_dispatch"}, event
+          if event == "pull_request":
+              assert os.environ["PR_REPOSITORY"] == os.environ["REPOSITORY"], "Fork evidence needs a trusted run"
+          expected = {
+              "structure": "success",
+              "tests": "success",
+              "docs": "success",
+              "evidence": "success",
+              "package": "success",
+              "native": "success",
+          }
+          actual = {name: job["result"] for name, job in json.loads(os.environ["RESULTS"]).items()}
+          assert actual == expected, {"expected": expected, "actual": actual}
+          for name in ("PACKAGE_ATTEMPT", "EVIDENCE_ATTEMPT"):
+              assert os.environ[name] == os.environ["RUN_ATTEMPT"], f"{name} belongs to another attempt; re-run all jobs"

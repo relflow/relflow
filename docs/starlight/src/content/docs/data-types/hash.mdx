@@ -1,0 +1,121 @@
+---
+title: Hash
+description: Preserve identifier matching without learning a vocabulary for every identifier.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Hash` for identifier relationships: whether an event refers to the
+same user, product, or account as another field. It represents identifiers
+without maintaining a learned vocabulary for every distinct value.
+
+<DataTypePage name="Hash">
+
+## Input values
+
+Supply integer, string, or bytes identifiers, or nulls. Equal values need the
+same scalar family to match: integer `42` and string `"42"` are distinct.
+There is no vocabulary admission step for a new identifier.
+
+Hashing gives a finite fingerprint, so distinct identifiers can collide.
+
+## Standardization and processor pipelines
+
+Each identifier becomes `n_hashes` deterministic integer hash lanes.
+Training changes the shared batch salt; validation, test, and prediction
+use salt zero. Matching values of the same scalar family retain matching
+fingerprints across Hash fields in that encoded batch.
+
+On the model device, normalized hash lanes are expanded into sine/cosine
+Fourier features and summed directly into model space. There is no learned
+identity vocabulary or content projection. Non-valued positions use a
+field-local state embedding. Hash fingerprints have finite capacity and
+can collide.
+
+## How is this leaf trained?
+
+State classification uses cross-entropy. For content reconstruction,
+each normalized hash lane is quantized into `n_buckets` uniform bins.
+Per-lane cross-entropy trains the decoder to identify those buckets, averaged
+across hash lanes and selected valued targets.
+
+This objective reconstructs an identity fingerprint, not the original
+identifier. It does not provide a decoder for arbitrary user or product IDs.
+
+### Predictions
+
+Hash reconstruction learns fingerprint buckets; it does not recover an
+original user or product ID as a decoded prediction. Use an appropriate label
+target when your application needs to predict named identities.
+
+Use Hash fields as context and declare Boolean or Number targets
+for public answers.
+
+<ValueTree
+  id="hash-predictions"
+  {...outputs.hash}
+  predictions
+  heading="Illustrative prediction output"
+  label="Hash prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `n_hashes` | `1` | Number of independent hash lanes; must be positive. |
+| `n_bands` | `8` | Lower-frequency extent of the Fourier representation; must be positive. |
+| `offset` | `4` | Upper-frequency extent of the Fourier representation; must be positive. |
+| `n_buckets` | `4` | Number of reconstruction buckets per hash lane; must exceed one. |
+
+Use `n_hashes` to configure multiple hash lanes when the matching problem
+calls for more capacity:
+
+```python
+owner_id = rf.Hash(n_hashes=4)
+```
+
+Apply the same representation settings to fields intended for matching.
+`n_bands` and `offset` control the Fourier representation; `n_buckets` controls
+the bucket objectives used for reconstruction.
+
+### Request methods
+
+This type has no type-specific request methods.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| Floats, Booleans, or other unsupported identifier families | `ValueError`: Hash accepts integer, string, or binary scalar values. | Normalize identifiers to a supported scalar family. |
+| A list or struct supplied as one identifier | `ValueError`: Hash expects scalar Arrow values. | Keep record structure in a branch and hash the identifier leaf. |
+| Nonpositive hash/Fourier settings or fewer than two buckets | Configuration validation rejects the option. | Use positive `n_hashes`, `n_bands`, and `offset`, with `n_buckets > 1`. |
+
+### Footguns
+
+- **Expecting a learned profile for every ID.** Hash uses [batch-salted fingerprints](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/hashable.py#L65), with no persistent identity vocabulary. Use Category or Group when an identity should carry learned state. The retained [P021 check](/evidence/#P021) measures matching unseen IDs, rather than learning a profile for each one.
+- **Changing ID types between related fields.** Integer `42` and string `"42"` are different inputs, and different Hash settings can produce different representations. Normalize matching IDs to the same scalar family and configure matching fields consistently; inspect the [Hash encoding contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/hashable.py#L125).
+- **Assuming fingerprints are collision-free keys.** A finite hash representation can map distinct IDs together. Check matching quality on held-out IDs, including nonmatching pairs, and compare `n_hashes` settings when needed. The [representation options](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/hashable.py#L89) control a model input, not a uniqueness constraint.
+- **Treating model matching as an exact lookup.** The retained [P037 experiment](/evidence/#P037) reports worse transfer error after compressing the route between related records. Preserve the records your task needs and evaluate the resulting predictions; perform required exact joins in your preprocessor rather than relying on a predicted lookup.
+
+## Relevant evidence
+
+<LeafEvidence type="Hash" />
+
+### Related types
+
+- [Group](/data-types/group/) learns persistent identity assignments to shared representations.
+
+- [Category](/data-types/category/) learns label-specific representations and can return learned labels as predictions.
+- [Enum](/data-types/enum/) predicts labels from a fixed declaration.
+
+Retain identifiers outside the schema
+when you only need to match output rows back to application records.
+
+For admission, unknown labels, and continued training, see
+[Online vocabulary](/advanced/online-vocabulary/).
+
+</DataTypePage>

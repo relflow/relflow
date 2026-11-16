@@ -1,0 +1,209 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import { apiEntries, apiPath, sourceURL, type ApiReference } from '../api/reference';
+import ApiSignature from './ApiSignature.astro';
+import Prose from './Prose.astro';
+import '../api/reference.css';
+
+interface Props {
+  entry: ApiReference;
+}
+const { entry } = Astro.props;
+const knownMethods = new Map(
+  apiEntries.map((item) => [item.name.replace(/^model\./, 'rf.Model.'), item.href]),
+);
+const documentationSource = entry.documentationSource && sourceURL(entry.documentationSource);
+const aliasTarget =
+  entry.aliasOf && apiEntries.find((item) => item.canonicalPath === entry.aliasOf);
+const methods = entry.methods.map((method) => ({
+  ...method,
+  href: knownMethods.get(method.name),
+  localName: method.name.split('.').at(-1)!,
+  summary: method.text.split('\n\n')[0].replace(/`+/g, ''),
+}));
+---
+
+<article class="api-reference">
+  <nav class="api-reference-links" aria-label="API context">
+    <a href={`/api-map/#api-${entry.sectionId}`}>{entry.sectionTitle}</a>
+    {entry.guide && <a href={entry.guide}>Guide</a>}
+    <a href={entry.sourceUrl}>View source ↗</a>
+  </nav>
+  {
+    entry.extra && (
+      <p class="api-install">
+        Requires <code>relflow[{entry.extra}]</code>.
+      </p>
+    )
+  }
+  {
+    entry.external ? (
+      <p>
+        Re-exported from <code>{entry.external}</code>.{' '}
+        {entry.upstream && <a href={entry.upstream}>Read the upstream reference ↗</a>}
+      </p>
+    ) : (
+      entry.text && <Prose text={entry.text} sourceDocstring />
+    )
+  }
+  {
+    aliasTarget && (
+      <p>
+        Alias for{' '}
+        <a href={aliasTarget.href}>
+          <code>{aliasTarget.name}</code>
+        </a>
+        .
+      </p>
+    )
+  }
+  {
+    documentationSource && documentationSource !== entry.sourceUrl && (
+      <p class="api-inherited">
+        Documentation inherited from <a href={documentationSource}>the base definition ↗</a>.
+      </p>
+    )
+  }
+
+  {entry.definition && <Code code={entry.definition} lang="python" wrap preserveIndent />}
+  {
+    entry.signatures.map((signature) => (
+      <section aria-labelledby="signature">
+        <h2 id="signature">Signature</h2>
+        <ApiSignature
+          signature={{ ...signature, text: signature.text === entry.text ? '' : signature.text }}
+        />
+      </section>
+    ))
+  }
+  {
+    entry.overloads.length > 0 && (
+      <details class="api-overloads">
+        <summary>Overloaded signatures</summary>
+        {entry.overloads.map((signature) => (
+          <Code code={signature.code} lang="python" wrap preserveIndent />
+        ))}
+      </details>
+    )
+  }
+
+  {
+    entry.fields.length > 0 && (
+      <section aria-labelledby="fields">
+        <h2 id="fields">Fields and attributes</h2>
+        <table class="api-table api-fields">
+          <thead>
+            <tr>
+              <th>Field</th>
+              <th>Type</th>
+              <th>Default</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entry.fields.map((field) => (
+              <tr>
+                <th scope="row">
+                  <code>{field.name}</code>
+                  <small>
+                    {field.property ? 'Property' : field.inherited ? 'Inherited' : 'Declared'}
+                  </small>
+                </th>
+                <td data-label="Type">
+                  <code>{field.type || '—'}</code>
+                  {field.description && <Prose text={field.description} sourceDocstring />}
+                  <a class="api-field-source" href={sourceURL(field.source)}>
+                    Source ↗
+                  </a>
+                </td>
+                <td data-label="Default">
+                  {field.property || (!field.type && field.default === null) ? (
+                    '—'
+                  ) : field.default === null ? (
+                    'Required'
+                  ) : (
+                    <>
+                      <code>{field.default}</code>
+                      {field.factory && <small>Default factory</small>}
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+    )
+  }
+
+  {
+    entry.methods.length > 0 && (
+      <section aria-labelledby="methods">
+        <h2 id="methods">Methods</h2>
+        {methods.map((method) =>
+          method.href && method.href !== apiPath(entry.name) ? (
+            <p class="api-method-link">
+              <a href={method.href}>
+                <code>{method.name}</code>
+              </a>{' '}
+              — {method.summary}
+            </p>
+          ) : (
+            <details class="api-method" id={`method-${method.localName}`}>
+              <summary>
+                <code>{method.localName}</code>
+              </summary>
+              <ApiSignature signature={method} />
+              <p>
+                <a href={sourceURL(method.source)}>View source ↗</a>
+              </p>
+            </details>
+          ),
+        )}
+      </section>
+    )
+  }
+</article>
+
+<style>
+  .api-reference {
+    min-width: 0;
+  }
+  .api-reference-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1.1rem;
+    font-size: 0.82rem;
+    margin-block: 0 1.5rem;
+  }
+  .api-install,
+  .api-inherited {
+    color: var(--rf-muted);
+    font-size: 0.83rem;
+  }
+  small,
+  .api-field-source {
+    display: block;
+    margin-top: 0.3rem;
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+    font-weight: 400;
+  }
+  .api-method,
+  .api-overloads {
+    margin-block: 1rem;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.5rem;
+    padding: var(--rf-panel-padding);
+    min-width: 0;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--rf-ink);
+  }
+  summary + :global(*) {
+    margin-top: 1rem;
+  }
+  .api-method-link {
+    overflow-wrap: anywhere;
+  }
+</style>

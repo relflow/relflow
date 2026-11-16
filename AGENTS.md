@@ -1,0 +1,511 @@
+# relflow Agent Guide
+
+This file is the high-signal context for AI coding agents working in this repo. Prefer it over rediscovering package conventions from scattered tests.
+
+Write the project name as `relflow` in documentation, navigation, metadata,
+and other user-facing prose. `Relflow` is acceptable when capitalization is
+needed; do not use camel-case branding.
+
+## Licensing
+
+Public relflow releases beginning with 0.5.0 use `AGPL-3.0-only` for
+project-authored code, documentation, examples, schema machinery, caches, and
+preset definitions unless a file states otherwise. Preserve third-party notices
+and earlier Apache grants. Additional licensing permissions require written
+approval from both Grantham Taylor and Reid Taylor and the necessary rights for
+every contribution; follow [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Run `python scripts/release.py licensing` before creating distributions. Keep
+the pre-build CI check and the archive licensing checks in `scripts/release.py`.
+Never replace already-published files or rewrite historical Evidence provenance
+to apply the new license retroactively.
+
+## Package Mental Model
+
+relflow builds PyTorch/Lightning models from JSON-like schemas. Users normally import the package as:
+
+```python
+import relflow as rf
+```
+
+The public surface should stay usable from `relflow` directly: `Model`, `Branch`, built-in tensorfields, data modules, preprocessors, inference writers, deployment helpers, mutation predicates, and extension base classes.
+
+The schema is the architecture. `Model(...)` receives field constructors and branch nodes, then builds the root branch, tensorfield embedders, context encoders, decoders, losses, and prediction outputs.
+
+## Common API Patterns
+
+Minimal supervised model:
+
+```python
+model = rf.Model(
+    d_model=64,
+    n_layers=2,
+    n_heads=4,
+    amount=rf.Number,
+    merchant=rf.Category,
+    label=rf.Category(mask=True),
+)
+```
+
+Nested repeated context:
+
+```python
+model = rf.Model(
+    d_model=64,
+    n_layers=2,
+    n_heads=4,
+    line_items=rf.Branch(
+        length=32,
+        sku=rf.Category,
+        quantity=rf.Number,
+    ),
+    returned=rf.Category(mask=True),
+)
+```
+
+The generated root is anonymous, has address `/`, and is always a singleton;
+use child `Branch(length=...)` for repeated data. All field addresses start
+with `/`, such as `/amount` or `/line_items/sku`.
+
+```python
+model = rf.Model(
+    d_model=32,
+    n_layers=1,
+    n_heads=4,
+    embed=True,
+    amount=rf.Number,
+)
+```
+
+## Gotchas
+
+- `Branch` and `Model` subclasses may declare children as class attributes,
+  such as `amount = rf.Number` and `transactions = Transaction(length=64)`.
+  Use a bare branch class, such as `transactions = Transaction`, when no
+  placement options are needed; it is equivalent to `Transaction()`. Bare
+  branches also work in keyword schemas, `fields` mappings, and `extend`.
+  For classes with declared children, constructor arguments configure the
+  enclosing node exclusively; add or replace children through subclassing,
+  not constructor keywords or `fields`. A declared child named `length` or
+  `d_model` is separate from the corresponding constructor setting. Declarations
+  are consumed at class creation; inspect bound children through the schema.
+  Inherited children keep their order, replacements replace whole definitions,
+  and conflicting multiple bases require an explicit child redeclaration.
+  Resolved schemas, checkpoints, and YAML loading remain authoritative rather
+  than merging class declarations. Ordinary `Model(...)` and `Branch(...)`
+  keyword and mapping schemas remain supported.
+- Do not use a public `Struct(...)` constructor. Public examples should use `Model(...)` and `Branch(...)`.
+- Select named architecture defaults with `Model(preset="small", ...)`.
+  The bundled names are `small` and `medium`, from the frozen arena HPO
+  architectures; custom policies use
+  `rf.presets.register(Preset(...))`. Generated size methods and
+  `rf.presets.factory`, `with_preset`, and old size names are removed.
+  A child named `preset` belongs in `fields` or a class declaration.
+- `Model(...)` has no root-name option. `name=rf.Category` defines an ordinary
+  child field at `/name`; neither `name="customer"` nor `root="customer"` names the model.
+- Branch and leaf names come from their parent; definitions have no `name` argument.
+  `Period` accepts positional calendar parts. Prefer positional scalar labels
+  for `Enum`, such as `rf.Enum("low", "high")` or `rf.Enum(*labels)`.
+  Its `values=(...)` form remains supported; never combine both forms. Other fields and
+  branches use keyword options.
+  Their parent supplies names through keywords, such as
+  `amount=rf.Number` or `events=rf.Branch(...)`. Use a `fields` mapping for
+  generated schemas or child names that collide with parent configuration:
+  `rf.Branch(length=8, fields={"length": rf.Number})`.
+  `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
+- Use bare tensorfield classes such as `rf.Category` when no options are needed;
+  call them only to configure fields, such as `rf.Category(mask=True)`.
+- Tensorfield options must be declared fields; pass them directly or unpack a
+  mapping with `**options`. Use `description` for notes, and declare extension
+  options on `RequestBase` subclasses. Undeclared options are rejected.
+- Processed observation names and nesting match the schema by default. A node
+  may opt into relflow's node-relative structural query syntax with paths such
+  as `query="source.path"` or `query="items[-32:][*].sku"`; relflow never
+  infers queries. Filters, joins, sorting, and derived values belong in an
+  `rf.Preprocessor`.
+- `transactions=rf.Branch(...)` reads the same-named child collection, and its
+  leaves read keys such as `amount` from each child mapping.
+- `Branch.length` defaults to `None`: collection width follows the largest
+  retained collection in each batch, without changing the schema or parameters.
+  A positive integer sets a hard limit; omitted overflow then defaults to
+  `"head"`. Use `length=N, overflow="tail"` for recency-ordered histories or
+  `overflow="error"` to reject excess rows. With a finite cap,
+  `overflow="random"` draws a uniformly selected contiguous window during
+  training and retains the tail during validation, test, and prediction.
+  Whole records, their fields, and nested children stay aligned. The source
+  or preprocessor must provide more than the cap for cropping to vary; apply
+  a separate resource bound to that candidate pool. Crops repeat for a fixed
+  data seed, epoch, batch ordinal, branch address, and parent position;
+  changing batching, worker assignment, or row order can change them.
+  Unbounded branches require
+  `overflow=None` and log one resource-exhaustion warning per model generation.
+  The anonymous root remains `length=1, overflow="error"`.
+- Bounded axes also compact execution to the observed batch width, up to their
+  cap. Prediction writes every record collection as a variable Arrow list,
+  even for bounded branches, without cap padding. Structural offsets and
+  validity preserve null collections, empty collections, and null items.
+  Tensorized input keeps branch `Geometry` under the reserved root address `/`
+  alongside leaf tensorfields, so cloning, device transfer, and row selection
+  preserve lengths and structural holes. Do not infer geometry from leaf values
+  or masks.
+- `mask=True` is shorthand for
+  `Mask(skip=True, dropout=False, reconstruct=True)`: the field is never
+  embedded and is decoded as a supervised reconstruction target.
+- Every node has one canonical `mask` tuple. A float is uniform train-only
+  masking; `Mask(query=...)` selects with an Arrow Boolean field; `skip=True`
+  prevents tensorization and embedding; `reconstruct=True` adds an objective.
+- `embed=True` emits an embedding in prediction output. It does not make the field a supervised target.
+- `ffnx` is a positive integer feed-forward multiplier, defaulting to `8` on
+  each node. The model root, child branches, and tensorfield decoders configure
+  it independently. Hidden neural activations use tanh GELU and normalization
+  uses RMSNorm; these have no configuration knobs.
+- Node `dropout` retains live-token encoder packing and selected-target decoding
+  for compatible modules. Attention and feed-forward dropout keep their declared
+  rates and locations; padding does not need dropout masks. Seeded masks follow
+  the execution layout, so they need not match a padded implementation. Attention
+  kernel memory still depends on device, dtype, and head configuration.
+- `Category`, `Set`, and `Enum` match string labels exactly; `strip=True` trims
+  surrounding whitespace and `cased=False` lowercases labels before lookup, and
+  the folded form is what vocabularies and predictions carry.
+- `Hash` represents large identifiers with batch-salted hashes, preserving equality across fields in one encoded batch without learning a persistent vocabulary.
+  Training salts derive from the run seed, epoch, and batch ordinal, never
+  from the process-wide `random` state, so seeded runs repeat exactly.
+- A `Category` or `Set` label admitted while training keeps a zero content row,
+  so it embeds like an unknown label and admission alone never changes a
+  prediction; the next training batch gives every still-zero assigned row a
+  normal start before using it. Zero rows after `encode(strata="train")` are
+  expected, not a bug.
+- `Number` keeps source values, statistics, and readouts in float64 (float32 on
+  MPS, which has no float64), so large offsets keep their spread. A float NaN
+  tensorizes as the `other` state, not as a value or a null; ±inf stays valued
+  but is never a regression target. Integers beyond ±2^53 are rejected.
+- `Ordinal(values=(...))` models declared labels by their ordered positions;
+  bare `Ordinal` accepts integer ranks, including unseen ranks. Predictions
+  round to the nearest rank with ties to even and return native labels or integers.
+- `Duration(query=(start_path, end_path), granularity="days")` computes signed
+  elapsed time before Number's numeric modeling. A single query pairs with a
+  configured `start` or `end`; ancestor sources use leading `../` within an
+  explicit Branch. Endpoints must agree on aware versus naive semantics.
+- `Period` is for calendar parts (`DateParts` remains a compatible alias).
+  Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
+  Zone-aware timestamps describe their own wall clock; strings carrying an offset
+  are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
+  in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
+- `Text` caches automatically: workers send stable IDs; a bounded device
+  table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
+  durable cold tier. `store` selects a local directory, `memory` budgets RAM
+  (default 64 MiB), and `resident` budgets device tables and replacement
+  workspace (CUDA default: one eighth of free memory, up to 512 MiB).
+  `cache=False` disables all tiers; `cache=N` additionally caps hot entries.
+  Disk storage grows with observed text; only hot state is memory bounded.
+  `embedder.warm(strings)` fills the cache ahead of training. Cache owners are
+  shared by a trainer's loader family; separate DDP ranks share disk, not RAM.
+- `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
+  configuration whose `apply(inputs, mask)` method owns the vectorized affine
+  tensor operation. Consumers own training activation, eligible coordinates,
+  and normalization placement. `Number`, `Vector`, `Period`, and `Text`
+  consume it. `Number` uses `normalize` to choose between raw and standardized
+  values. The other built-ins have one continuous representation and apply
+  jitter there without creating another normalizer.
+- Tensorfield extensions declare canonical Arrow atom compatibility families with
+  `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
+  with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of
+  `Request` and the shared ragged engine.
+- Register components by role, such as
+  `@extension.register(rf.Component.Request)` or
+  `extension.register(rf.Component.write, custom_writer)`. Python names are
+  independent of component roles; implementations follow the declared base-class
+  and callable protocols.
+- Preprocessors accept and return eager `polars.DataFrame` objects before
+  query/coalescing. Use them for source renaming, expressions, windowing,
+  joins, normalization, or row expansion/grouping. Their output is the
+  canonical observation set. Persisted pipeline values and `RaggedField`
+  members remain Arrow-backed.
+- Postprocessors accept and return eager `polars.DataFrame` objects after
+  prediction writing. Use them to reshape output for APIs or warehouses.
+
+## Data And Training
+
+`model.fit(datamodule, preset="small")` or `preset="medium"` selects the
+same policy's optional `FitDefaults` independently of its architecture. Explicit
+options win; an explicit optimizer replaces preset optimizer defaults, a
+supplied EMA callback replaces preset averaging, and `ema_decay=None` disables
+it. Preset fits default to eight epochs with early stopping and rollback off.
+An explicit epoch, step, or time budget replaces the epoch default. Fits never
+apply schema masks, jitter, or history policy from the source HPO recipe.
+
+Configure AdamW directly on `model.fit(...)`, such as
+`model.fit(datamodule, batch_size=128, learning_rate=1e-4, weight_decay=0.01, max_epochs=30)`.
+Omitted options use sensible defaults. Each fit starts a new optimizer run
+bound to the current parameters; use `ckpt_path` to resume full training state.
+Supply any scheduler for that run through `fit(scheduler=...)`. Keep
+`rf.adamw(...)` factories for custom optimizers and direct `lit.Trainer` setup;
+ordinary examples do not assign `model.optimizer` before calling `fit`.
+
+`Model(..., jacobian=True)` or `Model(preset="small", jacobian=True, ...)`
+opts into TorchJD UPGrad for multiple reconstruction
+objectives and requires `relflow[torchjd]`. One weighted scalar per reconstruction
+address participates; Lightning retains automatic optimization. The session
+policy belongs outside serialized presets and YAML templates and is not checkpointed.
+For a model loaded from YAML, set `model.jacobian = True` before compiling or
+fitting. Enable it before `model.compile(...)`; after loading,
+opt in explicitly before fitting again. Single-device and unsharded DDP training
+are supported; validation and prediction keep ordinary loss/output behavior.
+
+Set `batch_size` on `fit`, `validate`, `test`, or `predict` to update the model's
+current positive integer batch size. Arrow data modules read it when creating
+loaders; custom Lightning data modules own their loader behavior. The size is per
+device under DDP. Constructor `batch_size` remains the initial/checkpoint value
+and supports native Trainer and Tuner workflows. Direct
+`model.predict(inputs, batch_size=N)` preprocesses the full input once, chunks
+processed Arrow rows before encoding, and postprocesses the combined output
+once. Omitting the direct-prediction override preserves whole-input execution.
+
+Lead user documentation with training from any data source, primarily streaming
+from disk or cloud storage. Keep file paths and streaming data modules as the
+default training workflow; also describe query and custom-generator adapters.
+Prefer Polars specifically for user-facing in-memory examples: `pl.DataFrame` with
+`model.predict(...)`, `model.encode(...)`, or `model.write(source=...)`, and
+`rf.PolarsDataModule(...)` for training and evaluation. Use `ArrowDataModule`
+with file paths for streaming; ordinary examples should not require PyArrow
+imports. Keep Arrow explicit in extension contracts, transport, and internal
+data-plane documentation. Documentation uses static illustrations; use tiny
+data only in executable tests and proofs:
+
+```python
+import polars as pl
+
+frame = pl.DataFrame(records)
+datamodule = rf.PolarsDataModule(
+    model=model,
+    train=frame,
+    validate=frame,
+    num_workers=0,
+    persistent_workers=False,
+    pin_memory=False,
+)
+```
+
+For runtime smoke tests, train with `max_epochs=1`, `limit_train_batches=1`, and
+`limit_val_batches=1`. Documentation may show realistic training configurations
+without executing them.
+
+Loader workers ship each batch packed: `ship()` consolidates the batch's
+TensorDicts into one storage each and compacts the Arrow source so the batch
+pickles at its own size rather than its shuffle window's. In-process batches
+are untouched. Keep `pin_memory` off with workers; pinning is a main-process
+cost, not an overlap.
+
+`model.predict(...)` and `model.write(...)` return eager `polars.DataFrame`
+objects. Prediction accepts eager Polars DataFrames and Arrow inputs directly
+and retains a nonempty sequence of mappings as a small interactive convenience;
+pass a Polars DataFrame or Arrow object with an explicit schema when there are
+no rows. Collect a Polars LazyFrame before prediction. Canonical decoded
+results use actual schema child names under `predictions`, with branches stored
+as `list<struct<...>>`. Rich leaf results retain `state`, extension-owned output,
+and `inferred`. Requested embeddings are separate `representations` records:
+`path` segments (root `[]`), repeated ancestor `parents` ordinals, intrinsic
+`output_index`, and a fixed-width `embedding`. Omit unconfigured output columns;
+`inputs` appears only when retention is selected. Models with no public output
+reject prediction. Polars output uses `Struct`, variable `List`, and fixed-width
+`Array` types; it does not carry Arrow schema or field metadata. Read the model's
+recorded relflow version from `model.version`. Batch `predict_step` and `rf.Writer`
+retain Arrow tables and metadata, and HTTP serving retains Arrow IPC/JSON and
+version headers. Extension output list children must be named `element`.
+
+PyArrow Parquet cannot round-trip fixed-size lists below null containers.
+`rf.Writer` in its default Parquet mode rejects those batches before writing;
+use `rf.Writer(..., format="ipc")` for streaming sparse
+vector results. Scalar rich results and nonnull representation vectors retain
+normal Parquet support.
+
+The base install includes `relflow inspect`, `check`, `predict`, and
+`serve` (also `python -m relflow`). Architecture stays in model YAML; versioned
+run YAML configures data and execution. Prediction jobs use fresh output directories
+and `_SUCCESS` completion markers. `rf.inspect` and `rf.check` expose the same
+inspection and preflight contracts from Python. See the
+[command-line guide](docs/starlight/src/content/docs/advanced/command-line.mdx).
+
+## Inference
+
+Top-level inference exports:
+
+- `rf.Writer` writes batch prediction output.
+- `rf.Postprocessor` is the postprocess callable type.
+- `rf.Deployment`, `rf.Accelerator`, `rf.JSONBackend`, and related serving types are lazy exports that require `relflow[serving]`.
+
+## Code Style
+
+Repository structure is enforced by `[tool.relflow.tree]` in `pyproject.toml` and
+`scripts/tree.py`, locally through `make check-tree` and pre-commit and remotely
+through the required CI structure job. Keep new files in an owned path with an
+allowed type. Add a deliberate policy entry when introducing a new responsibility;
+never admit one-off reports, caches, generated sites, or experiment results.
+Ignore rules do not exempt force-added artifacts from validation.
+
+relflow code should read as a short sequence of domain operations.
+
+- Prefer the shortest precise noun or verb, such as `Plan`, `compile`,
+  `bind`, `query`, `coalesce`, and `write`. Use a longer name when one word
+  would hide a distinction that matters. Do not repeat the surrounding module
+  or class name in an identifier.
+- Never prefix a function or class name with `_`; control exposure with
+  explicit `__all__` and root exports. Python protocol methods such as
+  `__post_init__` are the exception.
+- Name every Pydantic validator with a `check_` prefix, including validators
+  that normalize or coerce inputs.
+- Inline a one-use function when it only forwards a call, renames arguments,
+  or hides a few incidental expressions. A named function should own a
+  semantic phase, recursion, a reusable algorithm, callback identity, or an
+  independently meaningful invariant.
+- Prefer plain module functions for transformations. Add a class only when
+  state and invariants travel together or a framework protocol requires it.
+  Avoid `Manager`, `Helper`, and `Service` objects that merely relay calls.
+- Keep control flow linear with validation and guard clauses followed by the
+  main path. Avoid adapter chains, dispatcher pyramids, speculative
+  abstractions, and parallel ways to perform the same operation.
+- Comments and docstrings explain contracts, invariants, or non-obvious
+  reasons. They do not narrate the syntax immediately below them.
+- Error messages identify the affected domain object or address, the expected
+  invariant, the actual value or type, and a useful remedy when one exists.
+  Translate only exceptions whose meaning is understood, and preserve their
+  cause.
+- Do not preserve aliases, shims, or old and new execution paths unless
+  compatibility is an explicit requirement. For an intentional breaking
+  change, remove obsolete code, exports, dependencies, tests, and docs
+  together.
+
+Simplicity comes before cleverness. Vectorize work over the value axis when it
+removes repeated Python traversal. A clear loop over schema nodes, addresses,
+chunks, or a fixed number of tensor axes is acceptable; a recursive loop over
+thousands of values is a signal to use Arrow, NumPy, or Torch.
+
+## Ownership Boundaries
+
+- Keep one canonical representation through a subsystem. Arrow is the CPU data
+  plane; Polars and Python values are ingress adapters, Torch owns model
+  computation, and Python objects reappear only at an extension-local library
+  boundary that requires them or an explicit application/JSON boundary.
+- Keep the batch dimension explicit through every row selection, expansion,
+  grouping, shuffle, and postprocessing operation.
+- Shared data code may understand Arrow containers, validity, offsets, shape,
+  and shape. It must not know a built-in tensorfield name, configuration
+  attribute, or value interpretation.
+- A tensorfield extension owns its accepted Arrow families, semantic validation,
+  tensorization, embedding, decoding, loss, output schema, writing, callbacks,
+  and datatype-specific runtime resources.
+- Reach optional behavior through a registered component or an explicit
+  protocol. Do not infer a capability from a class name, string name, concrete
+  extension import, or magic callable parameter.
+- Registration must remain late-extensible. Avoid import-time snapshots of the
+  registry in validation or serialization contracts.
+- If adding a datatype requires a branch in shared architecture or data code,
+  the extension boundary is incomplete.
+
+## Review Heuristics
+
+Before considering a change complete, ask:
+
+- Can a third-party datatype use this path without editing shared data or
+  architecture modules?
+- Is each new helper a real phase or invariant, or just a one-use forwarding
+  layer?
+- Does any hot path materialize Arrow values as Python rows only to convert
+  them back?
+- Are there two representations, entry points, or compatibility paths where
+  one would suffice?
+- Are invariants enforced once at the boundary and then trusted internally?
+- Do tests cover the architectural boundary as well as the built-in examples?
+
+## Useful Commands
+
+```bash
+uv run ruff format --check
+uv run ruff check
+uv run pyrefly check
+uv run pytest
+uv run pytest tests/test_public_api.py
+uv run pytest --full -n 2
+uv run pytest -m integration -n 2
+```
+
+Plain `pytest` and pre-commit run the fast core serially (about 12 seconds on
+the development machine). An explicit `-m` expression overrides the default
+`not integration` selection. Use `--full` for the complete suite; every PR CI
+job selects it explicitly. The hosted matrix covers Linux and Windows; macOS
+workers are omitted. Keep the configured Python versions and full checks.
+
+Mark tests with `pytest.mark.integration` when they run real Trainer/Tuner loops,
+compiler graph capture, worker or distributed processes, socket servers, optional
+encoder models, or accelerator execution. Mark individual parameters when CPU
+or mocked cases belong in the core. Keep cheap in-process data, serving, and
+extension checks in the core. New integration tests must remain in the full
+suite rather than being deleted to meet the local runtime target. Thread-pool
+and offline encoder defaults are set before collection; explicit environment
+values take precedence.
+
+## Documentation And Learning Evidence
+
+This repository contains the package, user documentation, branding assets, and
+canonical learning experiments with recorded results. The website is published
+at [www.relflow.ai](https://www.relflow.ai/). Follow [docs/AGENTS.md](docs/AGENTS.md) and
+[docs/README.md](docs/README.md) for authoring, interactive examples, preview,
+validation, and publication; follow [evidence/AGENTS.md](evidence/AGENTS.md) and
+[evidence/SPEC.md](evidence/SPEC.md) for the learning protocol.
+
+Coordinate documentation and evidence changes with public API changes. Verify
+claims against the implementation and use the current top-level imports.
+Package runtime and architectural tests belong in `tests/`; static documentation
+publisher tests belong in `docs/tests/`, Starlight tests in `docs/starlight/tests/`,
+and learning experiments, protocol/runtime tests, and canonical results in `evidence/`.
+
+Documentation lives in `docs/starlight/` and builds with its locked Node/Astro
+environment. The isolated `docs/pyproject.toml` environment owns the Python
+publisher and static Evidence verification. Never install or import relflow,
+Torch, or Lightning to build the site. From the repository root, run
+`make prepare`, `make check`, and `make check-docs`. Use `make dev` for live
+preview at port 4300, `make render` for `docs/starlight/dist/`, and
+`make check-browser` for desktop/mobile checks after installing Chromium.
+Learning experiments run only when explicitly invoked with the intended
+relflow wheel; ordinary package checks do not run them.
+
+Read the Docs builds versioned hosting and pull request previews from the root
+`.readthedocs.yaml`, using `uv run --project docs python -m docs.publish`.
+GitHub documentation CI validates Starlight and uploads a review artifact.
+Preserve the static build boundary and exact Evidence selection; the host
+supplies version URLs and its native version flyout. The default branch is
+`main`, the default documentation version is
+`latest`, and the canonical host is `www.relflow.ai`. See `docs/README.md` for
+hosted settings, Gold, release versions, and apex HTTPS forwarding. Use complete
+version URLs for public pages and assets; do not add unversioned compatibility
+aliases.
+
+## CI Ownership
+
+`ci.yml` owns PR, merge-group, main/staging-push, and manual triggers.
+PRs and merge groups targeting `main` or `stage/**` run the same complete gate. `tests.yml`,
+`docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
+for every event, including the shared package build, full matrix, static
+documentation checks, and complete paired evidence validation. Tests, Evidence,
+and release consume the same candidate wheel. Verified reuse must preserve
+original measurements and revisions and separately attest the current inputs;
+missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
+successful main CI; do not add a second matrix invocation to publication.
+Version releases retain verified evidence reports and a frozen publication JSON
+asset before publishing the package tag. New public assets use versioned
+`relflow-<version>-evidence*` filenames. Branch/PR documentation consumes the
+latest formal release at version >=0.5.0, or show pending measurements until
+one exists; tag docs require their matching frozen selection. Active Evidence
+comparisons require a supported baseline under the policy in `evidence/releases.py`;
+retain the actual event base separately when the fixed 0.5 anchor is selected.
+Ordinary CI retains reports and plots as Actions artifacts and creates no
+per-commit Evidence releases, publication commits, or pull requests. Experiments
+keep definitions and prose, with measured results outside their source files.
+The evidence helper and trusted executor are pinned separately from the suite.
+Twelve GitHub-hosted CPU shards keep baseline/candidate proof pairs on one runner,
+with two bounded task containers per shard and a separate full-catalog collector.
+Dependency caches never substitute learning results; hosted roles execute freshly.
+Keep selected suite code off the host execution path and preserve full evidence
+budgets, seeds, checks, per-shard provenance, and immutable attempts. Retry only
+eligible infrastructure failures before a measurement exists. See
+[evidence/hosted.md](evidence/hosted.md).

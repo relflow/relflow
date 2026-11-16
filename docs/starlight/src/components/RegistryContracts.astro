@@ -1,0 +1,148 @@
+---
+const contracts = [
+  {
+    name: 'Request',
+    signature: 'class Request(pydantic.BaseModel): ...',
+    role: 'Validate the leaf’s configuration.',
+  },
+  {
+    name: 'Tensorfield',
+    signature: 'class TensorField(tensordict.TensorClass): ...',
+    role: 'Hold tensorized content, state, and masks.',
+  },
+  {
+    name: 'Embedder',
+    signature: 'class Embedder(torch.nn.Module): ...',
+    role: 'Represent input values as embeddings.',
+  },
+  {
+    name: 'Decoder',
+    signature: 'class Decoder(torch.nn.Module): ...',
+    role: 'Reconstruct state and content from model context.',
+  },
+  {
+    name: 'Loss',
+    signature: 'def loss(...) -> torch.Tensor: ...',
+    role: 'Measure reconstruction error for training.',
+  },
+  {
+    name: 'Output',
+    signature: 'def output(...) -> pyarrow.StructType: ...',
+    role: 'Declare the prediction’s Arrow schema.',
+    optional: true,
+  },
+  {
+    name: 'Write',
+    signature: 'def write(...) -> pyarrow.StructArray: ...',
+    role: 'Materialize predictions using that schema.',
+    optional: true,
+  },
+];
+---
+
+<dl class="registry-contracts not-content" aria-label="Leaf extension components">
+  {
+    contracts.map((contract, index) => (
+      <div class="contract">
+        <dt>
+          <span class="contract-number" aria-hidden="true">
+            {String(index + 1).padStart(2, '0')}
+          </span>
+          <span>{contract.name}</span>
+          {contract.optional && <span class="contract-optional">Optional</span>}
+        </dt>
+        <dd>
+          <code>{contract.signature}</code>
+          <p>{contract.role}</p>
+        </dd>
+      </div>
+    ))
+  }
+</dl>
+
+<style>
+  .registry-contracts {
+    margin-block: var(--rf-section-gap);
+    border: 1px solid var(--rf-border);
+    border-radius: 0.5rem;
+    overflow: hidden;
+  }
+
+  .contract {
+    display: grid;
+    grid-template-columns: 8rem minmax(0, 1fr);
+    align-items: start;
+    gap: 0.5rem 1rem;
+    padding: var(--rf-panel-padding);
+  }
+
+  .contract + .contract {
+    border-block-start: 1px solid var(--rf-border);
+  }
+
+  dt {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+    gap: 0.35rem 0.65rem;
+    color: var(--rf-ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    line-height: 1.6;
+  }
+
+  .contract-optional {
+    grid-column: 2;
+    justify-self: start;
+    padding: 0.08rem 0.4rem;
+    border: 1px solid var(--rf-border);
+    border-radius: 999px;
+    background: var(--rf-surface);
+    color: var(--rf-muted);
+    font-size: 0.6rem;
+    font-weight: 400;
+    line-height: 1.4;
+  }
+
+  .contract-number {
+    color: var(--rf-muted);
+    font-family: var(--sl-font-mono);
+    font-size: 0.65rem;
+    font-weight: 400;
+  }
+
+  dd {
+    min-width: 0;
+    margin: 0;
+  }
+
+  code {
+    padding: 0.14rem 0.35rem;
+    border-radius: 0.2rem;
+    background: var(--rf-code);
+    color: var(--rf-ink);
+    font-family: var(--sl-font-mono);
+    font-size: 0.8rem;
+    line-height: 1.75;
+    box-decoration-break: clone;
+    overflow-wrap: anywhere;
+  }
+
+  p {
+    margin: 0.35rem 0 0;
+    color: var(--rf-muted);
+    font-size: 0.8rem;
+    line-height: 1.6;
+  }
+
+  @media (max-width: 40rem) {
+    .contract {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    dt {
+      display: flex;
+      flex-wrap: wrap;
+    }
+  }
+</style>

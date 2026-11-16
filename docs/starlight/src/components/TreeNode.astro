@@ -1,0 +1,33 @@
+---
+import type { TreeNode } from '../tree/types';
+
+interface Props {
+  node: TreeNode;
+}
+
+const { node } = Astro.props;
+const children = node.children || [];
+---
+
+<li class:list={['tree-node', { 'tree-node-value': children.length === 0 }]} data-tree-node>
+  {
+    children.length ? (
+      <details class="tree-branch" open>
+        <summary class="tree-heading">
+          <span class="tree-name">{node.label}</span>
+          {node.detail && <span class="tree-detail">{node.detail}</span>}
+        </summary>
+        <ul class="tree-children" role="list">
+          {children.map((child) => (
+            <Astro.self node={child} />
+          ))}
+        </ul>
+      </details>
+    ) : (
+      <div class="tree-row">
+        <span class="tree-name">{node.label}</span>
+        {node.detail && <span class="tree-detail">{node.detail}</span>}
+      </div>
+    )
+  }
+</li>

@@ -1,0 +1,17 @@
+---
+import StarlightPage from '@astrojs/starlight/components/StarlightPage.astro';
+---
+
+<StarlightPage
+  frontmatter={{
+    title: 'Page not found',
+    description: 'Return to the relflow documentation.',
+    pagefind: false,
+  }}
+>
+  <p>
+    This page could not be found. <a href="/">Start here</a> or <a href="/concepts/models/"
+      >explore models and schemas</a
+    >.
+  </p>
+</StarlightPage>

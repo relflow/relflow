@@ -1,0 +1,171 @@
+---
+title: Command-line workflows
+description: Inspect model artifacts, check prepared sources, stream prediction jobs, and serve a saved model from the shell.
+---
+
+Use the `relflow` command to inspect a model contract, check prepared data, run
+a file-backed prediction job, or start the HTTP runtime. The model artifact and
+source preparation are the same ones used by the Python API. Train the model
+through Python, then save it for prediction or serving.
+
+These examples assume a trained model saved as `customer.rf` and
+application-prepared request files matching its schema. Examples that retain
+`customer_id` require that column in the source. Substitute your own artifact,
+paths, and application key as needed.
+The package also exposes the commands through `python -m relflow`.
+
+```bash
+relflow --help
+relflow --version
+```
+
+## Inspect a model contract
+
+```bash
+relflow inspect customer.rf
+relflow inspect customer.rf --json > customer-inspection.json
+```
+
+Inspection reports the schema, field addresses, objectives, requested
+predictions and representations, batch size, stored tensor bytes, and whether
+the artifact contains full training-resume state. A model YAML template can
+also be inspected. The command reads checkpoint state onto CPU without
+constructing its neural graph; it does not run a prediction.
+
+`rf.inspect(path)` exposes the same inspection in Python. Its versioned report
+distinguishes the artifact's recorded model version from the installed package
+version.
+
+## Check declarations and prepared sources
+
+```bash
+relflow check customer.rf --input 'purchase-requests/*.parquet'
+relflow check customer.rf --input 'purchase-requests/*.parquet' \
+  --execute --sample 128
+```
+
+The default check resolves the declaration, discovers source metadata, and
+checks structural binding with a typed null observation. It reads no source
+values for tensorization and does not establish that populated nested records
+or leaf values are valid.
+
+`--execute` opts into sampled preprocessing and tensorization. It can construct
+the model and initialize optional text encoders or caches. `--sample` requires
+that flag and caps source rows, with a default of 128; it does not cap nested
+values or preprocessing expansion. Choose `--stage train`, `validate`, `test`,
+or `predict` when checking an explicit input's split contract. The saved
+checkpoint is not modified.
+
+Inspect the reported phase outcomes. A configured preprocessor needs execution;
+dataset-scoped preprocessing remains a skipped check rather than being applied
+to an incomplete sample. `rf.check(...)` provides the same preflight phases in
+Python. A successful structural check is separate from fitting or evaluating
+the model.
+
+## Stream a prediction job
+
+```bash
+relflow predict customer.rf \
+  --input 'purchase-requests/*.parquet' \
+  --output purchase-predictions/run-003 \
+  --batch-size 128 \
+  --accelerator cpu \
+  --format ipc \
+  --retain customer_id
+```
+
+Prediction requires a learned checkpoint and a file-backed source supplied by
+`--input` or the run file. A YAML architecture template has no learned state to
+predict with. The job uses the Arrow data module and `rf.Writer`, with one device
+and `return_predictions=False`, so it does not collect the complete output in
+memory.
+
+`--format parquet` is the default and writes `rank-0.parquet`. `--format ipc`
+writes `rank-0.arrow`, preserving sparse fixed-width vector layouts unsupported
+by Parquet. Repeat `--retain` to keep several processed source columns. Retained
+identifiers help join results back to the supplied observations; they need not
+be modeled inputs. See [inference and deployment](/advanced/inference-and-deployment/)
+for batching, preprocessing memory, and writer contracts.
+
+## Read the job's completion records
+
+Each prediction run needs a fresh output directory. An existing directory is
+rejected so a new job cannot replace its files or receipt. The job retains:
+
+| Path | Meaning |
+| --- | --- |
+| `_metadata/resolved.yaml` | Resolved run settings, model location, and checkpoint SHA256. |
+| `_metadata/sources.json` | Discovered source schemas and file paths, sizes, and modification metadata. This is not a content hash of every source file. |
+| `_metadata/report.json` | Running, successful, or failed job status, versions, timings, and final row/shard information. |
+| `_SUCCESS` | Created only after successful job completion and output finalization. |
+
+Treat a failed report or missing success marker as an incomplete job. Output
+shards use the writer's `.partial` completion boundary. A successful empty input
+still produces a typed empty shard; zero rows and failed execution are different
+outcomes.
+
+## Keep repeatable settings in a run file
+
+Save this separately from the model's architecture YAML:
+
+```yaml
+version: 1
+seed: 42
+data:
+  predict: purchase-requests/*.parquet
+loader:
+  num_workers: 2
+  persistent_workers: false
+  pin_memory: false
+predict:
+  batch_size: 128
+  accelerator: cpu
+  format: ipc
+  row_group_size: 8192
+  retain: [customer_id]
+```
+
+```bash
+relflow predict customer.rf --config prediction.yaml \
+  --output purchase-predictions/run-004 --json
+```
+
+Local data paths in the file resolve relative to that file; an explicit
+`--input` resolves relative to the current working directory. Explicit command
+options override the corresponding run-file values. The version-1 contract
+rejects unknown settings and invalid values rather than silently ignoring them.
+
+Custom field modules can be registered with repeatable `--import` options or
+the run file's `imports` list. A run file can refer to an already configured
+`rf.Preprocessor` or `rf.Postprocessor` as `preprocessor: package.module:object`
+or `postprocessor: package.module:object`. The referenced application code must
+be installed and importable in that process.
+
+## Serve the saved model
+
+Install the optional [`relflow[serving]` extra](/installation/#optional-dependencies), then use the same artifact:
+
+```bash
+relflow serve customer.rf --host 127.0.0.1 --port 8000 \
+  --accelerator cpu --max-batch-size 32 --retain customer_id
+```
+
+The command starts the same HTTP deployment runtime described in
+[inference and deployment](/advanced/inference-and-deployment/), using one
+server worker. Request validation, JSON and Arrow transport, queue limits, and
+application-level preprocessing requirements follow that runtime's contract.
+Run-file serving options belong under `serve`, separately from `predict`.
+
+Add `--json` when a caller needs one machine-readable terminal report on
+standard output; diagnostics stay on standard error. Check the process's exit
+status and the report's outcome. For a prediction job, retain the on-disk job
+records as well. `--debug` adds failure tracebacks to standard error.
+
+The [command implementations](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/cli/commands.py),
+[run-file contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/cli/config.py),
+and [job receipts](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/cli/jobs.py)
+define these workflows. The
+[CLI tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_cli.py)
+cover inspection boundaries, check phases, prediction parity, serving, and
+completion records. These examples are static documentation; the site build
+does not execute shell commands or models.

@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "published_model_parameter_count",
+  "observed_on": "2026-11-10",
+  "model": {
+    "name": "TabPFN-3.5",
+    "parameters_approximate": 220000000,
+    "tasks": [
+      "classification",
+      "regression"
+    ],
+    "checkpoint": "tabpfn-v3.5-20260909.safetensors",
+    "checkpoint_sha256": "ece4d67eadfea42eb0e610df5189bea60cb7f31073d81e9c7a019b76eacf0be3"
+  },
+  "parameter_source": {
+    "title": "TabPFN-3.5: Technical Report",
+    "url": "https://arxiv.org/html/2609.17895v1",
+    "version": "arXiv:2609.17895v1",
+    "published_on": "2026-09-15",
+    "location": "Figure 1(a), supported shapes and model size across releases"
+  },
+  "checkpoint_source": {
+    "url": "https://huggingface.co/Prior-Labs/tabpfn_3_5",
+    "location": "Model Overview and Checkpoints"
+  },
+  "benchmark_identity": {
+    "entry": "tabpfn-rel-local-2026-09-28",
+    "repository_revision": "fa4f1468c02b7dafd0c7b107544a887b83ca04c1",
+    "source_url": "https://github.com/PriorLabs/relarena/blob/fa4f1468c02b7dafd0c7b107544a887b83ca04c1/baseline_results/README.md#tabpfn-35-fixed-submissions",
+    "source_sha256": "34147d17e3a58bf9e48de5edcf3f968aa17f0878388eb57a6f1ee3a586d4f8eb",
+    "tabpfn_version": "9.0.0",
+    "tabpfn_extensions_version": "0.6.3"
+  },
+  "scope": "Reported base checkpoint parameter count for the public local TabPFN-3.5 baseline. This does not establish parameter counts of proprietary API service components, inference latency, memory use, or cost."
+}

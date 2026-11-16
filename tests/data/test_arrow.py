@@ -1,0 +1,128 @@
+from __future__ import annotations
+
+import pyarrow as pa
+import pytest
+import torch
+from tensordict import TensorDict
+
+from relflow.data.arrow import Encoded, mappings, variants
+from relflow.structs.tree import Address
+
+
+def test_mappings_reuses_uniform_dicts_without_rebuilding_rows():
+    values = [{"a": 1, "b": 2}, {"b": 3, "a": 4}]
+
+    aligned = mappings(values)
+
+    assert aligned == values
+    assert aligned[0] is values[0]
+    assert aligned[1] is values[1]
+
+
+def test_mappings_aligns_sparse_rows_with_fields_introduced_later():
+    values = [{"a": 1}, {"a": 2, "b": 3}]
+
+    aligned = mappings(values)
+
+    assert aligned == [{"a": 1, "b": None}, {"a": 2, "b": 3}]
+    assert aligned[0] is not values[0]
+
+
+def test_mappings_rejects_fieldless_observations():
+    with pytest.raises(ValueError, match="without fields"):
+        mappings([{}, {}])
+
+
+def test_variants_respects_sliced_union_offsets():
+    values = pa.UnionArray.from_dense(
+        pa.array([0, 1, 0], type=pa.int8()),
+        pa.array([0, 0, 1], type=pa.int32()),
+        [pa.array([1, 3]), pa.array([2.0])],
+    ).slice(1)
+
+    codes, offsets = variants(values)
+
+    assert codes.tolist() == [1, 0]
+    assert offsets is not None
+    assert offsets.tolist() == [0, 1]
+
+
+def test_encoded_keeps_tensors_and_arrow_source_separate():
+    source = pa.table({"value": [10, 20]})
+    tensors = TensorDict({"value": torch.tensor([10, 20])}, batch_size=[2])
+
+    encoded = Encoded(tensors=tensors, source=source, retain=("value",))
+
+    assert encoded.tensors is tensors
+    assert encoded.source is source
+    assert encoded.retain == ("value",)
+    assert encoded.observations == {}
+
+
+def test_encoded_pins_every_tensor_payload(monkeypatch: pytest.MonkeyPatch):
+    source = pa.table({"value": [10, 20]})
+    tensors = TensorDict({"value": torch.tensor([10, 20])}, batch_size=[2])
+    observation = TensorDict({"counts": torch.tensor([2])}, batch_size=[1])
+    binding = object()
+    calls = []
+
+    def pin(value):
+        calls.append(value)
+        return value.clone()
+
+    monkeypatch.setattr(TensorDict, "pin_memory", pin)
+    encoded = Encoded(
+        tensors=tensors,
+        source=source,
+        retain=("value",),
+        observations={Address("/value"): observation},
+        bindings={Address("/value"): binding},
+    )
+
+    pinned = encoded.pin_memory()
+
+    assert calls == [tensors, observation]
+    assert pinned.tensors is not tensors
+    assert pinned.observations["/value"] is not observation
+    assert pinned.source is source
+    assert pinned.retain == ("value",)
+    assert pinned.bindings["/value"] is binding
+
+
+def test_encoded_copies_and_validates_extension_bindings():
+    source = pa.table({"value": [10]})
+    tensors = TensorDict({}, batch_size=[])
+    binding = object()
+    supplied = {Address("/value"): binding}
+    encoded = Encoded(tensors=tensors, source=source, bindings=supplied)
+    supplied.clear()
+    assert encoded.bindings == {Address("/value"): binding}
+    with pytest.raises(TypeError, match="bindings must be a mapping"):
+        Encoded(tensors=tensors, source=source, bindings=[])
+    with pytest.raises(TypeError, match="binding addresses must be non-empty"):
+        Encoded(tensors=tensors, source=source, bindings={"": binding})
+
+
+def test_encoded_copies_and_validates_pristine_observations():
+    source = pa.table({"value": [10]})
+    tensors = TensorDict({}, batch_size=[])
+    observation = TensorDict({"counts": torch.ones(3, dtype=torch.int64)}, batch_size=[])
+    supplied = {Address("/value"): observation}
+
+    encoded = Encoded(tensors=tensors, source=source, observations=supplied)
+    supplied.clear()
+
+    assert tuple(encoded.observations) == (Address("/value"),)
+    assert encoded.observations["/value"] is observation
+
+    with pytest.raises(TypeError, match="must be a TensorDict"):
+        Encoded(tensors=tensors, source=source, observations={Address("/value"): object()})
+
+
+def test_encoded_validates_source_and_retain():
+    tensors = TensorDict({}, batch_size=[])
+
+    with pytest.raises(TypeError, match="pyarrow.Table"):
+        Encoded(tensors=tensors, source=object())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="Encoded retain entries must be unique"):
+        Encoded(tensors=tensors, source=pa.table({"value": [10]}), retain=("value", "value"))

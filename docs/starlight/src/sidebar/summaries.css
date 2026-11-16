@@ -1,0 +1,6 @@
+.rf-code-tooltip.rf-sidebar-tooltip {
+  width: min(20rem, calc(100vw - 24px));
+}
+.rf-sidebar-tooltip .rf-code-tooltip__title {
+  color: var(--sl-color-text-accent);
+}

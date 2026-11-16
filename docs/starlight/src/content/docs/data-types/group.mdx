@@ -1,0 +1,187 @@
+---
+title: Group
+description: Learn shared group representations for repeated identities through downstream prediction tasks.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Group` for repeated identities that may share predictive behavior:
+merchants, sellers, accounts, or products. Each known identity learns an
+assignment to one of a fixed number of shared group representations.
+
+The grouping learns through downstream targets while the identity remains
+visible as context. Choose the number of groups, then evaluate whether sharing
+representations helps your prediction task.
+
+<DataTypePage name="Group">
+
+## Input values
+
+Supply scalar string, integer, floating-point, Boolean, or bytes labels, using
+one compatible scalar type per field. Training grows the identity vocabulary;
+validation, test, and prediction reuse it. Unknown labels remain valued inputs
+and use a shared unavailable assignment. Nulls retain their own state, and a
+floating-point NaN takes the `other` state.
+
+## Standardization and processor pipelines
+
+The identity vocabulary grows during training. Each identity stores one
+learned assignment logit per group. The largest logit selects one shared
+group representation; a straight-through softmax carries gradients during
+training without sampling noise. The selected representation is combined
+with the field’s state embedding.
+
+Unknown identities use the shared unavailable assignment. `p_unavailable`
+also routes some known training identities through that assignment while
+`n_groups` remains fixed.
+
+`n_groups` stays fixed when the vocabulary grows. Each identity stores one
+trainable logit per group, so assignment storage grows with vocabulary size
+and group count. Groups need not be equally populated or match business
+categories.
+
+## How is this leaf trained?
+
+Group assignments learn through downstream prediction losses while
+the identity is visible as context. There is no built-in group-label or
+identity reconstruction objective.
+
+When Group is selected for reconstruction, its own loss is state
+cross-entropy only. That loss does not train the decoder’s group head.
+Use `assignments` to inspect the learned input routing rather than treating
+a decoded group probability as a trained identity assignment.
+
+### Predictions
+
+Group can provide input context for Boolean or Number targets. Use `rf.Group.assignments` to inspect how known input identities
+are grouped.
+
+A reconstructing mask on Group trains only the field's state classification;
+there is no built-in group or identity reconstruction objective. A decoded
+Group field exposes `group.value` and `group.probability`, without a vocabulary
+label. Its decoder's group head is not trained by that reconstruction loss, so
+the readout is not a learned identity assignment or calibrated confidence.
+
+<ValueTree
+  id="group-predictions"
+  {...outputs.group}
+  predictions
+  heading="Illustrative prediction output"
+  label="Group prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `n_groups` | Required | Fix the number of shared group representations. Must be an integer greater than one. |
+| `p_unavailable` | `0.01` | Route known input identities through the shared unavailable assignment at this rate during training. |
+
+Keep the Group field visible as context when a downstream objective should
+train its assignment logits.
+
+### Request methods
+
+Pass the Group field's absolute schema address to inspect or manage its
+identity assignments.
+
+| Method | Returns | Purpose |
+| --- | --- | --- |
+| `vocabulary(source, address)` | An immutable tuple of populated labels | Inspect known identities in vocabulary order. |
+| `assignments(model, address)` | A dictionary keyed by identity | Inspect each identity's `group` index and a tuple of assignment `probabilities`. |
+| `assign(model, address, token, assignment)` | The token's vocabulary index | Persistently assign one identity to an integer group index. |
+| `override(model, address, assignments)` | A context manager | Temporarily assign identities to integer group indices and restore their previous state on exit. |
+
+For a trained model, inspect its Group field at `/merchant`:
+
+```python
+labels: tuple[str, ...] = rf.Group.vocabulary(model, "/merchant")
+assignments: dict[str, dict[str, int | tuple[float, ...]]] = (
+    rf.Group.assignments(model, "/merchant")
+)
+```
+
+`vocabulary` accepts a model or its `interprocess_encoding_context`. The other
+methods require the model. Inspection returns snapshots; changing them does
+not change the model. Assignment probabilities are the softmax of the
+per-identity logits, rather than a confidence score for your downstream target.
+
+For an idle model, set a persistent assignment or try a temporary one:
+
+```python
+from contextlib import AbstractContextManager
+
+token_index: int = rf.Group.assign(model, "/merchant", "merchant-17", 0)
+override: AbstractContextManager[None] = rf.Group.override(
+    model, "/merchant", {"merchant-17": 1}
+)
+
+with override:
+    temporary: dict[str, dict[str, int | tuple[float, ...]]] = (
+        rf.Group.assignments(model, "/merchant")
+    )
+```
+
+An assignment must be an integer from zero through `n_groups - 1`; Boolean
+values and probability vectors are rejected. These operations can admit new
+identities, growing their storage without changing the group count. They
+require an idle model whose vocabulary state is not shared with workers.
+
+`override` restores previous labels and assignments on exit, including when
+the context raises. Expanded allocation remains available. Finish an override
+before saving or changing the schema, and avoid nested override contexts.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| `n_groups` is not an integer greater than one | Configuration validation rejects the group count. | Choose at least two groups. |
+| A non-integer or out-of-range manual assignment | `TypeError` or `ValueError` rejects the assignment. | Supply an integer index in `[0, n_groups)`; not a Boolean or probability vector. |
+| Nested overrides, active training, or shared worker state | The assignment lifecycle guards reject the mutation. | Use an idle model with unshared state and finish an override before saving or starting another. |
+
+### Footguns
+
+- **Masking an identity does not teach its group assignment.** Group's
+  reconstruction loss trains the state head, without a group-label objective.
+  Keep the identity visible to a downstream prediction task, and inspect input
+  routing with `rf.Group.assignments`; a decoder's `group.probability` is not
+  that assignment. See the [learning contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/group.py#L112)
+  and [reconstruction loss](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/group.py#L663).
+- **An unseen identity has no learned assignment of its own.** Unknown labels use
+  one shared unavailable assignment. Evaluate known and previously unseen
+  identities separately when a deployment will encounter both;
+  a good score on familiar merchants does not establish useful grouping of new
+  merchants. This follows from the [input routing](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/group.py#L394).
+- **A fixed group count does not mean fixed vocabulary memory.** Each identity
+  still stores `n_groups` trainable logits. Track vocabulary size alongside
+  model memory, and consider [Hash](/data-types/hash/) when matching relationships
+  are sufficient. The [identity table and resize path](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/group.py#L350)
+  retain a row per admitted identity.
+- **Assignment experiments can leave changed model state behind.** `assign`
+  persists its edits. Use `override` for a temporary comparison, on an idle
+  model with unshared vocabulary state, and leave the context before saving or
+  changing the schema. The [mutation guards and override lifecycle](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/group.py#L583)
+  enforce these boundaries.
+
+## Relevant evidence
+
+<LeafEvidence type="Group" />
+
+The pinned [Group API tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_group_bindings.py)
+and [assignment tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_group_assignments.py)
+specify the inspection and mutation contracts. These are API checks, rather
+than measurements of application quality.
+
+### Related types
+
+- [Category](/data-types/category/) learns separate representations for labels in a growing vocabulary.
+- [Hash](/data-types/hash/) supplies identifier matching relationships without a persistent identity vocabulary.
+- [Enum](/data-types/enum/) declares a fixed set of allowed labels.
+
+For admission, unknown labels, and continued training, see
+[Online vocabulary](/advanced/online-vocabulary/).
+
+</DataTypePage>

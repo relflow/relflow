@@ -1,0 +1,83 @@
+---
+import type { Value, ValueNotes } from '../values/types';
+import { tree } from '../values/tree';
+import ValueNode from './ValueNode.astro';
+import '../tree/tree.css';
+import '../values/tree.css';
+
+interface Props {
+  id: string;
+  value: Value;
+  /** Enables rich prediction views only under the returned predictions column. */
+  predictions?: boolean;
+  inputs?: Record<string, Value>;
+  label?: string;
+  heading?: string;
+  notes?: ValueNotes;
+}
+const {
+  id,
+  value,
+  predictions = false,
+  inputs,
+  label = predictions ? 'Prediction values' : 'Nested values',
+  heading = predictions ? 'One prediction row' : 'Structured values',
+  notes,
+} = Astro.props;
+const root = tree(value, { id, predictions, inputs, notes });
+const nodes = root.kind === 'record' ? root.children : [root];
+---
+
+<section class="tree value-tree not-content" data-value-tree aria-label={label}>
+  <header class="vt-toolbar">
+    <p>{heading}</p>
+    <div data-tree-tools hidden>
+      <button type="button" data-tree-expand>Expand all</button><button
+        type="button"
+        data-tree-collapse>Collapse all</button
+      ><button type="button" data-tree-copy>Copy JSON</button>
+    </div>
+  </header>
+  <p class="vt-sr-only" role="status" aria-live="polite" data-tree-status></p>
+  <ul class="tree-list">{nodes.map((node) => <ValueNode node={node} />)}</ul>
+  <script
+    type="application/json"
+    data-tree-source
+    set:html={JSON.stringify(value)
+      .replaceAll('<', '\\u003c')
+      .replaceAll('>', '\\u003e')
+      .replaceAll('&', '\\u0026')}
+  />
+</section>
+
+<script>
+  for (const toolbar of document.querySelectorAll<HTMLElement>('[data-tree-tools]'))
+    toolbar.hidden = false;
+  document.addEventListener('click', async (event) => {
+    const button =
+      event.target instanceof Element
+        ? event.target.closest<HTMLButtonElement>(
+            '[data-tree-expand], [data-tree-collapse], [data-tree-copy]',
+          )
+        : null;
+    const root = button?.closest<HTMLElement>('[data-value-tree]');
+    if (!button || !root) return;
+    const status = root.querySelector<HTMLElement>('[data-tree-status]')!;
+    if (button.hasAttribute('data-tree-expand') || button.hasAttribute('data-tree-collapse')) {
+      const expand = button.hasAttribute('data-tree-expand');
+      for (const branch of root.querySelectorAll<HTMLDetailsElement>('details'))
+        branch.open = expand;
+      status.textContent = expand
+        ? 'All value branches and returned fields expanded.'
+        : 'All value branches collapsed.';
+    } else {
+      try {
+        const source = JSON.parse(root.querySelector('[data-tree-source]')!.textContent!);
+        await navigator.clipboard.writeText(JSON.stringify(source, null, 2));
+        status.textContent = 'Complete row copied as JSON.';
+      } catch {
+        status.textContent = 'Copy was unavailable in this browser.';
+      }
+    }
+  });
+</script>

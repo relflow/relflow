@@ -1,0 +1,50 @@
+name: CI, release, or maintenance
+description: Improve workflows, dependency support, release publication, or execution infrastructure.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the operational problem and the expected result. Include run and artifact
+        references when available. Remove credentials and private data from logs and configuration.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is affected, and what happens?
+      description: Identify the workflow, dependency, release, or infrastructure and explain the impact.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: What should happen?
+      description: Describe concrete workflow, compatibility, publication, or maintenance completion criteria.
+    validations:
+      required: true
+  - type: textarea
+    id: trigger
+    attributes:
+      label: Trigger and reproduction
+      description: |
+        Include the event, source revision, run URL and attempt, failing job or step, command,
+        and environment when available. For dependency support, include affected versions or platforms.
+  - type: textarea
+    id: guarantees
+    attributes:
+      label: Guarantees to preserve
+      description: |
+        Identify relevant required gates, candidate wheel identity, artifact provenance,
+        executor pins, isolation, resource budgets, or supported environments.
+        Distinguish an execution failure from a failed learning check when evidence is involved.
+  - type: textarea
+    id: recovery
+    attributes:
+      label: Validation and recovery
+      description: |
+        Describe how the normal path and relevant failure or recovery cases should be checked.
+        For publication or retry changes, explain which original artifacts and execution records
+        must be retained and how duplicate or stale publication should be prevented.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Supporting evidence or possible approach
+      description: Attach logs, artifact references, configuration excerpts, or optional implementation ideas.

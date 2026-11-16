@@ -1,0 +1,165 @@
+{
+  "source": "Desktop/arena",
+  "recipes_file": "results/strategy-grids-avito-recovery-20261102/grid/recipes.json",
+  "recipes_sha256": "d9f03794a3c4952180c2213b6808fe50fe24cde60a5547d2b005fff87f030141",
+  "roster_file": "results/research-closeout-20261104/baseline-roster.json",
+  "roster_sha256": "0d271a312cd5803af1c3476e1ea77dae0ac4b7f9cc038e6be66e13eab2db0e00",
+  "selection": "Frozen 21-task singleton recipes, not per-task winners or held-out generalization claims.",
+  "presets": {
+    "small": {
+      "recipe_id": "small-regularized-capacity",
+      "source": {
+        "candidate_id": "f9000bc00059a6f380f0be0e53d3fa5147cddf1f66edc739a78f1e0d71a1ca2a",
+        "candidate_index": 33,
+        "config_id": "00872d1a99d0d195bcaeef80bc19c9ef7be1d08c7bddee125e58aed0cfa2d5bf",
+        "path": "results/architecture-presets-20261027/data/medium-reduced-reset-20261031/provenance/small-state.json",
+        "plan_id": "14d34e08f641a76f53ab1d75cd294334063525946dd4bb4174a4da54011fdad3",
+        "selection_basis": "retrospective historical test calibration; not unseen test evidence",
+        "sha256": "df5babf8883e0916d51253729a4e4ccc613584bad3803c35cd45bdadc05cac40",
+        "status": "complete"
+      },
+      "recipe": {
+        "batch_size": 64,
+        "branch_dropout": 0.0,
+        "branch_ffnx": 8,
+        "branch_heads": 4,
+        "branch_layers": 1,
+        "branch_mask": 0.1,
+        "branch_outputs": 4,
+        "d_model": 128,
+        "decoder_dropout": 0.0,
+        "decoder_ffnx": 8,
+        "decoder_heads": 4,
+        "decoder_layers": 1,
+        "dropout": 0.0,
+        "ema_decay": 0.995,
+        "ffnx": 2,
+        "jitter": 0.05,
+        "learning_rate": 0.0001504508367492947,
+        "mask": 0.3,
+        "n_heads": 4,
+        "n_layers": 2,
+        "objective": "mae",
+        "overflow": "random",
+        "passes": 8,
+        "weight_decay": 0.01
+      },
+      "config_sha256": "00872d1a99d0d195bcaeef80bc19c9ef7be1d08c7bddee125e58aed0cfa2d5bf",
+      "used_for_tiers": [
+        "small"
+      ],
+      "selected_tasks": 8,
+      "architecture_fields": [
+        "d_model",
+        "n_layers",
+        "n_heads",
+        "ffnx",
+        "dropout",
+        "branch_layers",
+        "branch_heads",
+        "branch_ffnx",
+        "branch_dropout",
+        "branch_outputs",
+        "decoder_layers",
+        "decoder_heads",
+        "decoder_ffnx",
+        "decoder_dropout"
+      ],
+      "scope": "Constructor: root, branch, and decoder architecture. Fit: optimizer, batch, EMA, clipping, and epoch budget defaults. Input masks, jitter, objective, history policy, dataset splits, and resource controls remain explicit.",
+      "fit_fields": [
+        "batch_size",
+        "learning_rate",
+        "weight_decay",
+        "ema_decay",
+        "passes"
+      ],
+      "fit_fixed": {
+        "gradient_clip_val": 0.25,
+        "early_stopping": false,
+        "rollback": false
+      },
+      "fit_source": {
+        "path": "results/strategy-grids-avito-recovery-20261102/worker/benchmarks/relarena/refit.py",
+        "sha256": "823edc3efc7ee08bb1159b862a454467819449cb808ccddb454457f53373c248"
+      }
+    },
+    "medium": {
+      "recipe_id": "medium-deep-context",
+      "source": {
+        "candidate_id": "909e29d6ad30883af7a15cfafdb9c2e13107c026da97f381034f4f49830f8256",
+        "candidate_index": 8,
+        "config_id": "2c596990c4e3e5ba3d6a6ef5771a9aacad2c309ab55deba7c1b6ae6d1b92784c",
+        "path": "results/architecture-presets-20261027/data/medium-finish-and-stop-20261101/state.live.json",
+        "plan_id": "8b47acd3dac0f006a586f3dc7a8d73e1d3d856bc90a4c079df4088f37b722fd1",
+        "selection_basis": "retrospective historical test calibration; not unseen test evidence",
+        "sha256": "ae0e5277620ebb70cd9cbc2678e8be3a9834be4359fab775e6501e662f4b75c6",
+        "status": "complete"
+      },
+      "recipe": {
+        "batch_size": 512,
+        "branch_dropout": 0.0,
+        "branch_ffnx": 8,
+        "branch_heads": 4,
+        "branch_layers": 2,
+        "branch_mask": 0.05,
+        "branch_outputs": 1,
+        "d_model": 64,
+        "decoder_dropout": 0.0,
+        "decoder_ffnx": 8,
+        "decoder_heads": 4,
+        "decoder_layers": 1,
+        "dropout": 0.0,
+        "ema_decay": 0.995,
+        "ffnx": 4,
+        "jitter": 0.0,
+        "learning_rate": 0.00021681002964478338,
+        "mask": 0.3,
+        "n_heads": 8,
+        "n_layers": 2,
+        "objective": "mae",
+        "overflow": "random",
+        "passes": 8,
+        "weight_decay": 0.0
+      },
+      "config_sha256": "2c596990c4e3e5ba3d6a6ef5771a9aacad2c309ab55deba7c1b6ae6d1b92784c",
+      "used_for_tiers": [
+        "large",
+        "medium"
+      ],
+      "selected_tasks": 13,
+      "architecture_fields": [
+        "d_model",
+        "n_layers",
+        "n_heads",
+        "ffnx",
+        "dropout",
+        "branch_layers",
+        "branch_heads",
+        "branch_ffnx",
+        "branch_dropout",
+        "branch_outputs",
+        "decoder_layers",
+        "decoder_heads",
+        "decoder_ffnx",
+        "decoder_dropout"
+      ],
+      "scope": "Constructor: root, branch, and decoder architecture. Fit: optimizer, batch, EMA, clipping, and epoch budget defaults. Input masks, jitter, objective, history policy, dataset splits, and resource controls remain explicit.",
+      "fit_fields": [
+        "batch_size",
+        "learning_rate",
+        "weight_decay",
+        "ema_decay",
+        "passes"
+      ],
+      "fit_fixed": {
+        "gradient_clip_val": 0.25,
+        "early_stopping": false,
+        "rollback": false
+      },
+      "fit_source": {
+        "path": "results/strategy-grids-avito-recovery-20261102/worker/benchmarks/relarena/refit.py",
+        "sha256": "823edc3efc7ee08bb1159b862a454467819449cb808ccddb454457f53373c248"
+      }
+    }
+  }
+}

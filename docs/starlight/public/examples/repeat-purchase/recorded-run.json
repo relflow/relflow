@@ -1,0 +1,57 @@
+{
+  "purpose": "Fictional workflow demonstration; not evidence of application quality or competitive performance.",
+  "seed": 42,
+  "smoke": false,
+  "architecture_preset": "small",
+  "fit_settings": {
+    "batch_size": 128,
+    "learning_rate": 0.001,
+    "max_epochs": 6,
+    "accelerator": "cpu",
+    "devices": 1,
+    "precision": "32-true",
+    "deterministic": true,
+    "logger": false,
+    "enable_progress_bar": false,
+    "enable_model_summary": false,
+    "num_sanity_val_steps": 0
+  },
+  "threads": 1,
+  "python_version": "3.12.10",
+  "versions": {
+    "relflow": "0.5.0",
+    "torch": "2.12.0",
+    "lightning": "2.6.4",
+    "pyarrow": "24.0.0"
+  },
+  "source_sha256": "001cff75b0f2848f0a5530620ada59b9fece47a1f418d3adb6a8c461bc27cd38",
+  "data": {
+    "train": {
+      "rows": 512,
+      "sha256": "266ed9f6086a34ceb8e4c1103e491c2a6b286b70bda6c0a82f8dad84e790b1e0"
+    },
+    "validation": {
+      "rows": 128,
+      "sha256": "1b1c48c168aff74edb3193a607a702e9603c4b1764da1cceed2b002b18cc518f"
+    },
+    "requests": {
+      "rows": 3,
+      "sha256": "b969848b8ab3ac50401311249b073760f25b273334312d140e2c43d6783937ad"
+    }
+  },
+  "fictional_rule": "Return labels are sampled with probability 0.85 when the latest order is at most 14 days old; otherwise 0.15.",
+  "predictions": [
+    {
+      "customer_id": "recent",
+      "return_probability": 0.8003501892089844
+    },
+    {
+      "customer_id": "less-recent",
+      "return_probability": 0.12361306697130203
+    },
+    {
+      "customer_id": "occasional",
+      "return_probability": 0.8005911707878113
+    }
+  ]
+}

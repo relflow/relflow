@@ -1,0 +1,86 @@
+---
+import cases from '../data/use-cases.json';
+import { datasets } from '../data/datasets';
+import CasePicker from './CasePicker.astro';
+import DataViews from './DataViews.astro';
+import ExampleSelection from './ExampleSelection.astro';
+
+interface Props {
+  id?: string;
+}
+
+const { id = 'featureless' } = Astro.props;
+if (!id || /\s/.test(id))
+  throw new Error('FeaturelessExamples needs a page-unique id without whitespace.');
+
+const examples = cases.map((item) => {
+  const dataset = datasets.find((dataset) => dataset.id === item.id);
+  if (!dataset) throw new Error(`Featureless modeling use case ${item.id} needs a source dataset.`);
+  return { ...item, dataset };
+});
+
+const choices = examples.map((item) => ({
+  id: item.id,
+  panel: `${id}-${item.id}`,
+  label: item.label,
+  summary: item.structure,
+}));
+---
+
+<section
+  class="featureless-examples not-content"
+  aria-label="Compare data and model structure by use case"
+  data-use-cases
+>
+  <ExampleSelection choices={choices} persistent />
+  <CasePicker choices={choices} />
+  <p class="sr-only" role="status" aria-live="polite" aria-atomic="true" data-case-status></p>
+  {
+    examples.map((item) => (
+      <article
+        id={`${id}-${item.id}`}
+        class="featureless-example"
+        aria-label={item.label}
+        data-case={item.id}
+      >
+        <DataViews
+          id={`${id}-${item.id}`}
+          dataset={item.dataset}
+          schema={item.code}
+          headingLevel={4}
+          showObservation={false}
+        />
+      </article>
+    ))
+  }
+</section>
+
+<script>
+  import '../concepts/selection';
+</script>
+
+<style>
+  .featureless-examples {
+    min-width: 0;
+  }
+  .featureless-example {
+    min-width: 0;
+    margin-block: var(--rf-section-gap);
+    scroll-margin-top: 6rem;
+  }
+  [data-prepared] .featureless-example,
+  [data-ready] .featureless-example {
+    margin-block: 0;
+  }
+  [data-ready] .featureless-example[aria-hidden='true'] {
+    display: none;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+</style>

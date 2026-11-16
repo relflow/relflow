@@ -1,0 +1,100 @@
+"""Editor-facing contracts for data ingress, processors and prediction writing."""
+
+from collections.abc import Iterator, Mapping
+from pathlib import Path
+from typing import Any, assert_type
+
+import polars as pl
+import pyarrow as pa
+from torch.utils.data import DataLoader, IterableDataset
+
+import relflow as rf
+from relflow.data.arrow import Encoded
+from relflow.data.datasets import StratumConfig
+
+
+@rf.preprocess
+def increase(frame: pl.DataFrame, *, amount: float = 1.0) -> pl.DataFrame:
+    return frame.with_columns((pl.col("amount") + amount).alias("amount"))
+
+
+@rf.preprocess(scope="dataset")
+def partitions(frame: pl.DataFrame) -> Iterator[pl.DataFrame]:
+    yield frame
+
+
+@rf.preprocess()
+def discard(frame: pl.DataFrame) -> None:
+    return None
+
+
+@rf.postprocess()
+def prediction_columns(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.select("predictions")
+
+
+def processors(frame: pl.DataFrame) -> None:
+    assert_type(increase, rf.Preprocessor[pl.DataFrame])
+    assert_type(increase.partial(amount=2.0), rf.Preprocessor[pl.DataFrame])
+    assert_type(increase(frame), pl.DataFrame)
+    assert_type(partitions(frame), Iterator[pl.DataFrame])
+    assert_type(discard(frame), None)
+    assert_type(prediction_columns, rf.Postprocessor)
+    assert_type(prediction_columns(frame), pl.DataFrame)
+
+
+def modules(model: rf.Model, table: pa.Table, frame: pl.DataFrame) -> None:
+    workers: StratumConfig[int] = {"train": 2, "validate": 0}
+    data = rf.ArrowDataModule(model, train=table, validate=table, num_workers=workers, preprocessor=increase)
+    assert_type(data.model, rf.Model | None)
+    assert_type(data.bound_model, rf.Model)
+    assert_type(data.dataloader("train"), DataLoader[Encoded])
+    assert_type(data.dataloader("test", required=False), DataLoader[Encoded] | None)
+    assert_type(data.train_dataloader(), DataLoader[Encoded] | None)
+    rf.PolarsDataModule(model, train=frame, preprocessor=[increase])
+    queries = rf.DuckDBDataModule(
+        model,
+        database=Path("warehouse.duckdb"),
+        train="SELECT amount FROM observations WHERE amount > ? ORDER BY id",
+        validate="SELECT amount FROM observations WHERE amount > $minimum ORDER BY id",
+        parameters={"train": (0.0,), "validate": {"minimum": 0.0}},
+        config={"threads": 1},
+        ingress_rows=2048,
+        num_workers=workers,
+        preprocessor=increase,
+    )
+    assert_type(queries.model, rf.Model | None)
+    assert_type(queries.dataloader("train"), DataLoader[Encoded])
+    writer = rf.Writer(Path("predictions"), postprocessor=prediction_columns)
+    assert_type(writer.path, Path)
+    assert_type(writer.close(), None)
+
+    unbound = rf.ArrowDataModule(train=table, validate=table, preprocessor=increase)
+    assert_type(unbound.model, rf.Model | None)
+    assert_type(unbound.bind(model), None)
+    rf.PolarsDataModule(train=frame)
+    rf.DuckDBDataModule(predict="SELECT 1.0 AS amount")
+
+
+class Records(IterableDataset[Mapping[str, Any]]):
+    def __iter__(self) -> Iterator[Mapping[str, Any]]:
+        yield {"amount": 1.0}
+
+
+def adapters(model: rf.Model) -> None:
+    rf.CustomDataModule(model, train=Records())
+    rf.SyntheticDataModule(model, train=lambda: [{"amount": 1.0}])
+    rf.CustomDataModule(train=Records())
+    rf.SyntheticDataModule(train=lambda: [{"amount": 1.0}])
+
+
+class Service(rf.Deployment):
+    def label(self) -> str:
+        return "service"
+
+
+def serving() -> None:
+    deployment = Service(checkpoint="model.ckpt")
+    assert_type(deployment.preprocess(increase), Service)
+    assert_type(deployment.postprocess(prediction_columns), Service)
+    assert_type(deployment.forge(), Service)

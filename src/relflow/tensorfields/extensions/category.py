@@ -1,0 +1,594 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import InitVar
+from functools import partial
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
+
+import numpy as np
+import pyarrow as pa
+import pyarrow.compute as pc
+import pydantic
+import torch
+from beartype import beartype
+from tensordict import TensorDict, tensorclass
+
+from relflow.data.ragged import RaggedField
+from relflow.structs.enums import Component, Metric, Strata, TensorKey, Tokens
+from relflow.structs.packages import Parcel, Prediction
+from relflow.structs.tree import Address, FieldOptions
+from relflow.tensorfields.base import (
+    Context,
+    DecoderBase,
+    EmbedderBase,
+    Extension,
+    RequestBase,
+    TensorFieldBase,
+    TensorInput,
+)
+from relflow.tensorfields.output import array, labels, struct, variable
+from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.reconstruction import Metrics, Reconstruction, Scores
+from relflow.tensorfields.shared.resize import SILENT_LOGIT
+from relflow.tensorfields.shared.rows import Embedding, Linear
+from relflow.tensorfields.shared.vocabulary import (
+    INITIAL_CAPACITY,
+    AdmittedRowsCallback,
+    OnlineVocabularyModel,
+    VocabularyBatch,
+    VocabularyState,
+    VocabularySyncCallback,
+    admissible,
+    states,
+)
+
+if TYPE_CHECKING:
+    from relflow.architecture.root import Model
+    from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.structs.experiment import Schema
+    from relflow.structs.structure import Branch
+    from relflow.tensorfields.shared.resize import Resize
+
+category: Extension = Extension(
+    name="category",
+    types=(bool, int, float, str, bytes),
+    callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
+)
+
+
+@category.register(Component.Request)
+class Request(RequestBase):
+    """One scalar label represented by an online vocabulary.
+
+    Training grows vocabulary storage automatically; later stages reuse it.
+    ``p_unavailable`` hides known
+    input label content during training without changing reconstruction targets,
+    while unknown labels remain valued inputs.
+    ``topk`` adds accuracy metrics and prediction candidates; entries are
+    sorted and deduplicated, and must exceed one. Candidates are limited to
+    the discovered vocabulary when fewer than ``k`` labels are known.
+    ``mask=True`` declares a supervised classification target. Predictions
+    select populated vocabulary labels and exclude the unavailable sentinel.
+    ``strip=True`` trims surrounding whitespace from string labels and
+    ``cased=False`` lowercases them before vocabulary lookup, an escape hatch
+    for look-alike labels; vocabulary snapshots and written labels hold the
+    folded form. Other label types are unaffected.
+    """
+
+    type: Literal["category"] = "category"
+    p_unavailable: Annotated[float, pydantic.Field(ge=0.0, le=1.0, default=0.01)] = 0.01
+    topk: list[int] | None = None
+    strip: bool = False
+    cased: bool = True
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            p_unavailable: float = 0.01,
+            topk: list[int] | None = None,
+            strip: bool = False,
+            cased: bool = True,
+            type: Literal["category"] = "category",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
+    @classmethod
+    def vocabulary(
+        cls,
+        source: "Model | InterprocessEncodingContext",
+        address: Address | str,
+        /,
+    ) -> tuple[Any, ...]:
+        """Return an immutable snapshot of one categorical vocabulary."""
+        from relflow.architecture.root import Model
+
+        address = Address(str(address))
+        if isinstance(source, Model):
+            if address not in source.nodes:
+                raise KeyError(f"no field at address {str(address)!r}")
+
+            embedder = getattr(source.nodes[address], "embedder", None)
+            if not isinstance(embedder, Embedder):
+                raise TypeError(f"address {str(address)!r} is not a Category field (got {type(embedder).__name__})")
+            with embedder.vocab.lock:
+                return tuple(embedder.vocab.master)
+        elif isinstance(source, Mapping):
+            if address not in source:
+                raise KeyError(f"no encoding context at address {str(address)!r}")
+
+            state = source[address]
+            if not isinstance(state, VocabularyState):
+                raise TypeError(
+                    f"encoding context at {str(address)!r} is not a VocabularyState (got {type(state).__name__})"
+                )
+        else:
+            raise TypeError(
+                "Category.vocabulary source must be a Model or InterprocessEncodingContext, "
+                f"got {type(source).__name__}"
+            )
+
+        with state.lock:
+            return tuple(state.master)
+
+    @classmethod
+    def counts(
+        cls,
+        model: "Model",
+        address: Address | str,
+        /,
+    ) -> dict[Any, int]:
+        """Return observed training counts for the populated vocabulary."""
+        from relflow.architecture.root import Model
+
+        if not isinstance(model, Model):
+            raise TypeError(f"Category.counts model must be a Model, got {type(model).__name__}")
+
+        address = Address(str(address))
+        if address not in model.nodes:
+            raise KeyError(f"no field at address {str(address)!r}")
+
+        embedder = getattr(model.nodes[address], "embedder", None)
+        if not isinstance(embedder, Embedder):
+            raise TypeError(f"address {str(address)!r} is not a Category field (got {type(embedder).__name__})")
+
+        vocabulary = cls.vocabulary(model, address)
+        counts = (
+            cast(Counter, embedder.counters[TensorKey.content.name])
+            .counts[: len(vocabulary)]
+            .detach()
+            .cpu()
+            .sub(1)
+            .clamp_min(0)
+            .tolist()
+        )
+        return {label: int(count) for label, count in zip(vocabulary, counts, strict=True)}
+
+    @pydantic.model_validator(mode="after")
+    def check_topk(self):
+        if self.topk is None:
+            self.topk = []
+
+        self.topk = sorted(set(self.topk))
+
+        for topk in self.topk:
+            if not isinstance(topk, int):
+                raise ValueError("topk values must be integers")
+
+            if topk <= 0:
+                raise ValueError("topk values must be positive")
+
+            if topk == 1:
+                raise ValueError("topk values must not be 1")
+
+        return self
+
+
+@category.register(Component.observe)
+def observe(
+    field: RaggedField,
+    *,
+    address: Address,
+    schema: Schema,
+    state: object | None,
+    learn: bool,
+) -> TensorDict | None:
+    """Reserve and count the complete pristine categorical exposure."""
+
+    if not learn:
+        return None
+    if not isinstance(state, VocabularyState):
+        raise RuntimeError(f"category field at '{address}' requires a vocabulary encoding context")
+
+    values, nan = admissible(field)
+    indices = state.indices(values, learn=True)
+    return TensorDict(
+        {
+            TensorKey.state: tally(torch.from_numpy(states(field, nan)), len(Tokens)),
+            TensorKey.content: tally(torch.from_numpy(indices.copy()), state.size),
+        },
+        batch_size=[],
+    )
+
+
+@category.register(Component.TensorField)
+@tensorclass
+class TensorField(TensorFieldBase[torch.Tensor]):
+    state: torch.Tensor
+    content: torch.Tensor
+    present: torch.Tensor
+    trainable: torch.Tensor
+    inferred: torch.Tensor
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        # TensorClass metadata is accepted by its generated initializer.
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
+
+    @classmethod
+    def new(
+        cls,
+        input: RaggedField,
+        target: RaggedField,
+        present: torch.Tensor,
+        trainable: torch.Tensor,
+        inferred: torch.Tensor,
+        address: Address,
+        schema: Schema,
+        strata: Strata,
+        context: Context,
+    ) -> TensorField:
+        state = context.state
+        if state is not None and not isinstance(state, VocabularyState):
+            raise TypeError(
+                f"category field at '{address}' requires VocabularyState context, got {type(state).__name__}"
+            )
+
+        def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
+            if not len(field.values):
+                return torch.zeros(field.shape, dtype=torch.int64), torch.from_numpy(field.dense.copy())
+            if state is None:
+                raise RuntimeError(f"category field at '{address}' requires a vocabulary encoding context")
+            values, nan = admissible(field)
+            tokens = np.full(len(nan), -1, dtype=np.int64)
+            tokens[~nan] = state.indices(values, learn=False)
+            return torch.from_numpy(field.place(tokens, fill=0)), torch.from_numpy(states(field, nan))
+
+        content, state_tensor = encode(input)
+        target_content, target_state = encode(target)
+        if strata == Strata.train:
+            p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
+            unavailable_index = -1
+
+            if p_unavailable > 0.0:
+                # Train the unavailable-input fallback against the real answer.
+                # An input augmentation is not evidence that its target is unknown.
+                known = state_tensor.eq(Tokens.valued.value) & content.ne(unavailable_index)
+                selected = torch.rand_like(state_tensor, dtype=torch.float).lt(p_unavailable) & known
+                content = content.masked_fill(selected, unavailable_index)
+
+        return cls(
+            state=state_tensor,
+            content=content,
+            present=present,
+            trainable=trainable,
+            inferred=inferred,
+            targets=TensorDict(
+                {
+                    TensorKey.state: target_state,
+                    TensorKey.content: target_content,
+                }
+                if address in schema.objectives
+                else {},
+                batch_size=input.shape,
+            ),
+            batch_size=input.batch_size,
+        )
+
+
+@category.register(Component.Embedder)
+class Embedder(EmbedderBase):
+    def __init__(self, schema: Schema, address: Address):
+        super().__init__(schema=schema, address=address)
+
+        request: Request = cast(Request, schema.requests[address])
+        self.origin: Address = address
+        self.destination: Address = cast("Branch", request.parent).address
+
+        self.vocab: OnlineVocabularyModel = OnlineVocabularyModel(strip=request.strip, cased=request.cased)
+
+        self.embeddings = torch.nn.ModuleDict(
+            {
+                TensorKey.state.name: torch.nn.Embedding(
+                    num_embeddings=len(Tokens),
+                    embedding_dim=schema.d_model,
+                ),
+                TensorKey.content.name: Embedding(
+                    num_embeddings=self.vocab.size,
+                    embedding_dim=schema.d_model,
+                ),
+            }
+        )
+        # Labels are admitted while training, so every content row starts at
+        # zero: an admitted label embeds exactly as it did while unknown until
+        # AdmittedRowsCallback starts its row before the next training batch.
+        torch.nn.init.zeros_(cast(torch.nn.Embedding, self.embeddings[TensorKey.content.name]).weight)
+
+        self.counters = torch.nn.ModuleDict(
+            {
+                TensorKey.state.name: Counter(address=address, size=len(Tokens)),
+                TensorKey.content.name: Counter(address=address, size=self.vocab.size),
+            }
+        )
+
+    @property
+    def size(self) -> int:
+        return self.vocab.size
+
+    @beartype
+    def forward(self, inputs: TensorInput) -> Parcel:
+        N: int
+        dims: list[int]
+
+        N, *dims = inputs.state.shape
+        state = inputs.state.reshape(-1)
+        content = cast(torch.Tensor, inputs.content).reshape(-1)
+        valued = state.eq(Tokens.valued.value)
+
+        known = valued & content.ge(0)
+        safe_content = content.masked_fill(~known, 0)
+        content_embedding = self.embeddings[TensorKey.content.name](safe_content) * known.unsqueeze(-1)
+
+        embeddings: torch.Tensor = (self.embeddings[TensorKey.state.name](state) + content_embedding).reshape(
+            N, *dims, -1
+        )
+
+        return Parcel(
+            payload=embeddings,
+            present=torch.ones(N, dtype=torch.bool, device=embeddings.device),
+            origin=self.origin,
+            destination=self.destination,
+            batch_size=N,
+        )
+
+    @property
+    def context(self) -> VocabularyState:
+        return self.vocab.state
+
+
+@category.register(Component.bind)
+def bind(
+    module: Model,
+    field: TensorFieldBase,
+    observation: TensorDict | None,
+    binding: object,
+    *,
+    address: Address,
+    strata: Strata,
+    resize: Resize,
+) -> None:
+    """Admit labels before forward and translate prefetched scalar IDs."""
+    if not isinstance(binding, VocabularyBatch):
+        raise TypeError(f"category binding at '{address}' requires VocabularyBatch, got {type(binding).__name__}")
+    node = module.nodes[address]
+    embedder = cast(Embedder, node.embedder)
+    mapping, size = binding.resolve(embedder.vocab, learn=strata == Strata.train, device=module.device, resize=resize)
+    resize.embedding(cast(torch.nn.Embedding, embedder.embeddings[TensorKey.content.name]), size, zero=True)
+    cast(Counter, embedder.counters[TensorKey.content.name]).resize(size, resize)
+    decoder = getattr(node, "decoder", None)
+    if decoder is not None:
+        resize.linear(decoder.linears[TensorKey.content.name], size, silent=True)
+    field = cast(TensorField, field)
+    field.content = binding.translate(field.content, mapping, address=address)
+    if TensorKey.content in field.targets:
+        values = cast(torch.Tensor, field.targets[TensorKey.content])
+        field.targets[TensorKey.content] = binding.translate(values, mapping, address=address)
+    if observation is not None:
+        observation[TensorKey.content] = binding.counts(
+            cast(torch.Tensor, observation[TensorKey.content]), mapping, size
+        )
+
+
+@category.register(Component.learn)
+def learn(
+    module: Model,
+    observation: TensorDict,
+    *,
+    address: Address,
+    strata: Strata,
+) -> None:
+    """Apply pristine categorical counts to model-owned resources."""
+
+    if strata != Strata.train:
+        raise ValueError(f"category learner at '{address}' requires train strata, got {strata}")
+    embedder: Embedder = cast(Embedder, module.nodes[address].embedder)
+    cast(Counter, embedder.counters[TensorKey.state.name]).learn(cast(torch.Tensor, observation[TensorKey.state]))
+    cast(Counter, embedder.counters[TensorKey.content.name]).learn(cast(torch.Tensor, observation[TensorKey.content]))
+
+
+@category.register(Component.Decoder)
+class Decoder(DecoderBase):
+    coordinatewise = True
+
+    def __init__(self, schema: Schema, address: Address):
+        super().__init__(schema=schema, address=address)
+
+        request: Request = cast(Request, schema.requests[address])
+
+        self.linears = torch.nn.ModuleDict(
+            {
+                TensorKey.state.name: torch.nn.Linear(
+                    in_features=schema.d_model,
+                    out_features=len(Tokens),
+                ),
+                TensorKey.content.name: Linear(
+                    in_features=schema.d_model,
+                    out_features=INITIAL_CAPACITY,
+                ),
+            }
+        )
+        # Silent rows keep an admitted label out of the softmax until it learns.
+        content = cast(torch.nn.Linear, self.linears[TensorKey.content.name])
+        torch.nn.init.zeros_(content.weight)
+        torch.nn.init.constant_(content.bias, SILENT_LOGIT)
+        self.metrics = Scores(address, partial(Reconstruction, cast(list[int], request.topk)))
+
+    @beartype
+    def decode(self, pooled: torch.Tensor) -> TensorDict:
+        return TensorDict(
+            source={
+                TensorKey.state: self.linears[TensorKey.state.name](pooled),
+                TensorKey.content: self.linears[TensorKey.content.name](pooled),
+            }
+        )
+
+
+@category.register(Component.loss)
+def loss(
+    module: Model,
+    prediction: Prediction,
+    batch: TensorFieldBase,
+    strata: Strata,
+) -> torch.Tensor:
+    embedder: Embedder = cast(Embedder, module.nodes[prediction.address].embedder)
+    N: int = cast(torch.Tensor, batch.targets[TensorKey.state]).numel()
+    trainable = batch.trainable.reshape(N)
+
+    state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
+    state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
+
+    loss: torch.Tensor = module.track(
+        (prediction.address, strata, Metric.loss, TensorKey.state),
+        value=(
+            torch.nn.functional.cross_entropy(
+                input=state_inputs,
+                target=state_targets,
+                reduction="none",
+            )
+            .masked_select(trainable)
+            .mean()
+        ),
+    )
+
+    module.track(
+        (prediction.address, strata, Metric.accuracy, TensorKey.state),
+        value=state_inputs.argmax(dim=1).eq(state_targets).masked_select(trainable).float().mean(),
+    )
+    module.track(
+        (prediction.address, strata, "vocabulary", "size"),
+        value=state_inputs.new_full((), len(embedder.vocab.master), dtype=torch.float32),
+    )
+
+    valued = trainable & state_targets.eq(Tokens.valued.value)
+    content_inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(N, -1)
+    content_targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)
+    size = len(embedder.vocab.master)
+    invalid = valued & (content_targets.lt(-1) | content_targets.ge(size))
+    if invalid.any():
+        raise ValueError(f"Token in address {prediction.address} exceeds vocabulary size")
+
+    known = valued & content_targets.ge(0)
+    known_indices = known.nonzero(as_tuple=True)[0]
+    known_logits = content_inputs.index_select(0, known_indices)[:, :size].float()
+    known_targets = content_targets.index_select(0, known_indices)
+    # Unknown target identities supply no categorical supervision. In
+    # particular, they do not imply a uniform distribution over known labels.
+    # Spare storage is not a class and must not influence the objective.
+    known_losses = torch.nn.functional.cross_entropy(input=known_logits, target=known_targets, reduction="none")
+    objective = known_losses.sum()
+    decoder = cast(Decoder, module.nodes[prediction.address].decoder)
+    metric = cast(Reconstruction, decoder.metrics[f"{strata.value}_metrics"])
+    with torch.no_grad():
+        # Score the same populated candidates used by the prediction writer.
+        candidates = known_logits
+        correct = known.sum().new_zeros(())
+        nll = objective.detach()
+        topk = [correct.clone() for _ in metric.topk]
+        if size:
+            correct = candidates.argmax(dim=-1).eq(known_targets).sum()
+            topk = [
+                candidates.topk(k=min(k, size), dim=-1).indices.eq(known_targets.unsqueeze(-1)).any(dim=-1).sum()
+                for k in metric.topk
+            ]
+        decoder.metrics.record(
+            module, strata, torch.stack((known.sum(), valued.sum(), correct, *topk)), torch.stack((objective, nll))
+        )
+    return loss + objective / known.sum().clamp_min(1)
+
+
+@category.register(Component.output)
+def output(module: Model, address: Address) -> pa.StructType:
+    candidate = pa.struct(
+        [
+            pa.field(TensorKey.value.name, pa.large_string(), nullable=False),
+            pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
+        ]
+    )
+    content = pa.struct(
+        [
+            pa.field(TensorKey.value.name, pa.large_string()),
+            pa.field(TensorKey.probability.name, pa.float32(), nullable=False),
+            pa.field(TensorKey.topk.name, pa.list_(pa.field("element", candidate)), nullable=False),
+        ]
+    )
+    return pa.struct([pa.field(TensorKey.content.name, content, nullable=False)])
+
+
+@category.register(Component.write)
+def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.StructArray:
+    content_type = datatype.field(TensorKey.content.name).type
+    candidate_type = content_type.field(TensorKey.topk.name).type.value_type
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.content])
+    coordinates = logits.reshape(-1, logits.shape[-1])
+    vocabulary = labels(cast(Embedder, module.nodes[prediction.address].embedder).vocab)
+    size = len(vocabulary)
+    if size > coordinates.shape[-1]:
+        raise ValueError(
+            f"category vocabulary at {prediction.address!s} has {size} values but prediction width is "
+            f"{coordinates.shape[-1]}"
+        )
+
+    count = coordinates.shape[0]
+    best_labels: pa.Array = pa.nulls(count, type=pa.large_string())
+    best_probabilities = torch.zeros(count, dtype=torch.float32, device=logits.device)
+    candidates = struct(
+        {
+            TensorKey.value.name: pa.array([], type=pa.large_string()),
+            TensorKey.probability.name: pa.array([], type=pa.float32()),
+        },
+        candidate_type,
+    )
+    candidate_counts = torch.zeros(count, dtype=torch.int64)
+
+    if size:
+        probabilities = coordinates[:, :size].softmax(dim=-1)
+        best_probabilities, best_indices = probabilities.max(dim=-1)
+        best_labels = pc.take(vocabulary, array(best_indices, pa.int64()))
+
+        request: Request = cast(Request, module.schema.requests[prediction.address])
+        width = min(max(cast(list[int], request.topk), default=0), size)
+        if width:
+            top_probabilities, top_indices = probabilities.topk(k=width, dim=-1)
+            candidates = struct(
+                {
+                    TensorKey.value.name: pc.take(vocabulary, array(top_indices, pa.int64())),
+                    TensorKey.probability.name: array(top_probabilities, pa.float32()),
+                },
+                candidate_type,
+            )
+            candidate_counts = torch.full((count,), width, dtype=torch.int64)
+
+    content = struct(
+        {
+            TensorKey.value.name: best_labels,
+            TensorKey.probability.name: array(best_probabilities, pa.float32()),
+            TensorKey.topk.name: variable(
+                candidates, candidate_counts, datatype=content_type.field(TensorKey.topk.name).type
+            ),
+        },
+        content_type,
+    )
+    return struct({TensorKey.content.name: content}, datatype)

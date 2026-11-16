@@ -1,0 +1,11 @@
+relflow-native
+Copyright 2024-2026 Grantham Taylor and Reid Taylor
+
+This component of relflow is licensed under the GNU Affero General Public
+License, version 3 only (AGPL-3.0-only). See LICENSE.
+
+Third-party dependencies retain their own licenses. Previously granted
+Apache-2.0 permissions remain effective for code made available under those terms.
+
+Additional licensing permissions require written approval from both Grantham
+Taylor and Reid Taylor and the necessary rights for all included contributions.

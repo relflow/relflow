@@ -1,0 +1,263 @@
+# %% [markdown]
+# ---
+# title: Does label encounter order limit vocabulary coverage?
+# categories:
+# - Vocabulary
+# description: Train on common and rare labels, changing which labels appear first.
+# execute:
+#   enabled: false
+#   eval: false
+# code-fold: true
+# toc: false
+# evidence-readout:
+# - label: Common-label coverage, rare first
+#   metric:
+#   - arms
+#   - rare_first
+#   - common_coverage
+#   format: percent
+# - label: Common-label coverage, common first
+#   metric:
+#   - arms
+#   - common_first
+#   - common_coverage
+#   format: percent
+# evidence-group: Vocabulary
+# ---
+#
+# This experiment asks whether the first labels encountered can crowd out useful labels that arrive
+# later. There are four code strings, but their frequencies are very unequal: the two rare labels
+# occur once each per generated pass, while `cold` and `hot` fill the remaining rows. The hidden
+# target depends only on the code plus small noise.
+#
+# ## Example
+#
+# ```yaml
+# code: rare-left
+# target: -1.0
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-evidence-capacity-admission-order
+# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# //| fig-alt: "Model tree with record, code, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# #tree(node("record", kind: "root", children: (
+#   node("code", type: "Category", body: [Growing vocabulary with stable IDs]),
+#   node("target", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# The displayed `rare-left` target of −1 is the illustrative mean before noise. The two common codes
+# have means −1 for `cold` and +1 for `hot`. Giving rare labels the first two encounters should
+# determine their vocabulary positions, but should not prevent the model from later storing both
+# common identities or learning their opposite effects.
+#
+# ## Comparison
+#
+# Compare rare-first and common-first training. Check that all observed labels are admitted and that common-label distinctions learn.
+#
+# The order intervention moves the first common examples to the front of the same observations. It
+# preserves every code, target, noise draw, and frequency, so a coverage difference cannot be
+# explained by one arm receiving more information. A second probe swaps common code names on held-out
+# rows; a model that uses identity should change its predictions substantially.
+#
+# ## Result
+#
+# {{< evidence P057 status >}}
+#
+# Storage grows and retains earlier labels in both orders. This single-consumer experiment does not test distributed encounter order.
+#
+# Vocabulary coverage and prediction quality answer different questions here. Complete coverage shows
+# that growing storage admitted the common labels; low normalized error shows that their effects were
+# learned. The rare labels diagnose admission and stable ordering, not dependable rare-label accuracy.
+# The controlled one-consumer setup also leaves distributed encounter ordering outside this claim.
+#
+# <details class="evidence-details">
+# <summary>Experiment details and code</summary>
+#
+# {{< evidence P057 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< evidence P057 script >}}
+#
+# ### Data and model
+#
+# A training pass has 4,096 rows: one of each rare label and 4,094 balanced
+# common labels. The target is the label's effect plus Gaussian noise with SD
+# 0.02. For common-first, move the first cold and hot observations to the front
+# without duplicating, deleting, or otherwise changing any record.
+# Validation uses 512 independent observations. Test generation uses 2,050
+# independent observations and scores only its 2,048 common-label rows.
+#
+# ### Training and controls
+#
+# Each arm uses the same seed and 300 AdamW updates at learning rate 0.002,
+# with `shuffle=False`, `num_workers=0`, and one device. Every arm must admit
+# all four labels, retain the first two IDs, have common-label coverage of one,
+# and achieve nRMSE below 0.15. Swapping cold and hot must change predictions
+# by more than 1.5 on average, demonstrating use of their distinct identities.
+# Both arms must grow to hold all four labels.
+#
+# ### Scope of evidence
+#
+# This checks one-device admission and common-label learning. The singleton
+# rare labels establish admission and ID order, not reliable rare-label
+# predictions. It does not establish worker/DDP ordering or optimizer-state
+# preservation after growth later in training. Dedicated runtime tests cover
+# those invariants separately, including two-rank DDP, persistent workers,
+# gradient accumulation, and checkpoint resume.
+#
+# ### Complete experiment code
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyarrow",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "training"
+# types = ["Category"]
+# conditions = ["changed-associations", "training-updates"]
+# ///
+
+"""P057: vocabulary growth retains admission order and learnable distinctions."""
+
+import sys
+from collections.abc import Iterator
+from functools import partial
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import pyarrow as pa
+import relflow as rf
+from reporting import experiment, report
+
+BUDGET = 300
+EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
+
+
+def records(*, rows: int, seed: int, common_first: bool = False) -> Iterator[dict]:
+    if rows < 4:
+        raise ValueError("capacity proof requires at least four observations")
+    rng = np.random.default_rng(seed)
+    common = np.resize(np.asarray(["cold", "hot"]), rows - 2)
+    rng.shuffle(common)
+    labels = ["rare-left", "rare-right", *common.tolist()]
+    noise = rng.normal(0.0, 0.02, rows)
+    observations = [
+        {"code": label, "target": float(EFFECTS[label] + deviation)}
+        for label, deviation in zip(labels, noise, strict=True)
+    ]
+    order = list(range(rows))
+    if common_first:
+        front = [labels.index("cold"), labels.index("hot")]
+        order = front + [index for index in order if index not in front]
+    for index in order:
+        yield observations[index]
+
+
+class PredictionModel(rf.Model):
+    code = rf.Category(p_unavailable=0.0)
+    target = rf.Number(mask=True, objective="mse")
+
+
+def build() -> rf.Model:
+    return PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
+
+
+def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
+
+
+@experiment("P057", seed=5701)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    test = [row for row in records(rows=2050, seed=seed + 3) if row["code"] in {"cold", "hot"}]
+    train = [row for row in records(rows=4096, seed=seed + 1) if row["code"] in {"cold", "hot"}]
+    actual = np.asarray([row["target"] for row in test])
+    baseline = float(np.sqrt(np.mean((actual - np.mean([row["target"] for row in train])) ** 2)))
+    metrics = {"baseline_rmse": baseline, "arms": {}}
+    checks = {}
+    for name, common_first in (("rare_first", False), ("common_first", True)):
+        lit.seed_everything(seed, workers=True)
+        model = build()
+        initial_size = model.nodes["/code"].embedder.size
+        data = rf.SyntheticDataModule(
+            train=partial(records, rows=4096, seed=seed + 1, common_first=common_first),
+            validate=partial(records, rows=512, seed=seed + 2),
+            seed=seed,
+            shuffle=False,
+            num_workers=0,
+        )
+        model.fit(
+            data,
+            batch_size=64,
+            learning_rate=0.002,
+            early_stopping=False,
+            rollback=False,
+            precision="32-true",
+            strategy="auto",
+            accelerator=accelerator,
+            devices=1,
+            max_epochs=-1,
+            max_steps=BUDGET if steps is None else min(steps, BUDGET),
+            deterministic=True,
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=False,
+            enable_model_summary=False,
+            num_sanity_val_steps=0,
+        )
+        trainer = model.trainer
+        model.eval()
+        vocabulary = rf.Category.vocabulary(model, "/code")
+        predicted = prediction(model, test)
+        renamed = [{**row, "code": "hot" if row["code"] == "cold" else "cold"} for row in test]
+        measured = {
+            "steps": trainer.global_step,
+            "initial_size": initial_size,
+            "allocated_size": model.nodes["/code"].embedder.size,
+            "vocabulary": vocabulary,
+            "counts": rf.Category.counts(model, "/code"),
+            "common_coverage": float(np.mean([row["code"] in vocabulary for row in test])),
+            "nrmse": float(np.sqrt(np.mean((actual - predicted) ** 2))) / baseline,
+            "identity_swap_drift": float(np.mean(np.abs(predicted - prediction(model, renamed)))),
+        }
+        first = ("cold", "hot") if common_first else ("rare-left", "rare-right")
+        checks[f"{name}: all four labels are admitted"] = len(vocabulary) == 4 and set(vocabulary) == set(EFFECTS)
+        checks[f"{name}: first label IDs are preserved"] = vocabulary[:2] == first
+        checks[f"{name}: allocation holds all four labels"] = measured["allocated_size"] == 4
+        checks[f"{name}: storage grows automatically"] = measured["allocated_size"] > initial_size
+        checks[f"{name}: all labels have training exposures"] = all(
+            measured["counts"].get(label, 0) > 0 for label in EFFECTS
+        )
+        checks[f"{name}: common-label coverage is complete"] = measured["common_coverage"] == 1.0
+        checks[f"{name}: common-label nRMSE below 0.15"] = measured["nrmse"] < 0.15
+        checks[f"{name}: common identities have distinct learned effects"] = measured["identity_swap_drift"] > 1.5
+        checks[f"{name}: prediction does not change admission"] = rf.Category.vocabulary(model, "/code") == vocabulary
+        metrics["arms"][name] = measured
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)
+
+# %% [markdown]
+# </details>

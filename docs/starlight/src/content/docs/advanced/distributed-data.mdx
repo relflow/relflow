@@ -1,0 +1,193 @@
+---
+title: Distributed training and streaming
+description: Control per-device batches, stream ownership, equal-step tails, and vocabulary growth across workers and distributed ranks.
+---
+
+Distributed training gives several model replicas disjoint observations and
+combines their gradients. Streaming controls how those observations are read.
+They are separate concerns: using several accelerators does not make an
+unrepeatable source or an unbounded observation safe to consume.
+
+Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
+It covers the built-in Arrow-backed modules with eager, unsharded DDP.
+
+## Start with an explicit launch configuration
+
+Use the `Customer` class from the
+[standalone Python example](/examples/repeat-purchase/repeat_purchase.py).
+Save `repeat_purchase.py` beside this script so the schema can be imported
+without running its training command. Prepare sharded Parquet files at the
+paths below with matching nested inputs and historical `returns_in_30d` labels.
+
+```python
+import relflow as rf
+
+from repeat_purchase import Customer
+
+
+if __name__ == "__main__":
+    model = Customer(preset="small")
+    data = rf.ArrowDataModule(
+        train=rf.source("purchase/train/*.parquet"),
+        validate=rf.source("purchase/validation/*.parquet"),
+        num_workers=2,
+        persistent_workers=True,
+        pin_memory=False,
+        prefetch_factor=2,
+        shuffle_rows=8192,
+        seed=2026,
+    )
+    model.fit(
+        data,
+        batch_size=128,
+        learning_rate=1e-3,
+        max_epochs=8,
+        accelerator="cuda",
+        devices=2,
+        strategy="ddp_find_unused_parameters_true",
+        precision="32-true",
+        accumulate_grad_batches=2,
+        early_stopping=False,
+        rollback=False,
+    )
+```
+
+This example requires two available CUDA devices. File shards must be visible
+to every consuming rank, and the training and validation records must match the
+declared `Customer` schema. The explicit precision setting makes the execution choice
+clear; it is not an accuracy or throughput recommendation.
+
+`fit` forwards these Trainer options to Lightning. When hardware options are
+omitted, relflow resolves available devices, selects DDP with unused-parameter
+detection for multiple devices or nodes, and chooses supported precision.
+Set the options explicitly when comparing runs or controlling resource use.
+The [hardware policy](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/training.py#L70)
+is the reference for this revision.
+
+## Count the right batch dimension
+
+In the example, each device receives up to 128 customer observations per
+training step. Two devices therefore process up to 256 customers together;
+two accumulated steps contribute up to 512 before an optimizer update.
+Partial tails can be smaller.
+
+Those counts describe outer rows. They do not count the orders inside a
+customer, nor the number of supervised target positions. Branch caps and
+collection lengths independently determine the work inside each row.
+
+| Control | Scope |
+| --- | --- |
+| `batch_size` on `fit` | Outer observations per device for model-owned loaders. |
+| `devices` and `num_nodes` | Number of participating model replicas. |
+| `accumulate_grad_batches` | Number of local steps combined before an optimizer update. |
+| `num_workers` | Local loading processes per rank, not the number of accelerators. |
+| `shuffle_rows` | Streaming shuffle buffer within a consumer's pipeline. |
+| Branch `length` | Retained records within each observation. |
+
+With two ranks and two workers per rank, there are four loading worker
+processes. Each can also hold source chunks and prefetched encoded batches.
+Size the source chunk, shuffle buffer, prefetch depth, and branch limits
+together rather than budgeting only for the neural batch.
+
+## Let one pipeline assign rows
+
+The Arrow-backed modules already partition work. Do not pre-shard the supplied
+source by rank or worker and then ask this same pipeline to divide it again.
+
+For ordinary training, validation, and test loading, local workers divide file
+manifests, alternate stream units, or stride in-memory rows before preprocessing
+and encoding. Within corresponding worker streams, distributed ranks replay
+the same logical order and select disjoint rows from global superbatches.
+
+Prediction, dataset-scoped preprocessing, and an `epoch_size` cap require a
+coordinated complete-split view instead. In those cases, workers replay the
+stream and take turns on completed batches. A generic connector can therefore
+be opened by multiple consumers even when every final observation is assigned
+only once to its rank's output stream.
+
+For file sources, the pipeline freezes a manifest before workers start and
+shares rank-zero discovery with the other ranks. Independent readers then open
+the selected files. Custom factories must provide the equivalent consistency:
+the same snapshot, logical row order, and schema on every rank.
+
+The [Arrow iteration path](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/datasets/arrow.py#L498)
+and [source manifest tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_sources.py#L36)
+make this ownership explicit.
+
+## Preserve equal steps at the tail
+
+DDP participants must enter compatible collective operations. With
+`drop_last=False`, a short global superbatch still produces a step on every
+rank. Some ranks can receive fewer rows or a zero-row batch. With
+`drop_last=True`, the incomplete global tail is dropped instead.
+
+Do not silently filter an assigned empty batch in a custom loader or callback.
+It can be the mechanism that keeps rank step counts aligned. Likewise, a rank
+must not independently stop its source early because its local queue appears
+empty. See the [distributed ownership and tail tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_arrow_datamodules.py#L267).
+
+## Bound a stream without changing its meaning
+
+Use a factory that creates a fresh Arrow reader or iterable on each pass.
+Place connector functions at module scope and open live clients inside the
+iteration so spawned processes create their own resources.
+
+An `epoch_size` budget limits processed, sampled observations in an epoch. For
+a callable source with shuffling, its candidate window is bounded by
+`max(epoch_size, 2 * shuffle_rows)` before the final cap. A connector can still
+read ahead by an ingress chunk. The cap is not a broker acknowledgement,
+exactly-once delivery protocol, or a deadline for blocked I/O.
+
+Keep `pin_memory=False` with workers. The built-in worker path packs tensor
+storage and compacts the Arrow source to the actual batch before shipping it;
+replacing it with arbitrary sliced tables can retain an entire source window
+in each serialized batch. The [shipping tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_arrow_datamodules.py#L773)
+cover that storage boundary.
+
+## Preserve distributed vocabulary growth
+
+New labels can require larger model parameters while training. That is more
+than inserting strings into a dictionary: every rank must agree on label
+positions, parameter shapes, optimizer state, and the DDP wrapper before the
+next forward pass.
+
+The built-in batch path carries resource bindings to the model process.
+`Model.on_before_batch_transfer` commits them before distributed forward
+execution. Keep that hook when customizing model or data transfer behavior.
+The model also installs the registered extension callbacks; replacing
+`configure_callbacks` must preserve them.
+
+For automatic resource growth, the current implementation requires:
+
+- Single-device training or eager Lightning DDP with automatic optimization.
+- `static_graph=False`, with no DDP-native mixed-precision wrapper,
+  communication hooks, or delayed all-reduce configuration.
+- A supported optimizer state layout when resized parameters need their state
+  preserved. The resize code supports the recognized Adam/AdamW moments, SGD
+  momentum, and step state; arbitrary optimizer tensors are not inferred.
+
+DDP-native mixed precision is a different mechanism from Lightning's Trainer
+precision setting. The example uses `32-true`; do not infer support for another
+strategy or plugin combination from the fact that it has several devices.
+The [binding guards](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/binding.py#L66)
+and [distributed growth tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/test_distributed_vocabulary_growth.py#L227)
+define the supported path.
+
+## Reproduce the consumer plan
+
+Record the data snapshot and ordering, seed, worker count, source chunking,
+per-device batch size, rank count, accumulation, and history policy together.
+Changing any of these can change which examples share a batch or which
+history window is retained. The same seed alone does not preserve those
+choices across a different consumer plan.
+
+For a CPU process-level check, the repository's distributed tests use two
+CPU processes, `precision="32-true"`, and a Gloo-capable Torch build. The CUDA
+example above is not an instruction to request multiple MPS devices. Cluster
+launching, network rendezvous, accessible storage, and backend availability
+belong to the deployment environment; `num_nodes` does not provision them.
+
+Continue with [custom data modules](/advanced/custom-data-modules/) for source
+adapters, [online vocabulary](/advanced/online-vocabulary/) for admission and
+learning semantics, and [checkpoints and model state](/advanced/checkpoints-and-state/)
+for the difference between optimization resume and stream replay.

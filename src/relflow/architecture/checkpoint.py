@@ -1,0 +1,171 @@
+"""Checkpoint serialization helpers for `relflow` models."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, TypeVar
+
+import lightning.pytorch as lit
+import torch
+from lightning.pytorch.callbacks import ModelCheckpoint
+
+from relflow.architecture.graph import ModelGraph
+from relflow.logging import logger
+from relflow.presets import Preset
+from relflow.structs.experiment import Schema
+
+if TYPE_CHECKING:
+    from relflow.architecture.root import Model
+
+M = TypeVar("M", bound="Model")
+
+
+class RollbackCheckpoint(ModelCheckpoint):
+    """Checkpoint the best model during fit and restore it into the module at fit end."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        if self.save_weights_only:
+            raise ValueError("RollbackCheckpoint requires full checkpoints; set save_weights_only=False")
+        if self.save_top_k == 0:
+            raise ValueError("RollbackCheckpoint requires at least one saved checkpoint; set save_top_k != 0")
+
+    def on_fit_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule) -> None:
+        from relflow.architecture.root import Model
+
+        super().on_fit_end(trainer=trainer, pl_module=pl_module)
+        if not isinstance(pl_module, Model):
+            raise TypeError("RollbackCheckpoint can only restore relflow Model instances")
+
+        best_model_path = self.best_model_path
+        if not best_model_path:
+            raise RuntimeError("RollbackCheckpoint did not find a best checkpoint to restore")
+
+        strategy = getattr(trainer, "strategy", None)
+        if strategy is not None:
+            strategy.barrier("rollback_checkpoint_load")
+            checkpoint = strategy.checkpoint_io.load_checkpoint(
+                best_model_path,
+                map_location=pl_module.device,
+                weights_only=False,
+            )
+        else:
+            checkpoint = torch.load(best_model_path, weights_only=False, map_location=pl_module.device)
+
+        pl_module.restore_checkpoint_state(checkpoint)
+        logger.bind(
+            component="checkpoint",
+            checkpoint=best_model_path,
+            score=self.best_model_score,
+        ).info("rolled back Model to best checkpoint")
+
+
+class CheckpointState:
+    """Save, load, and restore model state without owning the public facade."""
+
+    required_fields = {"state_dict", "schema", "batch_size", "version"}
+
+    @staticmethod
+    def dump(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Add RelFlow metadata to an otherwise framework-owned checkpoint mapping."""
+        checkpoint["version"] = module.version
+        checkpoint["schema"] = module.schema.model_dump(mode="json")
+        checkpoint["batch_size"] = module.batch_size
+        checkpoint["preset"] = None if module.preset is None else module.preset.model_dump(mode="json")
+
+    @staticmethod
+    def restore_metadata(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Restore validated package provenance and the policy for future schema additions."""
+        saved = checkpoint["version"]
+        if not isinstance(saved, str):
+            raise ValueError("checkpoint version must be a string")
+        policy = checkpoint.get("preset")
+        preset = None if policy is None else Preset.model_validate(policy)
+        object.__setattr__(module, "_version", saved)
+        module.preset = preset
+
+    @staticmethod
+    def save(module: "Model", pathname: str | Path) -> None:
+        """Persist model tensors and the schema needed to reconstruct their graph."""
+        path = Path(pathname)
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        checkpoint: dict[str, Any] = {"state_dict": module.state_dict()}
+        CheckpointState.dump(module, checkpoint)
+        torch.save(checkpoint, path)
+
+    @staticmethod
+    def require(checkpoint: dict[str, Any]) -> None:
+        """Validate the metadata needed to construct or restore a model."""
+        if not isinstance(checkpoint, dict):
+            raise ValueError("checkpoint must contain a mapping")
+        missing = CheckpointState.required_fields - set(checkpoint)
+        if missing:
+            fields = ", ".join(sorted(missing))
+            raise ValueError(f"missing checkpoint fields: {fields}")
+        if not isinstance(checkpoint["state_dict"], dict):
+            raise ValueError("checkpoint state_dict must be a mapping")
+        batch_size = checkpoint["batch_size"]
+        if not isinstance(batch_size, int) or isinstance(batch_size, bool) or batch_size < 1:
+            raise ValueError(f"checkpoint batch_size must be a positive integer, got {batch_size!r}")
+        if not isinstance(checkpoint["version"], str):
+            raise ValueError("checkpoint version must be a string")
+
+    @staticmethod
+    def read(path: str | Path) -> dict[str, Any]:
+        """Read and validate CPU state without constructing the neural graph."""
+        state = torch.load(path, weights_only=False, map_location="cpu")
+        CheckpointState.require(state)
+        return state
+
+    @staticmethod
+    def build(model_cls: type[M], state: dict[str, Any]) -> M:
+        """Construct the saved graph from validated CPU state and restore its provenance."""
+        model = model_cls(schema=Schema.model_validate(state["schema"]), batch_size=state["batch_size"])
+        CheckpointState.restore_metadata(model, state)
+        model.load_state_dict(state_dict=state["state_dict"])
+        return model
+
+    @staticmethod
+    def restore(module: "Model", checkpoint: dict[str, Any]) -> None:
+        """Restore a checkpoint, rolling back the graph if schema or tensor loading fails."""
+        CheckpointState.require(checkpoint)
+
+        device = module.device
+        was_training = module.training
+        previous_schema = module.schema
+        previous_batch_size = module.batch_size
+        previous_nodes = module.nodes
+        previous_example = module.example_input_array
+        previous_preset = module.preset
+        previous_version = module.version
+        try:
+            module.schema = Schema.model_validate(checkpoint["schema"])
+            module.batch_size = checkpoint["batch_size"]
+            CheckpointState.restore_metadata(module, checkpoint)
+            ModelGraph.install(module)
+            if isinstance(device, torch.device):
+                module.to(device=device)
+            module.load_state_dict(state_dict=checkpoint["state_dict"])
+        except Exception:
+            module.schema = previous_schema
+            module.batch_size = previous_batch_size
+            module.nodes = previous_nodes
+            module.example_input_array = previous_example
+            module.preset = previous_preset
+            object.__setattr__(module, "_version", previous_version)
+            module.train(was_training)
+            raise
+        module.train(was_training)
+        module.reset_contracts()
+
+    @staticmethod
+    def load(model_cls: type[M], checkpoint: str | Path) -> M:
+        """Construct the requested Model subclass from saved schema and tensor state."""
+        path = Path(checkpoint)
+        logger.bind(component="model_factory", checkpoint=str(path)).info("loading Model from checkpoint")
+        state = CheckpointState.read(path)
+        model = CheckpointState.build(model_cls, state)
+        logger.bind(component="model_factory", checkpoint=str(path)).info("restored model state from checkpoint")
+
+        return model

@@ -1,0 +1,139 @@
+name: Release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-main
+  queue: max
+
+jobs:
+  detect_version:
+    if: >-
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository) ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      ci_run_id: ${{ steps.ci.outputs.run_id }}
+      source_sha: ${{ steps.ci.outputs.source_sha }}
+      distribution_artifact: ${{ steps.ci.outputs.distribution_artifact }}
+    steps:
+      - name: Identify successful CI for the exact current main commit
+        id: ci
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const repo = context.repo;
+            const main = (await github.rest.git.getRef({ ...repo, ref: 'heads/main' })).data.object.sha;
+            let run = context.payload.workflow_run;
+            if (run && run.head_sha !== main) {
+              core.info('Skipping a superseded main commit.');
+              core.setOutput('current', 'false');
+              return;
+            }
+            if (!run) {
+              const response = await github.rest.actions.listWorkflowRuns({
+                ...repo, workflow_id: 'ci.yml', branch: 'main', event: 'push',
+                head_sha: main, status: 'success', per_page: 100,
+              });
+              run = response.data.workflow_runs.find(item => item.head_sha === main);
+            }
+            if (!run || run.conclusion !== 'success' || run.event !== 'push' ||
+                run.head_branch !== 'main' || run.head_sha !== main ||
+                run.head_repository.full_name !== `${repo.owner}/${repo.repo}` || run.path !== '.github/workflows/ci.yml') {
+              throw new Error('Release requires a successful CI push run for the current main commit. Re-run the main push CI first.');
+            }
+            core.setOutput('run_id', String(run.id));
+            core.setOutput('source_sha', run.head_sha);
+            if (!Number.isInteger(run.run_attempt) || run.run_attempt < 1) {
+              throw new Error('Release requires the exact successful CI attempt.');
+            }
+            core.setOutput('distribution_artifact', `python-package-distributions-attempt-${run.run_attempt}`);
+            core.setOutput('current', 'true');
+      - uses: actions/checkout@v4
+        if: steps.ci.outputs.current == 'true'
+        with:
+          ref: ${{ steps.ci.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: steps.ci.outputs.current == 'true'
+        with:
+          python-version: '3.12'
+      - name: Read the checked project version
+        id: version
+        if: steps.ci.outputs.current == 'true'
+        shell: python
+        run: |
+          import os
+          import tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(f"version={version}\n")
+
+  evidence:
+    needs: detect_version
+    if: needs.detect_version.outputs.source_sha != ''
+    uses: ./.github/workflows/publish-evidence.yml
+    permissions:
+      contents: write
+      actions: read
+    with:
+      library_run_id: ${{ needs.detect_version.outputs.ci_run_id }}
+      version: ${{ needs.detect_version.outputs.version }}
+      source_sha: ${{ needs.detect_version.outputs.source_sha }}
+
+  publish:
+    needs: [detect_version, evidence]
+    if: needs.detect_version.outputs.source_sha != ''
+    runs-on: ubuntu-24.04
+    environment:
+      name: pypi
+      url: https://pypi.org/p/relflow
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect_version.outputs.source_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.detect_version.outputs.distribution_artifact }}
+          path: package/
+          github-token: ${{ github.token }}
+          run-id: ${{ needs.detect_version.outputs.ci_run_id }}
+      - name: Reconcile the original checked build with GitHub and PyPI
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.detect_version.outputs.version }}
+          SOURCE_SHA: ${{ needs.detect_version.outputs.source_sha }}
+        run: >-
+          python scripts/release.py prepare package --source-sha "$SOURCE_SHA"
+          --version "$VERSION" --repository "$GH_REPO" --output dist --retained release-package
+      - name: Publish only absent original distributions
+        if: steps.prepare.outputs.should_publish == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Verify the complete published PyPI file inventory
+        run: python scripts/release.py verify-pypi release-package

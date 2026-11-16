@@ -1,0 +1,237 @@
+# %% [markdown]
+# ---
+# title: Can it subtract an average supplied as input?
+# categories:
+# - Peer-relative inference
+# description: Give each item both its value and its peer average, then predict their difference.
+# execute:
+#   enabled: false
+#   eval: false
+# code-fold: true
+# toc: false
+# evidence-readout:
+# - label: Difference prediction
+#   metric:
+#   - intact_nrmse
+#   format: error
+# evidence-group: Relational
+# ---
+#
+# ## Example
+#
+# Every item receives the reference average explicitly as `peer_mean`; the hidden answer is simply `value -
+# peer_mean`. In the illustration, `1.5 - 2.5 = -1.0` and `3.5 - 2.5 = 1.0`. All six listed values average
+# to `2.5`, but the model does not have to derive that fact to solve this version. The example separates
+# understanding the desired subtraction from discovering which other values provide the reference.
+#
+# ```yaml
+# items:
+#   - {value: 1.5, peer_mean: 2.5, deviation: -1.0}
+#   - {value: 1.9, peer_mean: 2.5, deviation: -0.6}
+#   - {value: 2.3, peer_mean: 2.5, deviation: -0.2}
+#   - {value: 2.7, peer_mean: 2.5, deviation: 0.2}
+#   - {value: 3.1, peer_mean: 2.5, deviation: 0.6}
+#   - {value: 3.5, peer_mean: 2.5, deviation: 1.0}
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```{typst}
+# //| label: fig-evidence-supplied-peer-mean-control
+# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# //| fig-alt: "Model tree with collection, items, value, peer_mean, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# #tree(node("collection", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("value", type: "Number"),
+#     node("peer_mean", type: "Number"),
+#     node("deviation", kind: "target", type: "Number", width: 150pt,),
+#   )),
+# )))
+# ```
+#
+# ## Comparison
+#
+# The generator varies the common mean and the spread of six centered deviations, then supplies that mean
+# beside every item. Fresh train, validation, and test records use independent random draws. This is a
+# diagnostic control beside the versions that withhold the mean: it removes peer selection and aggregation
+# while retaining local numeric prediction and repeated output alignment. It does not include an
+# intervention that corrupts the supplied reference.
+#
+# Compare predictions with the correct differences on fresh records.
+#
+# ## Result
+#
+# Normalized RMSE compares prediction error with a constant training-target guess. A ratio of `0.25`, for
+# example, would mean one quarter of that guess's root-mean-square error, not 75% exact answers. The visible
+# mean makes this a test of the final subtraction step. A good result helps rule out an inability to produce
+# local differences, but cannot show that the harder mean-inference or grouping steps have been learned.
+#
+# {{< evidence P034 status >}}
+#
+# Local subtraction works when both numbers are supplied. This does not show that the model can calculate the average or choose the right peers.
+#
+# <details class="evidence-details">
+# <summary>Experiment details and code</summary>
+#
+# {{< evidence P034 evidence >}}
+#
+# ### Run this experiment
+#
+# {{< evidence P034 script >}}
+#
+# ### How it works
+#
+# The repeated decoder can use visible siblings at the same coordinate. Since
+# both operands are already supplied, a failure would point toward local
+# arithmetic or repeated output routing before collection aggregation is tested.
+# The generator varies the collection's location independently of its centered
+# deviations, so a constant or raw-value shortcut is inadequate.
+#
+# ### Remaining work
+#
+# Repeat three core seeds and ten calibration seeds, then test missing operands
+# and variable lengths. The [raw ungrouped case](ungrouped-peer-deviation.html)
+# removes the supplied mean to test learned aggregation.
+#
+# ### Complete experiment code
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "structure"
+# types = []
+# conditions = ["fresh-records"]
+# ///
+
+"""Subtract a supplied peer mean and write each result to its item coordinate.
+
+The mean is deliberately provided beside every value. This diagnostic removes
+aggregation and peer selection, isolating local subtraction and repeated
+prediction writeback.
+
+Run this file with --help for seed, training-budget, and reporting options.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Iterator
+from functools import partial
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+ITEMS = 6
+
+
+def records(*, rows: int, seed: int) -> Iterator[dict]:
+    """Generate collections with independent locations and centered residuals."""
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        basis = rng.normal(size=ITEMS)
+        basis -= basis.mean()
+        basis /= np.sqrt(np.mean(np.square(basis)))
+        scale = float(rng.uniform(0.25, 1.1))
+        mean = float(rng.uniform(-3.5, 3.5))
+        deviations = scale * basis
+        values = mean + deviations
+        items: list[dict[str, float]] = []
+        for value, deviation in zip(values, deviations, strict=True):
+            item = {"value": float(value), "deviation": float(deviation)}
+            item["peer_mean"] = mean
+            items.append(item)
+        yield {"items": items}
+
+
+def targets(rows: list[dict]) -> np.ndarray:
+    return np.asarray([item["deviation"] for row in rows for item in row["items"]])
+
+
+def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
+    inputs = [
+        {"items": [{key: value for key, value in item.items() if key != "deviation"} for item in row["items"]]}
+        for row in rows
+    ]
+    output = pl.DataFrame(model.predict(inputs)).to_dicts()
+    return np.asarray([item["deviation"]["content"] for row in output for item in row["predictions"]["items"]])
+
+
+def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
+    return float(np.sqrt(np.mean(np.square(actual - predicted))))
+
+
+class Item(rf.Branch):
+    value = rf.Number
+    peer_mean = rf.Number
+    deviation = rf.Number(mask=True, objective="mse", n_linear=2)
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, overflow="error", n_layers=2, reduction=None)
+
+
+@experiment("P034", seed=3700)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    model = PredictionModel(d_model=48, n_layers=3, n_heads=4, reduction=None)
+    data = rf.SyntheticDataModule(
+        train=partial(records, rows=1024, seed=seed + 1),
+        validate=partial(records, rows=256, seed=seed + 2),
+        seed=seed,
+    )
+    model.fit(
+        data,
+        batch_size=128,
+        optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="ddp" if accelerator in ("gpu", "auto") and torch.cuda.device_count() > 1 else "auto",
+        accelerator=accelerator,
+        max_steps=600 if steps is None else min(steps, 600),
+        max_epochs=-1,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    train = list(records(rows=1024, seed=seed + 1))
+    test = list(records(rows=512, seed=seed + 3))
+    actual = targets(test)
+    baseline = rmse(actual, float(targets(train).mean()))
+    predicted = predict(model, test)
+    intact_error = rmse(actual, predicted)
+    intact_nrmse = intact_error / baseline
+    metrics = {"intact_rmse": intact_error, "baseline_rmse": baseline, "intact_nrmse": intact_nrmse}
+    checks = {"Baseline RMSE > 0.000001": baseline > 1e-6}
+    checks["Supplied-mean subtraction nRMSE < 0.25"] = intact_nrmse < 0.25
+    checks["Finite calibration and model metrics"] = bool(np.isfinite(list(metrics.values())).all())
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)
+
+# %% [markdown]
+# </details>

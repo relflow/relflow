@@ -1,0 +1,332 @@
+from __future__ import annotations
+
+import pyarrow as pa
+import pytest
+import torch
+from tensordict import TensorDict
+
+import relflow as rf
+from relflow.architecture.contracts import (
+    CONTRACT_SCOPES,
+    ContractScheduler,
+    ForwardContractError,
+    same_device,
+    sanitize,
+)
+from relflow.structs.enums import Strata, Tokens
+from relflow.structs.tree import Address
+from tests.arrow import table as arrow_table
+
+
+def prepared(model: rf.Model, rows: list[dict] | None = None, strata: Strata = Strata.train) -> TensorDict:
+    return model.encode(
+        arrow_table(
+            rows
+            or [
+                {"color": "red", "amount": 1.0, "label": "warm"},
+                {"color": "blue", "amount": 2.0, "label": "cool"},
+            ]
+        ),
+        strata=strata,
+    )
+
+
+def test_forward_contract_canonicalizes_default_accelerator_device_indices(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert same_device(torch.device("mps"), torch.device("mps:0"))
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: 0)
+
+    assert same_device(torch.device("cuda"), torch.device("cuda:0"))
+    assert not same_device(torch.device("cuda"), torch.device("cuda:1"))
+
+
+def test_forward_contract_rejects_missing_active_field() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+
+    del inputs[Address("/color")]
+
+    with pytest.raises(ForwardContractError, match="missing active request"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_requires_strata() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+
+    with pytest.raises(TypeError, match="strata"):
+        model(inputs)  # ty: ignore[missing-argument]
+
+
+def test_forward_contract_rejects_unknown_extra_field() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    inputs[Address("/extra")] = inputs[Address("/color")].clone()
+
+    with pytest.raises(ForwardContractError, match="unknown address"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_inactive_request_field() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, ignored=rf.Category(active=False))
+    inputs = prepared(model)
+    inputs[Address("/ignored")] = inputs[Address("/color")].clone()
+
+    with pytest.raises(ForwardContractError, match="inactive request"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_branch_address_field() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    inputs[Address("/")] = inputs[Address("/color")].clone()
+
+    with pytest.raises(ForwardContractError, match="branch address"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_wrong_tensorfield_class() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, amount=rf.Number)
+    inputs = prepared(model)
+    inputs[Address("/color")] = inputs[Address("/amount")].clone()
+
+    with pytest.raises(TypeError, match="must use tensorfield class"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_wrong_state_shape() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    inputs[Address("/color")].state = inputs[Address("/color")].state[:, :0]
+
+    with pytest.raises(ForwardContractError, match="state must have shape"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_wrong_state_dtype() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    inputs[Address("/color")].state = inputs[Address("/color")].state.to(torch.float32)
+
+    with pytest.raises(TypeError, match="state must use an integer dtype"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_content_without_state_shape_prefix() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    inputs[Address("/color")].content = inputs[Address("/color")].content[:, :0]
+
+    with pytest.raises(ForwardContractError, match="content.*state shape"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_allows_masked_non_trainable_input() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    field = inputs[Address("/color")]
+    field.state[0, 0] = Tokens.masked.value
+
+    model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_allows_masked_non_trainable_predict_input() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model, strata=Strata.predict)
+    field = inputs[Address("/color")]
+    field.state[0, 0] = Tokens.masked.value
+
+    model(inputs, strata=Strata.predict)
+
+
+def test_forward_contract_rejects_trainable_input_without_targets() -> None:
+    model = rf.Model(
+        preset="small", d_model=8, attention=None, color=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))
+    )
+    inputs = prepared(model)
+    field = inputs[Address("/color")]
+    field.targets = TensorDict({}, batch_size=field.state.shape)
+
+    with pytest.raises(ForwardContractError, match=r"lacks targets\[state\]"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_presence_state_disagreement() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
+    inputs = prepared(model)
+    inputs[Address("/label")].state[0, 0] = Tokens.valued.value
+
+    with pytest.raises(ForwardContractError, match="present must be true exactly"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_allows_predict_target_placeholder() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
+    inputs = prepared(
+        model,
+        rows=[
+            {"color": "red"},
+            {"color": "blue"},
+        ],
+        strata=Strata.predict,
+    )
+
+    predictions = model(inputs, strata=Strata.predict)
+
+    assert any(prediction.address == Address("/label") for prediction in predictions)
+
+
+def test_forward_contract_rejects_predict_placeholder_in_train_strata() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
+    inputs = prepared(
+        model,
+        rows=[
+            {"color": "red"},
+            {"color": "blue"},
+        ],
+        strata=Strata.predict,
+    )
+    with pytest.raises(ForwardContractError, match="cannot be inferred during train"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_uses_deterministic_backoff_schedule() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+
+    for _ in range(3):
+        model(inputs, strata=Strata.train)
+
+    inputs[Address("/color")].present[0, 0] = False
+
+    model(inputs, strata=Strata.train)
+    with pytest.raises(ForwardContractError, match="present must be true exactly"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_runs_when_batch_signature_changes() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+
+    for _ in range(3):
+        model(inputs, strata=Strata.train)
+
+    inputs[Address("/color")].content = inputs[Address("/color")].content[:, :0]
+
+    with pytest.raises(ForwardContractError, match="content.*state shape"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_runs_when_dataloader_index_changes() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+
+    for _ in range(3):
+        model(inputs, strata=Strata.train, dataloader_idx=0)
+
+    inputs[Address("/color")].present[0, 0] = False
+
+    with pytest.raises(ForwardContractError, match="present must be true exactly"):
+        model(inputs, strata=Strata.train, dataloader_idx=1)
+
+
+def test_forward_contract_resets_after_schema_mutation() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+
+    for _ in range(3):
+        model(inputs, strata=Strata.train)
+
+    inputs[Address("/color")].present[0, 0] = False
+
+    model(inputs, strata=Strata.train)
+    model.reset(rf.where("name") == "color")
+
+    with pytest.raises(ForwardContractError, match="present must be true exactly"):
+        model(inputs, strata=Strata.train)
+
+
+def collections(model: rf.Model, lengths: tuple[int, ...]) -> TensorDict:
+    datatype = pa.list_(pa.struct([("amount", pa.float64()), ("balance", pa.float64())]))
+    values = [[{"amount": float(index), "balance": float(index + 1)} for index in range(size)] for size in lengths]
+    return model.encode(pa.table({"history": pa.array(values, type=datatype)}), strata=Strata.predict)
+
+
+def test_dynamic_geometry_grows_and_shrinks_without_creating_contract_scopes() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, history=rf.Branch(amount=rf.Number, balance=rf.Number))
+
+    for lengths in ((0, 0), (1,), (2, 7), (3, 1, 0), (0,)):
+        inputs = collections(model, lengths)
+        sanitize(model, inputs, strata=Strata.predict)
+        assert inputs[Address("history", "amount")].state.shape == (len(lengths), 1, max(lengths))
+
+    assert len(model._contract_scheduler._counts) == 1
+
+
+def test_shared_branch_extent_is_checked_even_during_contract_backoff() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, history=rf.Branch(amount=rf.Number, balance=rf.Number))
+    inputs = collections(model, (2, 3))
+    for _ in range(3):
+        sanitize(model, inputs, strata=Strata.predict)
+
+    field = inputs[Address("history", "balance")]
+    field.state = field.state[:, :, :1]
+    with pytest.raises(ForwardContractError, match="/history/balance.*state must have shape"):
+        sanitize(model, inputs, strata=Strata.predict)
+
+
+def test_dynamic_forward_requires_geometry_and_rejects_unknown_geometry_addresses() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, history=rf.Branch(amount=rf.Number, balance=rf.Number))
+    inputs = collections(model, (2,))
+    geometry = inputs[Address()]
+    del inputs[Address()]
+
+    with pytest.raises(ForwardContractError, match="automatic branch lengths require branch geometry"):
+        sanitize(model, inputs, strata=Strata.predict)
+
+    inputs[Address()] = geometry
+    geometry[Address("unknown")] = geometry[Address("history")]
+    with pytest.raises(ForwardContractError, match="geometry addresses must match active branches"):
+        sanitize(model, inputs, strata=Strata.predict)
+
+
+def test_geometry_dtype_and_extent_limits_are_checked_before_backoff() -> None:
+    model = rf.Model(
+        preset="small", d_model=8, attention=None, history=rf.Branch(length=3, amount=rf.Number, balance=rf.Number)
+    )
+    inputs = collections(model, (1, 2))
+    for _ in range(3):
+        sanitize(model, inputs, strata=Strata.predict)
+    geometry = inputs[Address()][Address("history")]
+    original = geometry.lengths
+    geometry.lengths = original.to(torch.float32)
+
+    with pytest.raises(TypeError, match="/history.*lengths must use torch.int64"):
+        sanitize(model, inputs, strata=Strata.predict)
+
+    geometry.lengths = original
+    geometry.slots = torch.zeros(2, 1, 4, dtype=torch.bool)
+    with pytest.raises(ForwardContractError, match="/history.*extent must be at most 3"):
+        sanitize(model, inputs, strata=Strata.predict)
+
+
+def test_bounded_leaf_only_forward_inputs_keep_their_fixed_geometry_contract() -> None:
+    model = rf.Model(
+        preset="small", d_model=8, attention=None, history=rf.Branch(length=2, amount=rf.Number, balance=rf.Number)
+    )
+    inputs = collections(model, (2,))
+    del inputs[Address()]
+
+    sanitize(model, inputs, strata=Strata.predict)
+
+
+def test_contract_scope_cache_is_bounded_for_new_dataloaders() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category)
+    inputs = prepared(model)
+    scheduler = ContractScheduler()
+
+    for index in range(CONTRACT_SCOPES * 2):
+        assert scheduler.should_check(model, inputs, strata=Strata.train, dataloader_idx=index)
+
+    assert len(scheduler._counts) == CONTRACT_SCOPES

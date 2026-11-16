@@ -1,0 +1,13 @@
+node_modules/
+.astro/
+dist/
+playwright-report/
+test-results/
+performance-report/
+public/
+src/data/
+src/content/
+branding/
+README.md
+AGENTS.md
+package-lock.json

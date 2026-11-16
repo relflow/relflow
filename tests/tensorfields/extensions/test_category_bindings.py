@@ -1,0 +1,188 @@
+"""Tests for Category runtime state accessors."""
+
+from __future__ import annotations
+
+import polars as pl
+import pyarrow as pa
+import pytest
+
+import relflow as rf
+from relflow.structs.enums import TensorKey
+from tests.arrow import table
+
+ADDRESS = rf.Address("/category")
+
+
+def build(*, embed: bool = False) -> rf.Model:
+    return rf.Model(
+        preset="small",
+        d_model=8,
+        batch_size=2,
+        attention=None,
+        embed=embed,
+        category=rf.Category(p_unavailable=0.0),
+    )
+
+
+def learn(model: rf.Model, *values: str) -> None:
+    model.encode(
+        table([{"category": value} for value in values]),
+        strata=rf.Strata.train,
+    )
+
+
+def observe(model: rf.Model, *values: str | None) -> None:
+    model.encode(
+        table([{"category": value} for value in values]),
+        strata=rf.Strata.train,
+    )
+
+
+def test_category_vocabulary_returns_immutable_model_snapshot() -> None:
+    model = build()
+    learn(model, "ALPHA", "BETA")
+
+    snapshot = rf.Category.vocabulary(model, ADDRESS)
+
+    assert snapshot == ("ALPHA", "BETA")
+    assert isinstance(snapshot, tuple)
+
+    learn(model, "GAMMA")
+
+    # A returned snapshot must not be a live view of the model's vocabulary.
+    assert snapshot == ("ALPHA", "BETA")
+    assert rf.Category.vocabulary(model, "/category") == (
+        "ALPHA",
+        "BETA",
+        "GAMMA",
+    )
+
+
+def test_category_vocabulary_reads_latest_encoding_context_snapshot() -> None:
+    model = build()
+    encoding_context = model.interprocess_encoding_context
+
+    # This context was created before the model vocabulary grew. The binding
+    # reads its shared authoritative vocabulary rather than its local index.
+    learn(model, "ALPHA", "BETA")
+
+    assert rf.Category.vocabulary(encoding_context, ADDRESS) == ("ALPHA", "BETA")
+
+
+def test_category_vocabulary_reads_same_length_context_replacement() -> None:
+    model = build()
+    learn(model, "ALPHA")
+    encoding_context = model.interprocess_encoding_context
+
+    model.nodes[ADDRESS].embedder.vocab.load_snapshot(["BETA"])
+
+    assert rf.Category.vocabulary(encoding_context, ADDRESS) == ("BETA",)
+
+
+def test_category_vocabulary_is_available_to_inference_preprocessor() -> None:
+    model = build(embed=True)
+    learn(model, "ALPHA", "BETA")
+    seen: list[tuple[object, ...]] = []
+    contexts: list[object] = []
+
+    @rf.preprocess
+    def keep_known_category(frame: pl.DataFrame, *, encoding_context):
+        contexts.append(encoding_context)
+        vocabulary = rf.Category.vocabulary(encoding_context, ADDRESS)
+        seen.append(vocabulary)
+        return frame.select(
+            pl.when(pl.col("raw_category").is_in(vocabulary))
+            .then(pl.col("raw_category"))
+            .otherwise(None)
+            .alias("category")
+        )
+
+    predictions = pa.table(
+        model.predict(
+            table(
+                [
+                    {"raw_category": "ALPHA"},
+                    {"raw_category": "UNKNOWN"},
+                ]
+            ),
+            preprocess=keep_known_category,
+        )
+    )
+
+    assert seen == [("ALPHA", "BETA")]
+    assert len(contexts) == 1
+    assert rf.Category.vocabulary(contexts[0], ADDRESS) == ("ALPHA", "BETA")
+    root = predictions["representations"].combine_chunks()
+    assert len(root) == 2
+    assert all(row[0]["path"] == [] and len(row[0]["embedding"]) == 8 for row in root.to_pylist())
+
+
+@pytest.mark.parametrize("use_model", [True, False], ids=["model", "encoding-context"])
+def test_category_vocabulary_raises_for_missing_address(use_model: bool) -> None:
+    model = build()
+    source = model if use_model else model.interprocess_encoding_context
+
+    with pytest.raises(KeyError, match="missing"):
+        rf.Category.vocabulary(source, "/missing")
+
+
+def test_category_vocabulary_rejects_invalid_context_resource() -> None:
+    encoding_context = {ADDRESS: object()}
+
+    with pytest.raises(TypeError, match="VocabularyState"):
+        rf.Category.vocabulary(encoding_context, ADDRESS)
+
+
+def test_category_vocabulary_rejects_invalid_source() -> None:
+    with pytest.raises(TypeError, match="Model or InterprocessEncodingContext"):
+        rf.Category.vocabulary(object(), ADDRESS)
+
+
+def test_category_vocabulary_rejects_non_category_model_field() -> None:
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        amount=rf.Number,
+    )
+
+    with pytest.raises(TypeError, match="not a Category field"):
+        rf.Category.vocabulary(model, "/amount")
+
+
+def test_category_counts_returns_populated_training_counts() -> None:
+    model = build()
+    observe(model, "ALPHA", "BETA", "ALPHA", None)
+
+    counts = rf.Category.counts(model, ADDRESS)
+
+    assert counts == {"ALPHA": 2, "BETA": 1}
+    assert len(counts) <= model.nodes[ADDRESS].embedder.vocab.size
+
+    counts["ALPHA"] = 100
+    assert rf.Category.counts(model, ADDRESS) == {"ALPHA": 2, "BETA": 1}
+
+
+def test_category_counts_subtracts_and_clamps_internal_prior() -> None:
+    model = build()
+    learn(model, "ALPHA")
+    counter = model.nodes[ADDRESS].embedder.counters[TensorKey.content.name]
+    counter.counts[0] = 0
+
+    assert rf.Category.counts(model, ADDRESS) == {"ALPHA": 0}
+
+
+def test_category_counts_validates_model_and_address() -> None:
+    model = build()
+
+    with pytest.raises(TypeError, match="must be a Model"):
+        rf.Category.counts(model.interprocess_encoding_context, ADDRESS)
+    with pytest.raises(KeyError, match="missing"):
+        rf.Category.counts(model, "/missing")
+
+    wrong_model = rf.Model(
+        preset="small",
+        d_model=8,
+        amount=rf.Number,
+    )
+    with pytest.raises(TypeError, match="not a Category field"):
+        rf.Category.counts(wrong_model, "/amount")

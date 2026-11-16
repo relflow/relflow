@@ -1,0 +1,47 @@
+fail_fast: true
+
+repos:
+  - repo: local
+    hooks:
+      - id: tree
+        name: Check repository structure
+        entry: uv run --script scripts/tree.py --tracked
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: licensing
+        name: Check source licensing before builds
+        entry: uv run --script scripts/release.py licensing
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ruff-format
+        name: Format with Ruff
+        entry: uv run ruff format
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: ruff-check
+        name: Run Ruff
+        entry: uv run ruff check --fix
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pyrefly-check
+        name: Run Pyrefly
+        entry: uv run pyrefly check
+        language: system
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
+      - id: pytest
+        name: Run fast tests
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        always_run: true

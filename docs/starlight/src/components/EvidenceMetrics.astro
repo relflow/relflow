@@ -1,0 +1,134 @@
+---
+interface Props {
+  value: unknown;
+  path?: string;
+}
+const { value, path = 'metrics' } = Astro.props;
+const container = (item: unknown): item is Record<string, unknown> | unknown[] =>
+  item !== null && typeof item === 'object';
+const entries = container(value) ? Object.entries(value) : [['value', value] as const];
+const scalars = entries.filter(([, item]) => !container(item) || !Object.keys(item).length);
+const groups = entries.filter(([, item]) => container(item) && Object.keys(item).length);
+
+function display(item: unknown): string {
+  if (typeof item === 'string') return item;
+  return JSON.stringify(item);
+}
+---
+
+<div class="metric-tree not-content">
+  {
+    scalars.length > 0 && (
+      <div class="metric-table">
+        <table>
+          <caption>
+            <code>{path}</code>
+          </caption>
+          <thead>
+            <tr>
+              <>
+                <th scope="col">Measurement</th>
+                <th scope="col">Recorded value</th>
+              </>
+            </tr>
+          </thead>
+          <tbody>
+            {scalars.map(([key, item]) => (
+              <tr>
+                <th scope="row">
+                  <code>{key}</code>
+                </th>
+                <td>{display(item)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+  {
+    groups.map(([key, item]) => (
+      <details class="metric-group">
+        <summary>
+          <>
+            <code>{key}</code>
+            <span>
+              {Object.keys(item as object).length} {Array.isArray(item) ? 'items' : 'fields'}
+            </span>
+          </>
+        </summary>
+        <Astro.self value={item} path={`${path}.${key}`} />
+      </details>
+    ))
+  }
+</div>
+
+<style>
+  .metric-tree {
+    min-width: 0;
+    font-size: 0.8rem;
+    line-height: 1.65;
+  }
+  .metric-table {
+    overflow-x: auto;
+    margin-block: 0.65rem 1rem;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8rem;
+    line-height: 1.65;
+  }
+  caption {
+    text-align: left;
+    color: var(--rf-muted);
+    padding-bottom: 0.5rem;
+    overflow-wrap: anywhere;
+  }
+  th,
+  td {
+    text-align: left;
+    vertical-align: top;
+    padding: 0.6rem 0.65rem;
+    border: 1px solid var(--rf-border);
+    overflow-wrap: anywhere;
+  }
+  th {
+    font-weight: 600;
+  }
+  tbody th {
+    width: 48%;
+  }
+  td {
+    font-variant-numeric: tabular-nums;
+  }
+  code {
+    background: none;
+    padding: 0;
+    font-family: var(--sl-font-mono);
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+  }
+  .metric-group {
+    margin-block: 0.55rem;
+    border: 1px solid var(--rf-border);
+    border-radius: 0.3rem;
+    padding: 0.6rem 0.75rem;
+    min-width: 0;
+  }
+  summary {
+    cursor: pointer;
+    color: var(--sl-color-text-accent);
+    overflow-wrap: anywhere;
+  }
+  summary span {
+    margin-left: 0.65rem;
+    color: var(--rf-muted);
+    font-size: 0.72rem;
+    white-space: nowrap;
+  }
+  summary:focus-visible {
+    outline: 2px solid var(--sl-color-text-accent);
+    outline-offset: 3px;
+  }
+</style>

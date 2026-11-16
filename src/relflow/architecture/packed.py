@@ -1,0 +1,192 @@
+"""Live-token encoder blocks with attention grouped by sequence length.
+
+Packing is shared across an entire encoder stack. Equal-length grouping supports
+standard SDPA without padded queries. Dropout samples live activations and
+attention edges; its random-number schedule follows the packed execution.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+import torch
+import torch.nn.functional as F
+
+SDPA_BATCH_MAX = 65535
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from relflow.architecture.attention import RotaryMultiheadAttention
+    from relflow.architecture.encoder import RotaryTransformerEncoderLayer
+
+
+@dataclass(frozen=True)
+class Group:
+    """Equal-length rows addressed within the packed token axis."""
+
+    rows: int
+    length: int
+    indices: torch.Tensor
+
+
+@dataclass(frozen=True)
+class Packed:
+    """Original token coordinates and attention groups shared by an encoder stack."""
+
+    indices: torch.Tensor
+    positions: torch.Tensor
+    groups: tuple[Group, ...]
+
+
+def customized(layers: Iterable[torch.nn.Module], *, additional: tuple[type[torch.nn.Module], ...] = ()) -> bool:
+    """Retain dense module shapes for callbacks and replaced implementations.
+
+    Packing changes nested module inputs from [batch, length, width] to
+    [live_tokens, width]. Only the canonical, unobserved encoder modules opt in;
+    hooks and user replacements continue to receive the original dense contract.
+    """
+    from relflow.architecture.attention import RotaryMultiheadAttention
+    from relflow.architecture.encoder import RotaryTransformerEncoderLayer
+    from relflow.architecture.rotary import RotaryEmbedding
+
+    canonical = {
+        *additional,
+        RotaryTransformerEncoderLayer,
+        RotaryMultiheadAttention,
+        RotaryEmbedding,
+        torch.nn.Linear,
+        torch.nn.RMSNorm,
+        torch.nn.Sequential,
+        torch.nn.GELU,
+        torch.nn.Dropout,
+    }
+    hooks = ("_forward_pre_hooks", "_forward_hooks", "_backward_pre_hooks", "_backward_hooks")
+    if any(getattr(torch.nn.modules.module, "_global" + name) for name in hooks):
+        return True
+    return any(
+        type(module) not in canonical
+        or (isinstance(module, torch.nn.RMSNorm) and len(module.normalized_shape) != 1)
+        or "forward" in module.__dict__
+        or any(getattr(module, name) for name in hooks)
+        for layer in layers
+        for module in layer.modules()
+    )
+
+
+def pack(
+    inputs: torch.Tensor, present: torch.Tensor, positions: torch.Tensor | None = None
+) -> tuple[torch.Tensor, Packed]:
+    """Select live values once, retaining their original positions and row ownership."""
+    if present.dtype != torch.bool or tuple(present.shape) != tuple(inputs.shape[:2]):
+        raise ValueError(
+            f"encoder presence must have bool shape {tuple(inputs.shape[:2])}, "
+            f"got {tuple(present.shape)} with dtype {present.dtype}"
+        )
+    batch, capacity, width = inputs.shape
+    indices = present.reshape(-1).nonzero(as_tuple=False).reshape(-1)
+    positions = (
+        positions.expand(batch, capacity).reshape(-1).index_select(0, indices)
+        if positions is not None
+        else indices.remainder(capacity)
+        if capacity
+        else indices
+    )
+    counts = present.sum(dim=1, dtype=torch.int64)
+    # Rows sorted by length give every group one contiguous run of the sorted
+    # token axis, so groups are slices of a single on-device index and the host
+    # receives only the distinct lengths with their row counts.
+    order = counts.argsort(stable=True)
+    sorted_counts = counts.index_select(0, order)
+    lengths, sizes = torch.unique_consecutive(sorted_counts, return_counts=True)
+    total = indices.numel()
+    starts = (torch.cumsum(counts, dim=0) - counts).index_select(0, order)
+    firsts = torch.cumsum(sorted_counts, dim=0) - sorted_counts
+    tokens = torch.repeat_interleave(starts - firsts, sorted_counts, output_size=total) + torch.arange(
+        total, device=inputs.device
+    )
+    groups = []
+    cursor = 0
+    for length, rows in zip(*torch.stack((lengths, sizes)).tolist(), strict=True):
+        span = rows * length
+        if length:
+            groups.append(Group(rows, length, tokens[cursor : cursor + span]))
+        cursor += span
+    return inputs.reshape(batch * capacity, width).index_select(0, indices), Packed(indices, positions, tuple(groups))
+
+
+def attend(
+    attention: RotaryMultiheadAttention,
+    query: torch.Tensor,
+    key: torch.Tensor,
+    value: torch.Tensor,
+    packing: Packed,
+) -> torch.Tensor:
+    q, k, v = attention.project(query, key, value)
+    if attention.rotary is not None:
+        q = attention.rotary(q.transpose(0, 1), positions=packing.positions).transpose(0, 1)
+        k = attention.rotary(k.transpose(0, 1), positions=packing.positions).transpose(0, 1)
+    outputs: list[torch.Tensor] = []
+    placements: list[torch.Tensor] = []
+    for group in packing.groups:
+        # FlashAttention's CUDA launch has a bounded batch dimension. Split
+        # independent rows, keeping each row's tokens and rotary positions intact.
+        for indices in group.indices.split(group.length * SDPA_BATCH_MAX):
+            rows = indices.numel() // group.length
+            selected_q = (
+                q.index_select(0, indices)
+                .reshape(rows, group.length, attention.nhead, attention.head_dim)
+                .transpose(1, 2)
+            )
+            selected_k = (
+                k.index_select(0, indices)
+                .reshape(rows, group.length, attention.n_kv_heads, attention.head_dim)
+                .transpose(1, 2)
+            )
+            selected_v = (
+                v.index_select(0, indices)
+                .reshape(rows, group.length, attention.n_kv_heads, attention.head_dim)
+                .transpose(1, 2)
+            )
+            attended = F.scaled_dot_product_attention(
+                selected_q,
+                selected_k,
+                selected_v,
+                dropout_p=attention.dropout_p if attention.training else 0.0,
+                enable_gqa=attention.nhead != attention.n_kv_heads,
+            )
+            attended = attended.transpose(1, 2).reshape(-1, attention.nhead, attention.head_dim)
+            outputs.append(attended)
+            placements.append(indices)
+    context = torch.zeros_like(q)
+    # One scatter also avoids a full-output gradient copy per length group.
+    if len(outputs) == 1:
+        context.index_copy_(0, placements[0], outputs[0])
+    elif outputs:
+        context.index_copy_(0, torch.cat(placements), torch.cat(outputs))
+    return attention.out_proj(context.reshape(-1, attention.d_model))
+
+
+def block(layer: RotaryTransformerEncoderLayer, inputs: torch.Tensor, packing: Packed) -> torch.Tensor:
+    normed = layer.attention_norm(inputs)
+    inputs = inputs + layer.attention(normed, normed, normed, packing=packing)
+    return inputs + layer.ffn(layer.ffn_norm(inputs))
+
+
+def unpack(
+    values: torch.Tensor,
+    packing: Packed,
+    inputs: torch.Tensor,
+    present: torch.Tensor,
+    layers: Iterable[RotaryTransformerEncoderLayer],
+) -> torch.Tensor:
+    """Restore structural holes and retain zero gradients for entirely empty blocks."""
+    output = inputs.masked_fill(~present.unsqueeze(-1), 0.0) * 0.0
+    if packing.indices.numel():
+        return output.reshape(-1, inputs.shape[-1]).index_copy(0, packing.indices, values).reshape(inputs.shape)
+    if torch.is_grad_enabled():
+        for layer in layers:
+            for parameter in layer.parameters():
+                output = output + parameter.sum() * 0.0
+    return output
