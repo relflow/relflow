@@ -107,4 +107,4 @@ jobs:
     with:
       suite_ref: ${{ inputs.suite_ref }}
       baseline_sha: ${{ needs.wheels.outputs.baseline_sha }}
-    uses: relflow/relflow/.github/workflows/evidence-hosted.yml@5402aea9ccb7aefd02c57e03da10bbf0e6572927
+    uses: relflow/relflow/.github/workflows/evidence-hosted.yml@4efe75514b21cff1865867deb306a6d1abd638d1
