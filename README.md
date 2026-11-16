@@ -29,11 +29,11 @@
   <a href="https://discord.gg/DVyZUkvTFA">Community</a>
 </p>
 
-# Predictive modeling, shaped by your data
+# Featureless modeling, shaped by your data
 
-relflow is an open-source Python framework for building predictive models from
-structured data. You describe your records, their relationships, and the outcomes
-you want to predict using a typed schema. relflow builds a model from that schema,
+relflow is a predictive modeling framework, intended for any predictive task.
+You describe your records, their relationships, and the outcomes you want to
+predict using a typed Python schema. relflow builds a model from that schema,
 then learns features and predictions together during training.
 
 A customer has usage history and support tickets. An asset has sensor readings
@@ -53,8 +53,20 @@ history into a hand-crafted table of counts and averages.
   Targets can live at the root or inside nested collections of records.
 - **Deployable.** Use the trained model for batch prediction and real-time serving,
   with its learned vocabularies and normalizers included.
-- **State of the art.** Competitive predictive quality on large structured-data
-  tasks, backed by [published RelArena comparisons](https://www.relflow.ai/en/latest/benchmarks/).
+- **State of the art.** On the nine published RelArena tasks with more than one
+  million training observations, relflow beats TabPFN-3 on **9 of 9** and
+  TabPFN-3.5 on **6 of 9**. [Inspect the scores and comparison records](https://www.relflow.ai/en/latest/benchmarks/).
+
+## Philosophy
+
+**relflow was designed to be the first-of-its-class featureless modeling
+paradigm, providing a scalable solution in which model architecture embodies
+the latent data structure.**
+
+By internalizing feature processing as model components, relflow keeps the same
+learned vocabularies and normalizers throughout training and inference. The
+typed schema describes both the data contract and the architecture, including
+how related records contribute context to each prediction.
 
 ## Install
 
@@ -110,8 +122,11 @@ if __name__ == "__main__":
     data = rf.ArrowDataModule(
         train="customers/train/*.parquet",
         validate="customers/validation/*.parquet",
+        test="customers/test/*.parquet",
     )
     model.fit(data, preset="small")
+    validation_metrics = model.validate(data)
+    test_metrics = model.test(data)
     model.save("churn.rf")
 ```
 
@@ -121,9 +136,18 @@ representations, context encoders, prediction heads, and learning objectives.
 Class declarations describe the contract; constructing `ChurnModel(...)` creates
 a new, untrained model.
 
+The constructor preset selects architecture defaults. The preset on `fit`
+independently selects training defaults, including the optimizer, batch size,
+and training budget. The bundled `small` and `medium` presets are alternative
+recipes; you do not need to configure those settings individually to get started.
+
 `mask=True` makes `churn_90d` a supervised target: the historical answer trains
-the model without becoming an input. Each history is supplied oldest to newest;
-`overflow="tail"` retains the most recent records up to the declared cap.
+the model without becoming an input. Validation and test records also include
+observed answers, hidden in the same way for evaluation. New prediction requests
+may omit the target. Each history is supplied oldest to newest;
+`overflow="tail"` retains the most recent records up to the declared cap. See
+[Targets and masking](https://www.relflow.ai/en/latest/concepts/targets/) for
+multiple objectives and targets within nested collections.
 
 The Parquet files contain one subscriber observation per row, with nested usage
 and ticket records and the historical `churn_90d` answer. Your application owns
@@ -155,7 +179,8 @@ Use `rf.PolarsDataModule` when training and validation data are already in memor
 
 ## What can you build with relflow?
 
-The User Guide follows six examples through their schemas, datasets, and Core Concepts:
+The User Guide uses six examples to show how the same typed modeling approach
+generalizes across datasets and prediction tasks:
 
 | Use case | Available context | Predictions |
 | --- | --- | --- |
@@ -167,7 +192,7 @@ The User Guide follows six examples through their schemas, datasets, and Core Co
 | [Insurance claims](https://www.relflow.ai/en/latest/?case=claims#case-claims) | Policies, claims, invoices, and line items | Payout and fraud probability for each claim |
 
 These illustrate the same modeling contract across different data structures,
-leaf types, and prediction targets. [Explore the data and model ERDs](https://www.relflow.ai/en/latest/featureless/#example)
+leaf types, and prediction targets. [Explore the data, model, and class schema](https://www.relflow.ai/en/latest/featureless/#example)
 and [learn about leaf types](https://www.relflow.ai/en/latest/concepts/data-types/).
 
 ## Results you can inspect
@@ -210,6 +235,9 @@ Each linked page explains the setup, limitations, and retained results.
 ## Go further
 
 - [Models and schemas](https://www.relflow.ai/en/latest/concepts/models/): how typed declarations shape the model.
+- [Context branches](https://www.relflow.ai/en/latest/concepts/branches/): collections, nested records, and learned context.
+- [Targets and masking](https://www.relflow.ai/en/latest/concepts/targets/): hidden answers, multiple objectives, and nested predictions.
+- [Data flow](https://www.relflow.ai/en/latest/concepts/data-flow/): follow an observation from loading to prediction or a training update.
 - [Runtime](https://www.relflow.ai/en/latest/concepts/runtime/): fit, validate, test, and predict with presets.
 - [Data modules](https://www.relflow.ai/en/latest/advanced/data-modules/): streaming files, queries, and custom readers.
 - [Custom leaf types](https://www.relflow.ai/en/latest/advanced/custom-data-types/): extend the same registration system used by built-in fields.
