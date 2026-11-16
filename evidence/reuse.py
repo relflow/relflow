@@ -22,6 +22,7 @@ from pathlib import Path, PurePosixPath
 from evidence_ci import digest, identity, resolved, task_key
 from experiments.source import describe, metadata, registry
 from record import readme_content, validate
+from releases import LEGACY, inventory
 
 REPOSITORY = "relflow/relflow"
 RESULTS = {"evidence-result", "evidence-report"}
@@ -813,8 +814,10 @@ def artifact(run_id: int, name: str, destination: Path) -> dict:
 
 def release_bundle(release: dict, staging: Path) -> tuple[dict, dict]:
     """Recover a terminal execution after transient Actions inputs have expired."""
-    required = {"evidence-reports.tar.gz", "evidence-inputs.tar.gz", "github-run.json", "SHA256SUMS"}
     assets = {row["name"]: row for row in release["assets"]}
+    version = release.get("tag_name", "").removeprefix("evidence-v")
+    files = inventory(version, assets) if release.get("tag_name", "").startswith("evidence-v") else LEGACY
+    required = {files[role] for role in ("reports", "inputs", "provenance", "checksums")}
     if release.get("draft") or not required <= assets.keys():
         raise ValueError("Retained release lacks its complete immutable report/input inventory")
     payloads = {}
@@ -832,23 +835,23 @@ def release_bundle(release: dict, staging: Path) -> tuple[dict, dict]:
         payloads[name] = content
         identities.append({key: asset[key] for key in ("id", "name", "digest")})
     sums = {}
-    for line in payloads["SHA256SUMS"].decode().splitlines():
+    for line in payloads[files["checksums"]].decode().splitlines():
         checksum, name = line.split("  ", 1)
         if name in sums:
             raise ValueError("Retained release checksum inventory contains duplicate paths")
         sums[name] = checksum
-    if not required - {"SHA256SUMS"} <= sums.keys() or any(
-        hashlib.sha256(payloads[name]).hexdigest() != sums[name] for name in required - {"SHA256SUMS"}
+    if not required - {files["checksums"]} <= sums.keys() or any(
+        hashlib.sha256(payloads[name]).hexdigest() != sums[name] for name in required - {files["checksums"]}
     ):
         raise ValueError("Retained release checksums differ from report/input assets")
-    unpack(payloads["evidence-reports.tar.gz"], staging / "reports", zipped=False)
-    unpack(payloads["evidence-inputs.tar.gz"], staging / "inputs", zipped=False)
+    unpack(payloads[files["reports"]], staging / "reports", zipped=False)
+    unpack(payloads[files["inputs"]], staging / "inputs", zipped=False)
     manifest = json.loads((staging / "reports/manifest.json").read_text())
     original = re.fullmatch(r"gh-(\d+)-(\d+)", manifest["run_id"])
     if not original:
         raise ValueError("Retained report does not identify its terminal execution")
     run = attempt(api(f"repos/{REPOSITORY}/actions/runs/{original[1]}"), int(original[2]))
-    recorded = json.loads(payloads["github-run.json"])
+    recorded = json.loads(payloads[files["provenance"]])
     if (
         recorded.get("run_id", recorded.get("id")) != run["id"]
         or recorded.get("run_attempt") != run["run_attempt"]

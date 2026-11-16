@@ -16,6 +16,7 @@ from pathlib import Path
 from evidence_ci import task_key
 from experiments.source import describe, fingerprint, frontmatter, metadata
 from record import select, validate
+from releases import VERSION, filenames
 from reuse import SHA, archive, artifact_name, attempt, helper_sha, trusted, verify_receipt
 from reuse import artifact as verified_artifact
 
@@ -191,7 +192,7 @@ def retain(tag: str, tested: str, output: Path, names: list[str]) -> None:
                 "--target",
                 tested,
                 "--title",
-                f"Evidence {tag}",
+                f"relflow {tag.removeprefix('evidence-v')} evidence",
                 "--notes",
                 "Complete paired reports, tested inputs, and immutable provenance.",
             ],
@@ -223,13 +224,10 @@ def retain(tag: str, tested: str, output: Path, names: list[str]) -> None:
 def publish(root: Path, output: Path, run_id: int, *, version: str | None = None) -> None:
     declared = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
     version = version or declared
-    if (
-        run_id < 1
-        or version != declared
-        or not re.fullmatch(r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?", version)
-    ):
+    if run_id < 1 or version != declared or not VERSION.fullmatch(version):
         raise ValueError("Publication requires a positive CI run ID and the checkout package version")
     tag = "evidence-v" + version
+    files = filenames(version)
     released = api(f"repos/{REPOSITORY}/releases/tags/v{version}", missing=True)
     if released.get("tag_name") == "v" + version and released.get("draft") is False:
         print(f"relflow {version} is already published; its evidence selection remains frozen")
@@ -284,7 +282,7 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
         execution_run = verify_receipt(
             root, reports, inputs, reuse_receipt, run, baseline, current_inputs=current_inputs, executor=EXECUTOR
         )
-        (output / "evidence-reuse.json").write_text(json.dumps(reuse_receipt, sort_keys=True, indent=2) + "\n")
+        (output / files["reuse"]).write_text(json.dumps(reuse_receipt, sort_keys=True, indent=2) + "\n")
     suite_revision = retained_manifest["evidence_sha"]
     with tempfile.TemporaryDirectory() as temporary:
         tested = Path(temporary) / "evidence"
@@ -311,14 +309,14 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
             for key in ("run_attempt", "head_sha", "head_branch", "event", "html_url", "workflow_id", "path")
         }
         receipt["run_id"] = execution_run["id"]
-        github_run = output / "github-run.json"
+        github_run = output / files["provenance"]
         github_run.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
-        archive(reports, output / "evidence-reports.tar.gz")
-        archive(inputs, output / "evidence-inputs.tar.gz")
-        assets = ["evidence-reports.tar.gz", "evidence-inputs.tar.gz", "github-run.json"]
+        archive(reports, output / files["reports"])
+        archive(inputs, output / files["inputs"])
+        assets = [files["reports"], files["inputs"], files["provenance"]]
         if reused:
-            assets.append("evidence-reuse.json")
-        measurements = output / "measurements.md"
+            assets.append(files["reuse"])
+        measurements = output / files["measurements"]
         measurements.write_text(
             f"# relflow {version} evidence\n\n<!-- evidence-results:start -->\n<!-- evidence-results:end -->\n"
         )
@@ -327,9 +325,9 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
             root=tested,
             github_run=github_run,
             release=tag,
-            bundle=output / "evidence-reports.tar.gz",
+            bundle=output / files["reports"],
             readme_target=measurements,
-            output=output / "publication.json",
+            output=output / files["publication"],
             version=version,
             revision=main,
         )
@@ -340,22 +338,23 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
             verified_artifact(execution_run["id"], artifact_name(execution_run, "evidence-plots"), figures)
             bundle = figures / "proof-visualizations.zip"
             verify(bundle, manifest, records)
-            shutil.copyfile(bundle, output / bundle.name)
-            document = json.loads((output / "publication.json").read_text())
+            published_bundle = output / files["plots"]
+            shutil.copyfile(bundle, published_bundle)
+            document = json.loads((output / files["publication"]).read_text())
             document["report"]["plots"] = {
-                "url": f"https://github.com/{REPOSITORY}/releases/download/{tag}/{bundle.name}",
+                "url": f"https://github.com/{REPOSITORY}/releases/download/{tag}/{published_bundle.name}",
                 "sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
                 "size": bundle.stat().st_size,
             }
-            (output / "publication.json").write_text(json.dumps(document, sort_keys=True, indent=2) + "\n")
+            (output / files["publication"]).write_text(json.dumps(document, sort_keys=True, indent=2) + "\n")
             install(bundle, root / "docs/assets/evidence-plots")
-            assets.append(bundle.name)
-        assets += ["publication.json", "measurements.md"]
-        (output / "SHA256SUMS").write_text(
+            assets.append(published_bundle.name)
+        assets += [files["publication"], files["measurements"]]
+        (output / files["checksums"]).write_text(
             "".join(f"{hashlib.sha256((output / name).read_bytes()).hexdigest()}  {name}\n" for name in assets)
         )
-        assets.append("SHA256SUMS")
-    environment = dict(os.environ, RELFLOW_EVIDENCE_PUBLICATION=str(output / "publication.json"))
+        assets.append(files["checksums"])
+    environment = dict(os.environ, RELFLOW_EVIDENCE_PUBLICATION=str(output / files["publication"]))
     subprocess.run(["make", "check", "check-docs"], cwd=root, env=environment, check=True)
     if subprocess.check_output(["git", "diff", "--name-only"], cwd=root).strip():
         raise ValueError("Evidence publication must not change tracked experiment, README, or documentation sources")
@@ -363,7 +362,7 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     if api(f"repos/{REPOSITORY}/git/ref/heads/main")["object"]["sha"] != main:
         raise ValueError("Main advanced during validation; rerun publication against current main")
     retain(tag, main, output, assets)
-    print(f"Retained {tag} for verified relflow {version}; publication asset: {output / 'publication.json'}")
+    print(f"Retained {tag} for verified relflow {version}; publication asset: {output / files['publication']}")
 
 
 def main() -> None:

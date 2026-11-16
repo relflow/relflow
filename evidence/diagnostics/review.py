@@ -8,19 +8,28 @@ import re
 from pathlib import Path
 from urllib import request
 
+from evidence.releases import LEGACY, VERSION, filenames
+
 
 def prepare(root: Path, spec: dict) -> Path:
     """Fetch a checksum-bound static bundle from the retained CI or version release."""
     from evidence.visuals import LIMIT, install
 
+    location = re.fullmatch(
+        r"https://github.com/relflow/relflow/releases/download/(evidence-(?:ci-\d+-attempt-\d+|v[0-9A-Za-z.]+))/([^/]+)",
+        spec.get("url", ""),
+    )
+    allowed = {LEGACY["plots"]}
+    if location and location[1].startswith("evidence-v"):
+        version = location[1].removeprefix("evidence-v")
+        if VERSION.fullmatch(version):
+            allowed.add(filenames(version)["plots"])
     if (
         not re.fullmatch(r"[a-f0-9]{64}", spec.get("sha256", ""))
         or type(spec.get("size")) is not int
         or not 0 < spec["size"] <= LIMIT
-        or not re.fullmatch(
-            r"https://github.com/relflow/relflow/releases/download/evidence-(?:ci-\d+-attempt-\d+|v[0-9A-Za-z.]+)/proof-visualizations.zip",
-            spec.get("url", ""),
-        )
+        or not location
+        or location[2] not in allowed
     ):
         raise ValueError("Evidence plots require a bounded, checksum-pinned repository release asset")
     cache = root / ".cache/evidence/diagnostics"

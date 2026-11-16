@@ -23,6 +23,7 @@ from publication import (
     retain,
     selection_changes,
 )
+from releases import filenames
 
 SCRIPT = """# %% [markdown]
 # ---
@@ -330,15 +331,15 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
         publish(root, output, 123)
         assert retained[0][1] == main
         assert (output / "docs-base.txt").read_text().strip() == checkout
-        selected = json.loads((output / "publication.json").read_text())
+        selected = json.loads((output / filenames("0.4.2")["publication"]).read_text())
         assert selected["version"] == "0.4.2"
         assert selected["report"]["github_run"]["run_attempt"] == 2
         assert selected["revision"] == main
         assert selected["report"]["release"].endswith("/evidence-v0.4.2")
         assert all(result["provenance"]["relflow_revision"] == main for result in selected["results"].values())
         assert not subprocess.check_output(["git", "diff", "--name-only"], cwd=root).strip()
-        assert "publication.json" in retained[0][3]
-        assert "measurements.md" in retained[0][3]
+        assert filenames("0.4.2")["publication"] in retained[0][3]
+        assert filenames("0.4.2")["measurements"] in retained[0][3]
         assert not (output / "evidence-update.patch").exists()
 
 
@@ -382,13 +383,14 @@ def test_workflow_never_promotes_pr_runs_or_installs_model_runtime():
     triggers = workflow.get("on", workflow.get(True))
     job = workflow["jobs"]["publish"]
     triggers = workflow.get("on", workflow.get(True))
-    assert set(triggers) == {"workflow_call", "workflow_dispatch", "workflow_run"}
-    assert "!inputs.preview" in job["if"] and "inputs.library_run_id != ''" in job["if"]
+    assert set(triggers) == {"workflow_call"}
+    assert "refs/heads/main" in job["if"] and "inputs.library_run_id != ''" in job["if"]
     assert "pull-requests" not in job["permissions"]
     checkout = next(step["with"] for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["persist-credentials"] is False and checkout["fetch-depth"] == 0
     commands = "\n".join(step.get("run", "") for step in job["steps"])
-    assert "uv sync --locked --project docs" in commands
+    assert "make prepare" in commands
+    assert any(step.get("with", {}).get("node-version") == "24" for step in job["steps"])
     assert "--version" in commands and "--automatic" not in commands
     assert "uv pip install" not in commands and "--with" not in commands
     release = yaml.safe_load((Path(__file__).resolve().parents[2] / ".github/workflows/release.yml").read_text())

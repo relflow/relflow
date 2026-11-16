@@ -92,12 +92,27 @@ Historical downloads are generated from this canonical file, preserving the
 existing `/evidence/results.json` and single-proof download contracts. The
 selected publication remains a separate, byte-preserved download.
 
-Hosted branch/PR builds use the exact-commit CI selection, including pending
-status while its immutable assets are unavailable. Release tags require the
-matching frozen publication and source revision. Trusted selection and bundle
-verification remain in `evidence/assets.py`, `evidence/publication.py`, and the
-diagnostic helpers. Documentation rendering does not replace that trust chain,
-run learning experiments, or rewrite measurements.
+Hosted branch and PR builds show the latest formal relflow release's Evidence.
+Tag builds require their own version's frozen publication and exact source
+revision. Successful PR checks remain in GitHub Actions and do not replace
+published measurements or trigger an Evidence-specific docs rebuild.
+
+The Release workflow freezes verified assets once under `evidence-v<version>`,
+with a title such as **relflow 0.5.0 evidence**. Downloads use these names:
+
+- `relflow-0.5.0-evidence.json`
+- `relflow-0.5.0-evidence-reports.tar.gz`
+- `relflow-0.5.0-evidence-inputs.tar.gz`
+- `relflow-0.5.0-evidence-plots.zip`, when captured plots are available
+- `relflow-0.5.0-evidence-provenance.json`
+- `relflow-0.5.0-evidence-measurements.md`
+- `relflow-0.5.0-evidence-checksums.txt`
+- `relflow-0.5.0-evidence-reuse.json`, when a verified execution was reused
+
+Earlier published assets retain their original names and bytes. Trusted
+selection and verification remain in `evidence/assets.py`,
+`evidence/publication.py`, and the diagnostic helpers. Rendering documentation
+does not run learning experiments or rewrite measurements.
 
 The complete archived moderation example and its executed synthetic-workflow
 receipt are preserved under

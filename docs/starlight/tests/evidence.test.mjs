@@ -662,3 +662,20 @@ test('Git fallback shows only the exact historical source at its recorded revisi
   assert.equal(mismatch.source, '');
   assert.equal(mismatch.code, '');
 });
+
+test('a released plot bundle supplies exact historical proof source in a shallow checkout', (t) => {
+  const input = sourceFixture(t);
+  const historical = input.source.replaceAll('current source', 'released source');
+  input.record.provenance.script_sha256 = createHash('sha256').update(historical).digest('hex');
+  const directory = join(input.directory, 'docs/assets/evidence-plots');
+  mkdirSync(directory, { recursive: true });
+  const path = join(directory, 'P001-proof.py');
+  writeFileSync(path, historical);
+  const entry = input.read();
+  assert.equal(entry.sourceMatches, true);
+  assert.equal(entry.source, historical);
+  assert.equal(entry.sourceRevision, input.record.provenance.evidence_revision);
+  assert.deepEqual(entry.result, input.record);
+  writeFileSync(path, historical + '\n# changed after publication\n');
+  assert.equal(input.read().sourceMatches, false);
+});

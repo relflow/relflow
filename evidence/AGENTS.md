@@ -82,8 +82,11 @@ artifacts and immutable Releases in relflow/relflow, with no AWS dependency.
 Freeze canonical versioned candidate measurements only with a package version release, from its
 complete passing paired CI run in relflow/relflow. Freeze the publication JSON,
 reports, and actual execution provenance in an immutable `evidence-v<version>`
-Release before publishing the package tag. Ordinary CI retains immutable per-attempt preview report/plot assets, with no publication
-commits, branches, or pull requests. Keep the recorded bootstrap snapshot in
+Release before publishing the package tag. Ordinary CI retains per-attempt
+reports and plots only as GitHub Actions artifacts. It creates no public
+Evidence releases, source commits, branches, or pull requests. Hosted branch/PR
+docs show the latest formal release's frozen results. New release downloads use
+`relflow-<version>-evidence*` names; existing published names remain immutable. Keep the recorded bootstrap snapshot in
 `results.json` for offline builds; it is historical data, not an automatically
 updated selection. Hosted builds verify the public release asset's digest and
 source revision, without model dependencies or credentials.

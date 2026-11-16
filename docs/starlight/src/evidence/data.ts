@@ -1,7 +1,7 @@
 import { metricAt } from './metrics.ts';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 
@@ -517,6 +517,12 @@ function selectedSource(
       digest(source) === expected &&
       identify(source, header(source)) === entry.id
     )
+      return { source, matches: true, sha256: expected };
+  }
+  const frozen = join(root, 'docs/assets/evidence-plots', `${entry.id}-proof.py`);
+  if (existsSync(frozen)) {
+    const source = readFileSync(frozen, 'utf8');
+    if (digest(source) === expected && identify(source, header(source)) === entry.id)
       return { source, matches: true, sha256: expected };
   }
   if (/^[a-f\d]{40}$/.test(revision) && !entry.sourcePath.includes('..')) {

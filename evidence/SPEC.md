@@ -193,9 +193,11 @@ exact successful main CI run, source revision, and package version. The
 publisher verifies coverage, checks, provenance, input hashes, and report
 integrity before rendering a review site from the selected data.
 
-The immutable `evidence-v<version>` Release retains `publication.json`, a
-generated `measurements.md` table, complete report and input archives,
-`github-run.json`, checksums, and the reuse receipt when applicable. The
+The immutable `evidence-v<version>` Release retains the frozen publication,
+comparison table, complete report and input archives, execution provenance,
+checksums, plots, and the reuse receipt when applicable. New download names
+share the prefix `relflow-<version>-evidence`; earlier published files retain
+their original names and bytes. The
 publication must exist before the package's `v<version>` tag can be published.
 Already published package versions keep their original evidence selection.
 Publishing creates no source commits or follow-up PRs. No AWS storage or new
@@ -260,15 +262,16 @@ fresh learning result.
 `docs/starlight/src/evidence/data.ts` combines canonical declarations and the
 selected publication JSON for the website's `/evidence/Pxxx/` pages. No generated
 Python documentation pages are maintained. The checked-in `results.json` is an
-unchanged bootstrap snapshot for offline builds; Starlight retains its identical
-local copy at `docs/starlight/public/evidence/results.json`. Hosted release versions fetch
-their matching public asset with the same run's plots. Branch and PR builds select
-the newest exact-commit CI attempt and its candidate plots; pending or unavailable
-assets show an explicit status rather than older passing measurements. Every
-full paired Evidence execution retains observations without additional model
-calls. CI publishes immutable per-attempt preview assets, while version releases
-freeze the canonical versioned selection. Missing or invalid assets for an actual
-release fail the build.
+unchanged bootstrap snapshot for offline builds. Historical result downloads
+are generated from that canonical file. Hosted release versions fetch their
+matching public asset with the same run's plots. Branch and PR builds select
+the latest formal relflow release, keeping its measured revision and source
+provenance visible. Every full paired Evidence execution still retains
+observations without additional model calls. Routine CI keeps its reports and
+plots as Actions artifacts; only the Release workflow publishes
+`evidence-v<version>` with `relflow-<version>-evidence*` download names. Existing
+published files are immutable. Missing or invalid assets for an actual release
+fail the build.
 Downloaded data is cached outside experiment sources and checked against
 GitHub's asset digest and the package source revision. Never edit generated
 pages as a second source. `make check` validates static sources and tooling;

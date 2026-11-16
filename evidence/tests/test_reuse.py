@@ -708,13 +708,13 @@ def test_publisher_retains_original_pr_measurements_for_authenticated_multicommi
     output = tmp_path / "publication"
     publication.publish(root, output, current["id"])
     assert retained[0][1] == main
-    assert "evidence-reuse.json" in retained[0][3]
-    assert json.loads((output / "github-run.json").read_text())["run_id"] == execution_run["id"]
-    assert json.loads((output / "evidence-reuse.json").read_text())["role_mapping"] == {
+    assert "relflow-0.4.2-evidence-reuse.json" in retained[0][3]
+    assert json.loads((output / "relflow-0.4.2-evidence-provenance.json").read_text())["run_id"] == execution_run["id"]
+    assert json.loads((output / "relflow-0.4.2-evidence-reuse.json").read_text())["role_mapping"] == {
         "baseline": "candidate",
         "candidate": "candidate",
     }
-    selected = json.loads((output / "publication.json").read_text())
+    selected = json.loads((output / "relflow-0.4.2-evidence.json").read_text())
     assert selected["revision"] == main
     assert all(result["provenance"]["relflow_revision"] == tested for result in selected["results"].values())
     assert not git(root, "diff", "--name-only")
@@ -925,3 +925,50 @@ def test_failed_learning_attempt_is_allowed_only_for_review_authentication(bundl
     run["head_repository"]["full_name"] = "external/fork"
     with pytest.raises(ValueError):
         reuse.trusted(run, manifest, helper=HELPER, executor=EXECUTOR, root=root, request=request, review=True)
+
+
+@pytest.mark.parametrize("versioned", [False, True])
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_release_bundle_reads_versioned_or_frozen_names_with_unchanged_digest_checks(
+    bundle, tmp_path, monkeypatch, versioned, corrupt
+):
+    from releases import LEGACY, filenames
+
+    _, reports, inputs, run, _ = bundle
+    files = filenames("0.5.0") if versioned else LEGACY
+    output = tmp_path / "release"
+    output.mkdir()
+    payloads = {}
+    for role, directory in [("reports", reports), ("inputs", inputs)]:
+        path = output / files[role]
+        reuse.archive(directory, path)
+        payloads[path.name] = path.read_bytes()
+    payloads[files["provenance"]] = json.dumps(dict(run_id=run["id"], **run)).encode()
+    payloads[files["checksums"]] = "".join(
+        f"{hashlib.sha256(content).hexdigest()}  {name}\n" for name, content in payloads.items()
+    ).encode()
+    release = {
+        "id": 77,
+        "tag_name": "evidence-v0.5.0",
+        "draft": False,
+        "html_url": "https://github.com/relflow/relflow/releases/tag/evidence-v0.5.0",
+        "assets": [
+            {"id": index, "name": name, "size": len(content), "digest": "sha256:" + hashlib.sha256(content).hexdigest()}
+            for index, (name, content) in enumerate(payloads.items())
+        ],
+    }
+    by_id = {str(asset["id"]): payloads[asset["name"]] for asset in release["assets"]}
+    if corrupt:
+        asset = next(item for item in release["assets"] if item["name"] == files["reports"])
+        by_id[str(asset["id"])] += b"changed archive"
+    monkeypatch.setattr(
+        reuse.subprocess, "check_output", lambda command, **kwargs: by_id[command[-1].rsplit("/", 1)[-1]]
+    )
+    monkeypatch.setattr(reuse, "api", lambda *args: run)
+    if corrupt:
+        with pytest.raises(ValueError, match="differs from its GitHub digest"):
+            reuse.release_bundle(release, tmp_path / "recovered")
+    else:
+        recovered, receipt = reuse.release_bundle(release, tmp_path / "recovered")
+        assert recovered["id"] == run["id"]
+        assert {item["name"] for item in receipt["assets"]} == set(payloads)

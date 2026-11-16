@@ -2,12 +2,12 @@ name: CI
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, "stage/**"]
   merge_group:
     types: [checks_requested]
-    branches: [main]
+    branches: [main, "stage/**"]
   push:
-    branches: [main]
+    branches: [main, "stage/**"]
   workflow_dispatch:
     inputs:
       evidence_ref:

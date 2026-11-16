@@ -10,6 +10,7 @@ import pytest
 
 from evidence import assets
 from evidence.experiments.source import metadata, registry, snapshot
+from evidence.releases import filenames
 
 
 @pytest.fixture
@@ -49,6 +50,7 @@ def released(tmp_path, monkeypatch):
     }
     responses = {
         "https://api.github.com/repos/relflow/relflow/releases/tags/v0.4.3": package,
+        "https://api.github.com/repos/relflow/relflow/releases/latest": package,
         "https://api.github.com/repos/relflow/relflow/releases/tags/" + tag: report,
         url: content,
     }
@@ -113,9 +115,10 @@ def test_invalid_release_material_never_replaces_the_snapshot(released, fault):
     assert not list((root / ".cache").rglob("*.json"))
 
 
-def test_unreleased_preview_uses_latest_released_measurements(released):
+@pytest.mark.parametrize("checkout", ["0.4.2", "0.4.3", "0.5.0"])
+def test_preview_uses_latest_formal_release_independent_of_checkout_version(released, checkout):
     root, responses, _, _, _, _ = released
-    (root / "pyproject.toml").write_text('[project]\nversion="0.4.4"\n')
+    (root / "pyproject.toml").write_text(f'[project]\nversion="{checkout}"\n')
     responses["https://api.github.com/repos/relflow/relflow/releases/tags/v0.4.4"] = None
     responses["https://api.github.com/repos/relflow/relflow/releases/latest"] = responses[
         "https://api.github.com/repos/relflow/relflow/releases/tags/v0.4.3"
@@ -168,3 +171,76 @@ def test_bootstrap_preserves_historical_measurements_outside_canonical_sources()
         if identifier in selected["results"]:
             assert entry["run"] == selected["results"][identifier]
             assert entry["report"] == selected["report"]
+
+
+def test_versioned_names_are_used_without_renaming_historical_releases(released):
+    root, responses, selected, report, calls, old_url = released
+    name = filenames("0.4.3")["publication"]
+    url = old_url.removesuffix("publication.json") + name
+    report["assets"][0].update(name=name, browser_download_url=url)
+    responses[url] = responses.pop(old_url)
+    path = assets.fetch(root, "0.4.3", required=True)
+    assert json.loads(path.read_text()) == selected
+    assert url in calls and old_url not in calls
+
+
+def test_partial_versioned_inventory_cannot_fall_back_to_old_publication_name(released):
+    root, _, _, report, _, _ = released
+    report["assets"].append({"name": filenames("0.4.3")["reports"]})
+    with pytest.raises(ValueError, match="requires one relflow-0.4.3-evidence.json"):
+        assets.fetch(root, "0.4.3", required=True)
+
+
+def test_publication_requires_matching_plot_asset_before_downloading(tmp_path):
+    selected = {"version": "0.5.0", "report": {"plots": {"sha256": "a" * 64, "size": 10, "url": "wrong"}}}
+    with pytest.raises(ValueError, match="retained GitHub release asset"):
+        assets.plots(tmp_path, selected, {"assets": []})
+
+
+@pytest.mark.parametrize("corrupt", [False, True])
+def test_released_plots_bind_to_frozen_source_instead_of_newer_checkout(tmp_path, monkeypatch, corrupt):
+    from evidence.diagnostics import review as reviewing
+    from evidence.experiments.source import fingerprint
+
+    directory = tmp_path / "docs/assets/evidence-plots"
+    directory.mkdir(parents=True)
+    source = "# A frozen proof\nvalue = 1\n"
+    record = {"provenance": {"script_sha256": hashlib.sha256(source.encode()).hexdigest()}, "metrics": {"score": 0.8}}
+    (directory / "P001-proof.py").write_text(source if not corrupt else source + "value = 2\n")
+    (directory / "P001.json").write_text(json.dumps({"record": record}))
+    (directory / "P091.json").write_text(json.dumps({"record": None}))
+    review = {
+        "ci": {"run_id": "gh-123-1"},
+        "entries": {
+            "P001": {
+                "data": "P001.json",
+                "assets": {"P001-proof.py": record["provenance"]["script_sha256"]},
+                "code_sha256": fingerprint(source),
+            },
+            "P091": {"data": "P091.json", "assets": {}, "code_sha256": "unmeasured illustration"},
+        },
+    }
+    name = filenames("0.5.0")["plots"]
+    spec = {
+        "url": f"https://github.com/relflow/relflow/releases/download/evidence-v0.5.0/{name}",
+        "sha256": "a" * 64,
+        "size": 10,
+    }
+    selected = {"version": "0.5.0", "report": {"run_id": "gh-123-1", "plots": spec}, "results": {"P001": record}}
+    release = {
+        "assets": [
+            {
+                "name": name,
+                "browser_download_url": spec["url"],
+                "digest": "sha256:" + spec["sha256"],
+                "size": spec["size"],
+            }
+        ]
+    }
+    monkeypatch.setattr(reviewing, "prepare", lambda *args: directory)
+    monkeypatch.setattr(reviewing, "load", lambda *args: review)
+    if corrupt:
+        with pytest.raises(ValueError, match="frozen measurement"):
+            assets.plots(tmp_path, selected, release)
+    else:
+        assets.plots(tmp_path, selected, release)

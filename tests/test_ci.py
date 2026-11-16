@@ -209,57 +209,61 @@ def test_release_skips_superseded_main_and_rejects_missing_validation(release):
     assert release(manual=True, available=False).returncode != 0
 
 
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
 @pytest.mark.parametrize(
-    "event,run_id,preview,conclusion,repository,expected",
+    "branch,accepted", [("main", True), ("stage/0.5.0", True), ("stage/0.6.0", True), ("feature/docs", False)]
+)
+def test_full_ci_includes_staging_branches(event, branch, accepted):
+    from fnmatch import fnmatchcase
+
+    workflow = yaml.safe_load((WORKFLOWS / "ci.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert any(fnmatchcase(branch, pattern) for pattern in triggers[event]["branches"]) is accepted
+    assert set(workflow["jobs"]) == {"package", "tests", "docs", "native", "evidence", "required"}
+
+
+@pytest.mark.parametrize(
+    "event,ref,run_id,version,source,expected",
     [
-        ("workflow_run", "123", False, "success", "relflow/relflow", (True, False)),
-        ("workflow_dispatch", "123", False, "success", "relflow/relflow", (True, False)),
-        ("workflow_run", "", False, "success", "relflow/relflow", (False, True)),
-        ("workflow_run", "", False, "failure", "relflow/relflow", (False, True)),
-        ("workflow_run", "", False, "cancelled", "relflow/relflow", (False, False)),
-        ("workflow_run", "", False, "success", "fork/relflow", (False, False)),
-        ("workflow_dispatch", "123", True, "success", "relflow/relflow", (False, True)),
-    ],
-    ids=[
-        "automatic-release",
-        "manual-release",
-        "ci-preview",
-        "failed-ci-preview",
-        "cancelled-ci",
-        "fork-ci",
-        "manual-preview",
+        ("workflow_run", "refs/heads/main", "123", "0.5.0", "a" * 40, True),
+        ("workflow_dispatch", "refs/heads/main", "123", "0.5.0", "a" * 40, True),
+        ("pull_request", "refs/pull/102/merge", "123", "0.5.0", "a" * 40, False),
+        ("workflow_dispatch", "refs/heads/stage/0.5.0", "123", "0.5.0", "a" * 40, False),
+        ("workflow_run", "refs/heads/main", "", "0.5.0", "a" * 40, False),
+        ("workflow_run", "refs/heads/main", "123", "", "a" * 40, False),
+        ("workflow_run", "refs/heads/main", "123", "0.5.0", "", False),
     ],
 )
-def test_evidence_publication_routes_explicit_release_inputs_despite_inherited_caller_event(
-    event, run_id, preview, conclusion, repository, expected
+def test_evidence_publication_requires_the_release_caller_and_complete_main_inputs(
+    event, ref, run_id, version, source, expected
 ):
     node = shutil.which("node")
     if node is None:
-        pytest.skip("Node is required to execute the GitHub Actions publication conditions")
-    jobs = yaml.safe_load((WORKFLOWS / "publish-evidence.yml").read_text())["jobs"]
+        pytest.skip("Node is required to execute GitHub Actions publication conditions")
+    workflow = yaml.safe_load((WORKFLOWS / "publish-evidence.yml").read_text())
+    triggers = workflow.get("on", workflow.get(True))
+    assert set(triggers) == {"workflow_call"}
+    assert set(workflow["jobs"]) == {"publish"}
     fixture = {
-        "conditions": {name: jobs[name]["if"] for name in ("publish", "preview")},
-        "inputs": {"library_run_id": run_id, "preview": preview},
-        "github": {
-            "event_name": event,
-            "repository": "relflow/relflow",
-            "event": {"workflow_run": {"head_repository": {"full_name": repository}, "conclusion": conclusion}},
-        },
+        "condition": workflow["jobs"]["publish"]["if"],
+        "inputs": {"library_run_id": run_id, "version": version, "source_sha": source},
+        "github": {"event_name": event, "ref": ref},
     }
-    harness = """
-    const fixture = JSON.parse(process.env.PUBLICATION_FIXTURE);
-    const result = {};
-    for (const [name, expression] of Object.entries(fixture.conditions)) {
-      result[name] = Boolean(new Function('inputs', 'github', `return (${expression});`)(fixture.inputs, fixture.github));
-    }
-    process.stdout.write(JSON.stringify(result));
-    """
     result = subprocess.run(
-        [node, "--input-type=module", "-e", harness],
+        [
+            node,
+            "--input-type=module",
+            "-e",
+            """
+        const fixture = JSON.parse(process.env.PUBLICATION_FIXTURE);
+        const value = new Function('inputs', 'github', `return (${fixture.condition});`)(fixture.inputs, fixture.github);
+        process.stdout.write(JSON.stringify(Boolean(value)));
+        """,
+        ],
         env=dict(os.environ, PUBLICATION_FIXTURE=json.dumps(fixture)),
         capture_output=True,
         text=True,
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == dict(zip(("publish", "preview"), expected, strict=True))
+    assert json.loads(result.stdout) is expected

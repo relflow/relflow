@@ -193,8 +193,8 @@ See [hosted.md](hosted.md) for workflow trust, parallelism, and storage.
 
 ## Reports and publication
 
-Every main push still validates the complete paired suite against the pre-push
-revision. PRs and merge groups use their actual comparison base; manual runs
+Every push to `main` or `stage/**` validates the complete paired suite against
+the pre-push revision. PRs and merge groups use their actual comparison base; manual runs
 use the current commit's first parent by default; `evidence_base=<full-sha>`
 selects an explicit ancestor for repeatable manual comparisons. Routine
 reports remain Actions artifacts for 90 days, with tested input wheels and
@@ -207,42 +207,48 @@ checks, provenance, source/wheel digests, the runtime lock, and report integrity
 the publisher renders a review site from the selected records and freezes
 `evidence-v<version>` before the package's `v<version>` tag is published.
 
-The immutable evidence Release contains:
+New immutable Evidence releases use versioned downloads. For relflow 0.5.0:
 
-- `publication.json`: the versioned selection and original candidate results.
-- `measurements.md`: generated comparison figures for publication.
-- `evidence-reports.tar.gz`: records, logs, summary, and HTML report.
-- `evidence-inputs.tar.gz`: exact tested wheels and runtime requirements.
-- `github-run.json`, `SHA256SUMS`, and the reuse receipt when applicable.
+- `relflow-0.5.0-evidence.json`: the frozen selection and original results.
+- `relflow-0.5.0-evidence-measurements.md`: the comparison table.
+- `relflow-0.5.0-evidence-reports.tar.gz`: records, logs, summary, and HTML report.
+- `relflow-0.5.0-evidence-inputs.tar.gz`: exact wheels and runtime requirements.
+- `relflow-0.5.0-evidence-plots.zip`: matched diagnostic plots, when available.
+- `relflow-0.5.0-evidence-provenance.json` and
+  `relflow-0.5.0-evidence-checksums.txt`: execution identity and integrity.
+- `relflow-0.5.0-evidence-reuse.json`: a verified reuse receipt, when applicable.
 
+Previously published names and bytes remain unchanged.
 Publication never edits experiment headers or the source README, commits a
 bot branch, or opens a follow-up PR. An already published package version
 keeps its evidence selection frozen. New measurements for publication require
 a new version. Report Releases do not replace the latest package Release.
 
-The checked-in `results.json` preserves the existing historical snapshot for
-offline builds. Starlight keeps an identical local copy and combines it, or the
-publication selected by `RELFLOW_EVIDENCE_PUBLICATION`, with canonical experiment
-declarations through `docs/starlight/src/evidence/data.ts`. Hosted release docs
-read their matching public release asset after verifying its digest and source
-revision. Branch and PR builds select the newest exact-commit CI attempt; pending
-assets remain pending rather than borrowing older measurements. No model import,
-cloud account, or new API credential is required.
-
+The checked-in `results.json` preserves the historical snapshot for offline
+builds. Its existing download URLs are generated from that canonical file.
+Starlight combines the snapshot, or the publication selected by
+`RELFLOW_EVIDENCE_PUBLICATION`, with canonical declarations through
+`docs/starlight/src/evidence/data.ts`. Hosted tag docs require their exact
+version's public release asset and source revision. Branch and PR builds use
+the latest formal release, with its measured revision and proof sources visible.
+CI never creates per-commit Evidence releases or requests docs rebuilds.
+No model import, cloud account, or additional API credential is required.
 To execute another complete CI run without publishing a new selection:
 
 ```sh
 gh workflow run ci.yml --repo relflow/relflow --ref main
 ```
 
-The release workflow normally publishes evidence automatically. To prepare
-assets explicitly for an unreleased version using its verified main CI run:
+The Release workflow publishes Evidence as part of a formal version release.
+To retry the release process for the exact checked current `main` commit:
 
 ```sh
-gh workflow run publish-evidence.yml --repo relflow/relflow \
-  -f version=0.4.3 -f library_run_id=<successful-main-ci-run-id>
+gh workflow run release.yml --repo relflow/relflow --ref main
 ```
 
+`publish-evidence.yml` is reusable only by the Release workflow, with its exact
+successful main CI run, source revision, and package version. It has no ordinary
+CI-completion trigger or standalone preview mode.
 Keep actual metrics, checks, seeds, environment, tested revisions, and source
 digests bound to the measured execution. A verified reused selection retains
 its original identity and separate current-request receipt. Source edits and

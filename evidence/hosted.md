@@ -192,11 +192,12 @@ inside a read-only, network-disabled 2-CPU/4-GiB container, with host-disk tempo
 storage and no credentials. It uploads the static bundle and frozen-host receipt
 for 90 days. It performs no training or inference.
 
-The post-CI publisher executes only the frozen verifier, authenticates the
-original attempt, immutable helper/executor, reports, wheels and plot hashes,
-and retains `evidence-ci-<id>-attempt-<n>` assets. Valid learning regressions may
-be visualized; execution/provenance errors and incomplete coverage cannot publish.
-No PR code executes with publication credentials. Version release publication
-retains the same matched bundle in its frozen version assets. See
-[diagnostics/README.md](diagnostics/README.md) for Read the Docs setup and local
-review. Keep executor, helper and consumer pin updates in that order.
+CI retains reports and plot bundles as per-attempt Actions artifacts. It does
+not create public Evidence releases or rebuild the documentation after every
+commit. The formal Release workflow authenticates the successful main attempt,
+immutable helper/executor, reports, wheels, and plot hashes, then freezes its
+matched assets under `evidence-v<version>`. Downloads use versioned
+`relflow-<version>-evidence*` names. Execution/provenance errors and incomplete
+coverage cannot publish. See [diagnostics/README.md](diagnostics/README.md) for
+artifact review and publication. Keep executor, helper and consumer pin updates
+in that order.

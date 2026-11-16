@@ -1,6 +1,6 @@
 ---
 title: Evidence
-description: Explore controlled learning experiments, inspect their selected CI results, and follow the measurements back to their source.
+description: Explore controlled learning experiments, inspect results published with relflow releases, and follow the measurements back to their source.
 ---
 
 import EvidenceLibrary from '../../components/EvidenceLibrary.astro';
@@ -9,6 +9,9 @@ import EvidenceLibrary from '../../components/EvidenceLibrary.astro';
 by capability or leaf type. Each page explains how the question is modeled,
 then shows its primary recorded comparison. Expand the measurements, method,
 and reproduction details when you want to investigate further.
+
+Published results are frozen with formal relflow releases. Pull-request checks
+remain available in GitHub Actions.
 
 A result describes the recorded task and revision. Both met and unmet checks
 remain visible; declarations without a selected learning run carry no measured

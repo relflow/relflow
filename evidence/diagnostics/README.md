@@ -40,40 +40,30 @@ The trusted publication reader stages verified bundles under
 `docs/assets/evidence-plots/`; this is a download location rather than an authored
 website asset directory.
 
-After CI completes, the privileged publication workflow runs a frozen verifier,
-authenticates the original internal CI attempt and helper/executor pins, and
-retains the plots, publication selection, reports, wheels and checksums in an
-immutable `evidence-ci-<run-id>-attempt-<n>` GitHub Release. It creates no source
-commits or publication PRs. Forks cannot publish. Each attempt has its own assets;
-reruns never overwrite earlier measurements. Once this workflow is on `main`,
-its `workflow_run` trigger is automatic. Before merge it can be exercised with:
+Ordinary CI keeps these reports and plots in Actions. It creates no
+`evidence-ci-*` GitHub releases and does not trigger an Evidence-specific Read
+the Docs rebuild. Download an attempt's `evidence-plots-attempt-<n>` artifact
+from its Actions run to inspect candidate results before release.
 
-```sh
-gh workflow run publish-evidence.yml --ref <branch> \
-  -f preview=true -f library_run_id=<complete-ci-run-id>
-```
+Only the formal Release workflow publishes frozen Evidence. It authenticates
+the exact successful main CI attempt and helper/executor pins, then retains
+plots, reports, inputs, provenance, and checksums in `evidence-v<version>`.
+The title is **relflow <version> evidence**. New public downloads use
+`relflow-<version>-evidence*` names, including
+`relflow-0.5.0-evidence-plots.zip` and `relflow-0.5.0-evidence.json`.
+Already published assets retain their original names and bytes.
 
-Set the repository's `READTHEDOCS_TOKEN` Actions secret to a Read the Docs API
-token with build access for the `relflow` project. The publisher requests a build
-of the current PR version or `latest` after publishing the assets. If absent,
-asset publication finishes and the workflow reports the missing configuration.
-It skips rebuilds for superseded heads. Tokens never enter proof containers,
-plot containers, bundles or documentation builds.
+Read the Docs branch and PR builds show the latest formal release's results;
+tagged builds require the corresponding version's exact frozen selection.
+Static builds verify asset digests, bundle inventories, frozen proof sources,
+and exact record equality. They never install or import relflow, Torch,
+Lightning, Matplotlib, or Arrow. Plot sources are checked against their own
+recorded execution, so an updated PR proof cannot change the meaning of a
+previous release's measurements.
 
-Read the Docs branch and PR builds select the newest CI run and attempt for the
-exact checkout commit, including unsuccessful attempts. Pending or unavailable
-plots show an explicit status with no fallback to an older passing result.
-Package release builds freeze the matching plot bundle in `evidence-v<version>`
-alongside their publication JSON; old releases remain unchanged. Static builds
-verify GitHub asset digests, bundle inventories and exact record equality. They
-never install or import relflow, Torch, Lightning, Matplotlib or Arrow.
-
-For local review of an exact commit after its assets are published:
-
-```sh
-uv run --project docs python -c 'import subprocess; from pathlib import Path; from evidence.assets import ci; print(ci(Path.cwd(), subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()))'
-RELFLOW_EVIDENCE_PUBLICATION="$PWD/.cache/evidence/ci-preview.json" make dev
-```
+No Read the Docs token is needed for Evidence publication. Versioned hosting
+continues through the repository's normal release/tag integration; CI does not
+request per-commit preview rebuilds.
 
 Review populations, units, matched scales, control labels and both light/dark
 layouts when changing visual briefs or renderers. Keep projections fitted to

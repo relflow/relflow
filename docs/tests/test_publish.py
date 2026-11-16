@@ -305,12 +305,15 @@ def test_publish_copies_nothing_when_rendered_assets_or_canonical_prefix_fail_va
     assert not (Path(environment["READTHEDOCS_OUTPUT"]) / "html").exists()
 
 
-def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measurements(
-    project, environment, renderer, monkeypatch
-):
+@pytest.mark.parametrize("kind", ["external", "branch"])
+def test_preview_builds_select_only_released_measurements(project, environment, renderer, monkeypatch, kind):
     (project / "evidence/experiments").mkdir(parents=True)
-    environment.update(READTHEDOCS_VERSION_TYPE="external", READTHEDOCS_GIT_IDENTIFIER="86")
-    selected = project.parent / "diagnostic-review.json"
+    environment.update(
+        READTHEDOCS_VERSION_TYPE=kind,
+        READTHEDOCS_GIT_IDENTIFIER="102" if kind == "external" else "latest",
+        RELFLOW_EVIDENCE_PUBLICATION="/unused/ci-preview.json",
+    )
+    selected = project.parent / "released-publication.json"
     selected.write_text("{}")
     calls = []
     execute = publishing.subprocess.run
@@ -320,14 +323,22 @@ def test_pr_preview_selects_reviewed_diagnostics_without_fetching_released_measu
             calls.append(options["env"]["RELFLOW_EVIDENCE_PUBLICATION"])
         return execute(command, **options)
 
-    def fetch(*args, **kwargs):
-        raise AssertionError("A reviewed PR must retain its captured measurements")
+    def fetch(root, version, *, required):
+        assert root == project and version is None and required is False
+        return selected
 
-    monkeypatch.setattr(publishing, "ci", lambda root, revision: selected)
     monkeypatch.setattr(publishing, "fetch", fetch)
     monkeypatch.setattr(publishing.subprocess, "run", run)
     publishing.publish(project, environ=environment)
     assert calls == [str(selected)] * 3
+
+
+def test_unreleased_hosted_build_cannot_keep_an_ad_hoc_ci_override(project, environment, renderer, monkeypatch):
+    (project / "evidence/experiments").mkdir(parents=True)
+    environment.update(READTHEDOCS_VERSION_TYPE="branch", RELFLOW_EVIDENCE_PUBLICATION="/unused/ci-preview.json")
+    monkeypatch.setattr(publishing, "fetch", lambda *args, **kwargs: None)
+    publishing.publish(project, environ=environment)
+    assert all("RELFLOW_EVIDENCE_PUBLICATION" not in options for options in renderer)
 
 
 def test_read_only_check_validates_existing_output_without_fetching_or_building(
@@ -342,7 +353,6 @@ def test_read_only_check_validates_existing_output_without_fetching_or_building(
     def forbidden(*args, **kwargs):
         raise AssertionError("Static validation must not fetch Evidence or rebuild the site")
 
-    monkeypatch.setattr(publishing, "ci", forbidden)
     monkeypatch.setattr(publishing, "fetch", forbidden)
     monkeypatch.setattr(publishing.subprocess, "run", forbidden)
     publishing.main()

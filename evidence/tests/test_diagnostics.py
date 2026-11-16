@@ -45,13 +45,14 @@ def test_plotting_runs_selected_code_only_in_a_bounded_offline_container(tmp_pat
     assert result["image_id"] == "sha256:" + "a" * 64
 
 
-def test_privileged_publication_uses_only_a_frozen_verifier():
+def test_publication_belongs_only_to_the_formal_release_workflow():
     workflow = yaml.safe_load((ROOT / ".github/workflows/publish-evidence.yml").read_text())
     triggers = workflow.get("on", workflow.get(True))
-    assert triggers["workflow_run"] == {"workflows": ["CI"], "types": ["completed"]}
-    job = workflow["jobs"]["preview"]
-    assert "head_repository.full_name == github.repository" in job["if"]
+    assert set(triggers) == {"workflow_call"}
+    assert set(workflow["jobs"]) == {"publish"}
+    job = workflow["jobs"]["publish"]
+    assert "refs/heads/main" in job["if"]
     checkout = next(step["with"] for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
-    assert len(checkout["ref"]) == 40 and checkout["persist-credentials"] is False
-    assert checkout["repository"] == "relflow/relflow"
-    assert not any("pip install" in step.get("run", "") and "executor/" in step["run"] for step in job["steps"])
+    assert checkout["ref"] == "${{ inputs.source_sha }}"
+    assert checkout["persist-credentials"] is False
+    assert "READTHEDOCS_TOKEN" not in str(workflow)

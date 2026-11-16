@@ -460,7 +460,8 @@ aliases.
 
 ## CI Ownership
 
-`ci.yml` owns PR, merge-group, main-push, and manual triggers. `tests.yml`,
+`ci.yml` owns PR, merge-group, main/staging-push, and manual triggers.
+PRs and merge groups targeting `main` or `stage/**` run the same complete gate. `tests.yml`,
 `docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
 for every event, including the shared package build, full matrix, static
 documentation checks, and complete paired evidence validation. Tests, Evidence,
@@ -469,8 +470,11 @@ original measurements and revisions and separately attest the current inputs;
 missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
 successful main CI; do not add a second matrix invocation to publication.
 Version releases retain verified evidence reports and a frozen publication JSON
-asset before publishing the package tag. Documentation consumes these assets;
-ordinary CI must not create publication commits or pull requests. Experiments
+asset before publishing the package tag. New public assets use versioned
+`relflow-<version>-evidence*` filenames. Branch/PR documentation consumes the
+latest formal release; tag docs require their matching frozen selection.
+Ordinary CI retains reports and plots as Actions artifacts and creates no
+per-commit Evidence releases, publication commits, or pull requests. Experiments
 keep definitions and prose, with measured results outside their source files.
 The evidence helper and trusted executor are pinned separately from the suite.
 Twelve GitHub-hosted CPU shards keep baseline/candidate proof pairs on one runner,

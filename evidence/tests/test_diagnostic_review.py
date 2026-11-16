@@ -93,7 +93,15 @@ def test_static_review_rejects_changed_or_incomplete_assets(project, change):
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
-def test_preview_fetch_verifies_archive_and_assets_before_installing(project, monkeypatch, corrupt):
+@pytest.mark.parametrize(
+    "asset",
+    [
+        "evidence-ci-1-attempt-1/proof-visualizations.zip",
+        "evidence-v0.5.0/proof-visualizations.zip",
+        "evidence-v0.5.0/relflow-0.5.0-evidence-plots.zip",
+    ],
+)
+def test_preview_fetch_verifies_archive_and_assets_before_installing(project, monkeypatch, corrupt, asset):
     assets = project / "docs/assets/evidence-plots"
     stream = io.BytesIO()
     with ZipFile(stream, "w", compression=ZIP_DEFLATED) as bundle:
@@ -102,7 +110,7 @@ def test_preview_fetch_verifies_archive_and_assets_before_installing(project, mo
     payload = stream.getvalue()
     spec = {
         "schema": 1,
-        "url": "https://github.com/relflow/relflow/releases/download/evidence-ci-1-attempt-1/proof-visualizations.zip",
+        "url": f"https://github.com/relflow/relflow/releases/download/{asset}",
         "size": len(payload),
         "sha256": hashlib.sha256(payload).hexdigest(),
     }

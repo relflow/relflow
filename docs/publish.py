@@ -11,7 +11,7 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
 
-from evidence.assets import ci, fetch
+from evidence.assets import fetch
 from evidence.experiments.source import snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,11 +134,9 @@ def publish(root: Path = ROOT, *, environ: Mapping[str, str] | None = None) -> P
             if environment.get("READTHEDOCS_VERSION_TYPE") == "tag"
             else None
         )
-        publication = (
-            ci(root, revision) if environment.get("READTHEDOCS_VERSION_TYPE") in {"external", "branch"} else None
-        )
-        if publication is None:
-            publication = fetch(root, version.removeprefix("v") if version else None, required=bool(version))
+        # Hosted versions always select formal releases, never inherited CI overrides.
+        environment.pop("RELFLOW_EVIDENCE_PUBLICATION", None)
+        publication = fetch(root, version.removeprefix("v") if version else None, required=bool(version))
         if publication is not None:
             if version and snapshot(publication)["revision"] != revision:
                 raise ValueError("Released evidence does not match the documentation tag's source revision")
