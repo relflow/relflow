@@ -1,5 +1,6 @@
 ---
 import type { EvidenceEntry } from '../evidence/data';
+import { review } from '../evidence/catalog';
 import { comparison } from '../evidence/comparison';
 import { formatValue } from '../evidence/presentation';
 interface Props {
@@ -7,6 +8,7 @@ interface Props {
 }
 const { entry } = Astro.props;
 const chart = comparison(entry);
+const content = review(entry);
 const [min, max] = chart.domain;
 const zero = ((0 - min) / (max - min)) * 100;
 ---
@@ -56,37 +58,8 @@ const zero = ((0 - min) / (max - min)) * 100;
         </div>
         {chart.kind === 'Recorded measurement' && (
           <p class="scope">
-            No matched A/B comparison is presented for this readout. Inspect the full measurements
-            and method for the experiment’s other checks.
-          </p>
-        )}
-        {['P056', 'P062', 'P065'].includes(entry.id) && (
-          <p class="scope">
-            Known-answer accuracy and all-row accuracy have different denominators. Inspect coverage
-            in Measurements to see which answers the vocabulary can represent.
-          </p>
-        )}
-        {entry.id === 'P046' && (
-          <p class="scope">
-            First edit cycle. Repeated cycles, source rebindings, and rejected edits remain in
-            Measurements.
-          </p>
-        )}
-        {entry.id === 'P055' && (
-          <p class="scope">
-            The reference is the information limit without identity, not a competing trained model.
-          </p>
-        )}
-        {entry.id === 'P040' && (
-          <p class="scope">
-            The flattened-data reference is an information-bound oracle, not a competing trained
-            model.
-          </p>
-        )}
-        {entry.id === 'P079' && (
-          <p class="scope">
-            Heavy-tailed multiplicative task, matched 500-update budget. Additive tasks, other
-            target types, and longer training budgets remain in Measurements.
+            No matched A/B measurement is presented for this readout. The selected record’s complete
+            criteria remain below.
           </p>
         )}
       </>
@@ -99,6 +72,13 @@ const zero = ((0 - min) / (max - min)) * 100;
             : !entry.sourceMatches
               ? 'The exact source could not be matched; inspect the recorded execution before interpreting these metrics.'
               : 'The selected record does not contain every measurement needed for this comparison. Inspect Measurements for the available values.'}
+      </p>
+    )
+  }
+  {
+    content.note && (
+      <p class="scope" data-evidence-scope>
+        {content.note}
       </p>
     )
   }

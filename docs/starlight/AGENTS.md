@@ -293,18 +293,23 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   declaration catalog require exact archived source bytes, a matching script
   digest and ID, and their recorded original path/lane identity; reject unknown
   identities rather than silently omitting measurements or reusing another proof.
-  `src/evidence/catalog.ts` owns interrogative display titles, neutral modeling summaries,
-  and primary leaf-type tags. The tags drive catalog filters and `LeafEvidence`
+  `src/evidence/reviews.ts` owns an individually reviewed question, concise modeling
+  explanation, primary comparison paths/units, and scope note for every proof.
+  There is no extracted-prose or arbitrary-first-metric fallback: add a review
+  when adding a proof. `src/evidence/catalog.ts` owns primary leaf-type tags and
+  exposes that authored content. The tags drive catalog filters and `LeafEvidence`
   reverse links; do not tag retired Cluster proofs as current Group evidence.
   Lead each report with how the synthetic task is modeled, then one primary
-  comparison using `EvidenceComparison`. `src/evidence/comparison.ts` selects
-  metric paths, conditions, and units; every plotted number still comes from the
+  comparison using `EvidenceComparison`. `src/evidence/comparison.ts` resolves
+  the reviewed metric paths, conditions, and units; every plotted number still comes from the
   selected record. Prefer recorded raw RMSE/MAE/MSE over normalized error when
   the same raw quantity exists for all compared arms. Distinguish controlled
   comparisons, baseline references, before/after runs, and recorded conditions;
   never invent a control for a proof that lacks one. Keep check totals and unmet
   verdicts visible, with every criterion, secondary metric, and the complete
   investigation closed by default. Charts must remain readable without scripts.
+  `src/evidence/criteria.ts` provides human display labels while retaining original
+  check keys on hover, in `data-check-name`, and in the complete record.
   Display authored interpretation separately from the CI-derived verdict. Exact
   archived scripts keep their own API and source hashes. Run `npm test` for the input-driven
   adapter checks as well as the normal type check and build.

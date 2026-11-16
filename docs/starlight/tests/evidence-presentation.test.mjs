@@ -151,6 +151,14 @@ test('primary type tags are the same source used by the leaf reference tables', 
   }
   assert.deepEqual(typesFor('P021'), ['Category', 'Hash']);
   assert.deepEqual(
+    typesFor('P060'),
+    ['Category'],
+    'Yes/no outcomes in this experiment use Category, not Boolean.',
+  );
+  assert.deepEqual(typesFor('P069'), ['Enum']);
+  assert.deepEqual(typesFor('P070'), ['Enum']);
+  assert.deepEqual(typesFor('P100'), ['Number', 'Ordinal', 'Category']);
+  assert.deepEqual(
     experimentsForType(evidenceEntries, 'Group').map((item) => item.id),
     ['P108', 'P109', 'P110', 'P111', 'P112'],
   );
@@ -164,4 +172,77 @@ test('primary type tags are the same source used by the leaf reference tables', 
   );
   assert.equal(question(entry('P001')), 'Can relflow add a list of numbers?');
   assert.ok(evidenceEntries.every((item) => question(item).endsWith('?')));
+});
+
+test('every experiment has a complete individual explanation and explicit primary comparison', async () => {
+  const { reviews } = await import('../src/evidence/reviews.ts');
+  const { modeling, review } = await import('../src/evidence/catalog.ts');
+  assert.deepEqual(Object.keys(reviews).sort(), evidenceEntries.map((entry) => entry.id).sort());
+  const texts = new Set();
+  for (const entry of evidenceEntries) {
+    const content = review(entry);
+    assert.ok(content.question.endsWith('?'), entry.id);
+    assert.ok(content.modeling.split(/\s+/).length <= 100, `${entry.id} should stay concise`);
+    assert.ok(content.modeling.split(/\s+/).length >= 25, `${entry.id} must explain a real setup`);
+    assert.equal(
+      modeling(entry),
+      content.modeling,
+      `${entry.id} cannot silently fall back to extracted prose`,
+    );
+    assert.ok(content.comparison.conditions.length, entry.id);
+    assert.ok(
+      content.comparison.conditions.every((condition) => condition.label && condition.path.length),
+    );
+    texts.add(content.modeling);
+  }
+  assert.equal(texts.size, evidenceEntries.length, 'Every setup is individually authored.');
+  assert.throws(() => review({ id: 'P999' }), /individually reviewed/);
+});
+
+test('limitation proofs and confounded comparisons retain their scientific scope', async () => {
+  const { reviews } = await import('../src/evidence/reviews.ts');
+  assert.match(reviews.P028.note, /limitation.*not.*succeeded/);
+  assert.match(reviews.P024.note, /shortcut/);
+  assert.match(reviews.P068.note, /does not mean.*extrapolated/);
+  assert.equal(reviews.P043.comparison.kind, 'Recorded conditions');
+  assert.match(reviews.P043.note, /different training budgets/);
+  const operations = comparison(entry('P027'));
+  assert.equal(operations.points.length, 12);
+  assert.equal(operations.metric, 'Normalized RMSE');
+  const sensors = comparison(entry('P074'));
+  assert.equal(sensors.metric, 'MSE');
+  assert.deepEqual(
+    sensors.points.map((point) => point.path),
+    ['100', '010', '001', '111'].map((pattern) => ['patterns', pattern, 'mse']),
+  );
+  assert.equal(reviews.P080.comparison.metric, 'Adjusted Rand index');
+  assert.equal(reviews.P096.comparison.metric, 'False positive rate');
+});
+
+test('human-readable criterion labels retain separate criterion identities and original records', async () => {
+  const { criterionLabel } = await import('../src/evidence/criteria.ts');
+  for (const entry of evidenceEntries) {
+    const originals = Object.keys(entry.result?.checks || {});
+    const copy = JSON.stringify(entry.result);
+    const labels = originals.map((name) => criterionLabel(entry.id, name));
+    assert.equal(
+      new Set(labels).size,
+      originals.length,
+      `${entry.id} must not merge distinct criteria`,
+    );
+    assert.ok(labels.every((label) => label.length && !/\bnRMSE\b|\bSD\b/.test(label)));
+    assert.equal(JSON.stringify(entry.result), copy);
+  }
+  assert.equal(
+    criterionLabel('P074', '101: tracks conditional mean'),
+    'Sensors 1 and 3 visible: tracks conditional mean',
+  );
+  assert.equal(
+    criterionLabel('P061', '0.2: evaluation preserves mapping and exposures'),
+    '20% input unavailability: evaluation preserves mapping and exposures',
+  );
+  assert.equal(
+    criterionLabel('P001', 'Seen-length nRMSE below 0.35'),
+    'Seen-length normalized RMSE below 0.35',
+  );
 });

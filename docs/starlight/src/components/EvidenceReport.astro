@@ -8,7 +8,8 @@ import EvidenceProse from './EvidenceProse.astro';
 import JsonRecord from './JsonRecord.astro';
 import EvidenceComparison from './EvidenceComparison.astro';
 import EvidenceTypes from './EvidenceTypes.astro';
-import { modeling, question } from '../evidence/catalog';
+import { criterionLabel } from '../evidence/criteria';
+import { description, modeling, question } from '../evidence/catalog';
 
 interface Props {
   entry: EvidenceEntry;
@@ -39,7 +40,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
       {entry.archived && <span>Archived experiment</span>}
       <span class="run-status" data-outcome={state.id}>{state.label}</span>
     </div>
-    <p class="report-description">{entry.description}</p>
+    <p class="report-description">{description(entry)}</p>
     {
       entry.archived && (
         <p class="scope-note">
@@ -137,7 +138,9 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
                   <tbody>
                     {checks.map(([name, passed]) => (
                       <tr data-check-name={name}>
-                        <th scope="row">{name}</th>
+                        <th scope="row" title={`Original criterion: ${name}`}>
+                          {criterionLabel(entry.id, name)}
+                        </th>
                         <td data-check-outcome={passed ? 'met' : 'not_met'}>
                           {passed ? 'Met' : 'Not met'}
                         </td>

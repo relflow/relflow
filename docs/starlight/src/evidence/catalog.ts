@@ -1,4 +1,5 @@
 import type { EvidenceEntry } from './data';
+import { reviews, type Review } from './reviews.ts';
 
 /** Primary subjects, not every leaf used by the generator or prediction target. */
 const subjects = {
@@ -28,6 +29,7 @@ const subjects = {
     'P088',
     'P093',
     'P099',
+    'P100',
   ],
   Quantile: ['P067', 'P068', 'P077', 'P079'],
   Vector: [],
@@ -39,14 +41,13 @@ const subjects = {
     'P056',
     'P057',
     'P059',
+    'P060',
     'P061',
     'P062',
     'P066',
-    'P069',
-    'P070',
-    'P086',
+    'P100',
   ],
-  Boolean: ['P017', 'P060'],
+  Boolean: ['P017'],
   Enum: ['P069', 'P070'],
   Hash: ['P021', 'P025', 'P028', 'P029', 'P037', 'P075', 'P098'],
   Set: ['P058', 'P063', 'P064'],
@@ -70,31 +71,23 @@ export function experimentsForType<T extends { id: string }>(
   return entries.filter((entry) => typesFor(entry.id).includes(type));
 }
 
-export function question(entry: Pick<EvidenceEntry, 'title'>): string {
-  return entry.title.replace(/\bit\b/, 'relflow');
+export function review(entry: Pick<EvidenceEntry, 'id'>): Review {
+  const content = reviews[entry.id];
+  if (!content)
+    throw new Error(
+      `Evidence ${entry.id} needs an individually reviewed explanation and comparison in reviews.ts.`,
+    );
+  return content;
 }
 
-/** Explain the setup without promoting the source's authored conclusions to CI outcomes. */
-const setups: Record<string, string> = {
-  P001: 'Generate independent lists of one to six amounts between −1 and 1. Give the model the amounts in a repeated branch and hide their sum as a Number target. Training, validation, and test use separate lists. Compare test RMSE with a predictor that always returns a constant.',
-  P021: 'Give the model two identifiers and hide a Boolean target indicating whether they match. Training and test use disjoint identifier names. Compare Hash with Category on the same equality task: new Category labels share the unknown representation, whereas Hash retains equality within an encoded batch. A shuffled-label control checks for an accidental signal.',
-  P038: 'Generate records in which a measurement is either null or the number zero, and hide the Boolean answer identifying which case occurred. Compare preserving these states with replacing nulls by zero. Filling nulls removes the information needed to distinguish the two cases; the test measures whether the model uses the preserved distinction.',
-  P039: 'Generate independent records containing exactly six amounts sampled between −1 and 1. Put the amounts in a repeated branch and hide their sum as a Number target. Score held-out totals with RMSE and compare with a predictor that always returns the training-set average total.',
-  P040: 'Pair records containing the same six amounts but arrange their sessions differently: two items in each session, or one, four, and one. Hide the structure-dependent target. A reference that sees only flattened values must return the same answer for both records; the model can use their different nesting.',
-};
+export function question(entry: Pick<EvidenceEntry, 'id' | 'title'>): string {
+  return review(entry).question;
+}
+
+export function description(entry: Pick<EvidenceEntry, 'id' | 'description'>): string {
+  return review(entry).description || entry.description;
+}
 
 export function modeling(entry: EvidenceEntry): string {
-  if (!entry.sourceMatches || !entry.source) return '';
-  if (setups[entry.id]) return setups[entry.id];
-  // These paragraphs come from the exact selected source, not the live SDK.
-  return (
-    entry.sections.method
-      .replace(/^###[^\n]*\n+/, '')
-      .split(/\n### /)[0]
-      .split(/\n\s*\n/)
-      .filter((paragraph) => paragraph.trim() && !paragraph.startsWith('#'))
-      .slice(0, 2)
-      .join('\n\n')
-      .trim() || entry.description
-  );
+  return entry.sourceMatches && entry.source ? review(entry).modeling : '';
 }

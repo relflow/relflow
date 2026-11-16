@@ -1,7 +1,7 @@
 ---
 import EvidenceTypes from './EvidenceTypes.astro';
 import { comparison } from '../evidence/comparison';
-import { leafTypes, question, typesFor } from '../evidence/catalog';
+import { description, leafTypes, question, typesFor } from '../evidence/catalog';
 import { evidenceEntries, selection } from '../evidence/data';
 import { experimentURL, formatValue, recordDate, status } from '../evidence/presentation';
 
@@ -165,7 +165,22 @@ const lastRecorded = recorded
         const result = entry.result;
         const measured = entry.state.id === 'met' || entry.state.id === 'not_met';
         const checks = measured && result ? Object.values(result.checks) : [];
-        const readouts = entry.primary.available ? entry.primary.points : [];
+        const points = entry.primary.available ? entry.primary.points : [];
+        const readouts =
+          points.length > 3
+            ? [
+                {
+                  label: `Lowest across ${points.length} conditions`,
+                  value: Math.min(...points.map((point) => point.value!)),
+                  format: points[0].format,
+                },
+                {
+                  label: `Highest across ${points.length} conditions`,
+                  value: Math.max(...points.map((point) => point.value!)),
+                  format: points[0].format,
+                },
+              ]
+            : points;
         const family = familyLabels[entry.family] || entry.family;
         return (
           <li
@@ -174,7 +189,7 @@ const lastRecorded = recorded
             data-family={entry.family}
             data-status={entry.state.id}
             data-types={entry.types.join(' ')}
-            data-search={`${entry.id} ${entry.family} ${family} ${entry.question} ${entry.title} ${entry.types.join(' ')} ${entry.description} ${entry.lane} ${entry.archived ? 'archived' : ''} ${entry.requirements.join(' ')}`.toLowerCase()}
+            data-search={`${entry.id} ${entry.family} ${family} ${entry.question} ${entry.title} ${entry.types.join(' ')} ${description(entry)} ${entry.lane} ${entry.archived ? 'archived' : ''} ${entry.requirements.join(' ')}`.toLowerCase()}
           >
             <article aria-labelledby={`${entry.id}-title`}>
               <div class="entry-labels">
@@ -187,7 +202,7 @@ const lastRecorded = recorded
                 <a href={experimentURL(entry.id)}>{entry.question}</a>
               </h3>
               <EvidenceTypes id={entry.id} />
-              <p class="entry-description">{entry.description}</p>
+              <p class="entry-description">{description(entry)}</p>
               {readouts.length > 0 && (
                 <dl class="readouts">
                   {readouts.map((readout) => (

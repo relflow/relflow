@@ -127,3 +127,33 @@ test('the primary chart and nested investigation disclosures work without JavaSc
     await context.close();
   }
 });
+
+test('every Evidence page renders its own reviewed question, setup, and scope', async ({
+  page,
+}, info) => {
+  test.skip(
+    info.project.name !== 'desktop-light',
+    'Full catalog text audit once; shared mobile and theme behavior is checked above.',
+  );
+  test.setTimeout(120_000);
+  const { reviews } = await import('../../src/evidence/reviews');
+  await page.goto('/evidence/');
+  const ids = await page
+    .locator('[data-evidence-entry]')
+    .evaluateAll((entries) => entries.map((entry) => entry.id));
+  for (const id of ids) {
+    await test.step(id, async () => {
+      await page.goto(`/evidence/${id}/`);
+      const content = reviews[id];
+      await expect(page.locator('h1')).toHaveText(content.question);
+      const setup = page.locator('#modeling-title').locator('..');
+      await expect(setup).toContainText(content.modeling);
+      const comparison = page.locator('[data-primary-comparison]');
+      await expect(comparison).toHaveAttribute('data-metric', content.comparison.metric);
+      if (content.note)
+        await expect(comparison.locator('[data-evidence-scope]')).toHaveText(content.note);
+      await expect(page.locator('.report-details')).not.toHaveAttribute('open');
+      await expect(page.locator('.check-disclosure[open]')).toHaveCount(0);
+    });
+  }
+});

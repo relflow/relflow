@@ -538,13 +538,16 @@ never used as measurements.
 
 Each experiment has a page at `/evidence/Pxxx/`. Its interrogative title leads
 into **How is the question modeled?**, followed by a single **Primary comparison**.
-`src/evidence/catalog.ts` owns neutral setup copy and primary leaf-type tags.
+`src/evidence/reviews.ts` contains an individually authored question, modeling
+explanation, explicit primary comparison, and scope note for every experiment.
+There is no extracted-paragraph or first-readout fallback. `src/evidence/catalog.ts`
+exposes those reviews and owns the primary leaf-type tags.
 `LeafEvidence type="Number"` and the catalog's shareable `?type=Number` filter
 consume that same mapping. Tags describe primary test subjects, not every type
 used incidentally in a generator; retired Cluster results are not Group results.
 
-`src/evidence/comparison.ts` selects condition labels and metric paths, never
-measurements or outcomes. Standard source-unit RMSE/MAE/MSE take priority when
+`src/evidence/comparison.ts` resolves the reviewed condition labels and metric
+paths, never supplying measurements or inferring outcomes. Standard source-unit RMSE/MAE/MSE take priority when
 recorded for every plotted condition. AUC and accuracy retain distinct meanings.
 Constant-prediction baselines, information-bound references, before/after results,
 and controlled comparisons are labeled separately. A proof without a matched
@@ -553,7 +556,10 @@ comparison says so. Missing values are never synthesized from source commentary.
 and a shared zero-based axis; it needs no browser chart library or JavaScript.
 
 Check totals and the selected CI verdict remain visible, including unmet checks.
-Individual criteria, illustrative records, and the full investigation are native
+`src/evidence/criteria.ts` expands opaque condition prefixes and metric
+abbreviations for display. Original criterion names remain on hover and in
+`data-check-name`, source, and raw records. Individual criteria, illustrative
+records, and the full investigation are native
 disclosures closed by default. Measurements, Method, Reproduce,
 and Code panels retain complete results and source context. Authored interpretation
 is folded under Method, labeled as source commentary rather than an automatic CI
