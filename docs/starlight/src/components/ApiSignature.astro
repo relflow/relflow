@@ -1,0 +1,106 @@
+---
+import { Code } from '@astrojs/starlight/components';
+import type { Signature } from '../api/reference';
+import Prose from './Prose.astro';
+
+interface Props {
+  signature: Signature;
+}
+const { signature } = Astro.props;
+const descriptions = signature.parameters.some((parameter) => parameter.description);
+---
+
+<div class="api-signature">
+  <Code code={signature.code} lang="python" wrap preserveIndent />
+  {signature.text && <Prose text={signature.text} sourceDocstring />}
+  {
+    signature.parameters.length > 0 && (
+      <table class="api-table">
+        <caption>Parameters</caption>
+        <thead>
+          <tr>
+            <th>Parameter</th>
+            <th>Type</th>
+            <th>Default</th>
+            {descriptions && <th>Description</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {signature.parameters.map((parameter) => (
+            <tr>
+              <th scope="row">
+                <code>{parameter.name}</code>
+                <small>{parameter.kind}</small>
+              </th>
+              <td data-label="Type">{parameter.type ? <code>{parameter.type}</code> : '—'}</td>
+              <td data-label="Default">
+                {parameter.kind.startsWith('variadic') ? (
+                  'Variadic'
+                ) : parameter.default === null ? (
+                  'Required'
+                ) : (
+                  <code>{parameter.default}</code>
+                )}
+              </td>
+              {descriptions && (
+                <td data-label="Description">
+                  {parameter.description && <Prose text={parameter.description} sourceDocstring />}
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  {
+    signature.returns.length > 0 && (
+      <table class="api-table">
+        <caption>Returns</caption>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signature.returns.map((value) => (
+            <tr>
+              <td data-label="Type">
+                <code>{value.type || '—'}</code>
+              </td>
+              <td data-label="Description">
+                {value.description && <Prose text={value.description} sourceDocstring />}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+  {
+    signature.raises.length > 0 && (
+      <table class="api-table">
+        <caption>Raises</caption>
+        <thead>
+          <tr>
+            <th>Exception</th>
+            <th>Condition</th>
+          </tr>
+        </thead>
+        <tbody>
+          {signature.raises.map((value) => (
+            <tr>
+              <td data-label="Type">
+                <code>{value.type}</code>
+              </td>
+              <td data-label="Condition">
+                <Prose text={value.description} sourceDocstring />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    )
+  }
+</div>

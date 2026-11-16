@@ -23,8 +23,8 @@ render: ## Build static HTML and search into docs/starlight/dist/.
 	npm --prefix $(DOCS) run build
 
 check-python: ## Check the static publisher and Evidence tooling.
-	uv run --project docs ruff format --check --config docs/pyproject.toml docs/publish.py docs/tests evidence
-	uv run --project docs ruff check --config docs/pyproject.toml docs/publish.py docs/tests evidence
+	uv run --project docs ruff format --check --config docs/pyproject.toml docs/publish.py docs/api.py docs/tests evidence
+	uv run --project docs ruff check --config docs/pyproject.toml docs/publish.py docs/api.py docs/tests evidence
 	uv run --project docs pytest -c docs/pyproject.toml docs/tests evidence/tests
 
 check: check-python ## Check documentation formatting, types, and static contracts.

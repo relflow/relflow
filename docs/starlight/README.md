@@ -590,3 +590,19 @@ Before handing off changes, run the type check and production build, then check
 links, search, copying, narrow screens, and both themes. The root publisher owns
 hosted version paths and trusted Evidence selection. There are no compatibility
 routes.
+
+## API reference
+
+The API map and dedicated symbol pages read the checked-out Python source on
+each build. The locked `griffe` dependency in `docs/pyproject.toml` performs
+static analysis with runtime inspection disabled. No SDK or training dependency
+is installed or imported. Run `make prepare` before the first build.
+
+`src/data/api-map.ts` defines only navigation choices: public names, grouping,
+order, guide links, and optional dependency labels. `docs/api.py` extracts
+signatures, overloads, inherited fields, defaults, type hints, and docstrings.
+`src/api/reference.ts` supplies those definitions to the Astro renderers. Change
+API wording in the corresponding Python docstring, not in the site catalog.
+Source links use the exact documentation checkout revision; external dependency
+re-exports link to their upstream reference. `RELFLOW_DOCS_PYTHON` can select an
+alternate isolated docs interpreter.

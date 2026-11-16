@@ -4,7 +4,7 @@ import type { EvidenceEntry } from '../evidence/data';
 import { evidenceEntries, selection } from '../evidence/data';
 import { experimentURL, formatValue, recordDate, status } from '../evidence/presentation';
 import EvidenceMetrics from './EvidenceMetrics.astro';
-import EvidenceProse from './EvidenceProse.astro';
+import Prose from './Prose.astro';
 import JsonRecord from './JsonRecord.astro';
 import EvidenceComparison from './EvidenceComparison.astro';
 import EvidenceTypes from './EvidenceTypes.astro';
@@ -61,9 +61,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
           {selection.mode === 'snapshot' && <span>Archived snapshot</span>}
           <>
             <span>{run.mode} run</span>
-            <span>{run.accelerator.toUpperCase()}</span>
           </>
-          <span>Seed {run.seed}</span>
         </p>
       ) : (
         <p class="record-context">
@@ -85,10 +83,10 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
     {
       hasSource ? (
         <>
-          <EvidenceProse text={modeling(entry)} />
+          <Prose text={modeling(entry)} />
           <details class="illustrative-record">
             <summary>See an illustrative record</summary>
-            <EvidenceProse text={entry.sections.example} />
+            <Prose text={entry.sections.example} />
             {entry.diagram.alt && <p class="scope-note">{entry.diagram.alt}</p>}
           </details>
         </>
@@ -253,10 +251,10 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
         {
           hasSource && (
             <>
-              {entry.sections.intro && <EvidenceProse text={entry.sections.intro} />}
+              {entry.sections.intro && <Prose text={entry.sections.intro} />}
               <h3>Complete comparison framing</h3>
-              <EvidenceProse text={entry.sections.comparison} />
-              <EvidenceProse text={entry.sections.method} />
+              <Prose text={entry.sections.comparison} />
+              <Prose text={entry.sections.method} />
             </>
           )
         }
@@ -268,7 +266,7 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
                 This is source commentary at <code>{entry.sourceRevision.slice(0, 7)}</code>. The
                 current outcome and measurements above are calculated from the selected CI record.
               </p>
-              <EvidenceProse text={entry.sections.result} />
+              <Prose text={entry.sections.result} />
             </details>
           )
         }
@@ -277,6 +275,12 @@ const reproduce = `uv run --project docs --with /path/to/matching-relflow.whl py
             <>
               <h3>Execution settings</h3>
               <dl class="execution-settings">
+                <div>
+                  <>
+                    <dt>Accelerator</dt>
+                    <dd>{run.accelerator.toUpperCase()}</dd>
+                  </>
+                </div>
                 <div>
                   <>
                     <dt>Seed</dt>

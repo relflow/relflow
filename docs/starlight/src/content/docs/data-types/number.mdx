@@ -3,6 +3,7 @@ title: Number
 description: Represent numeric measurements and predict values in their original units.
 ---
 
+import TypeChoice from '../../../components/TypeChoice.astro';
 import DataTypePage from '../../../components/DataTypePage.astro';
 import LeafEvidence from '../../../components/LeafEvidence.astro';
 import ValueTree from '../../../components/ValueTree.astro';
@@ -11,6 +12,8 @@ import { outputs } from '../../../datatypes/predictions';
 Use `rf.Number` for a measurement whose magnitude matters: an amount, count,
 distance, or elapsed time. It learns from the supplied numbers and manages its
 own numeric normalization.
+
+<TypeChoice group="numeric" />
 
 <DataTypePage name="Number">
 
@@ -86,7 +89,7 @@ Error metrics are reported in the original units.
 | `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
 | `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
 
-### Request Methods
+### Request methods
 
 Inspect the training normalization of a Number field.
 

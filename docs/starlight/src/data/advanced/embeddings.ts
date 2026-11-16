@@ -14,7 +14,7 @@ export const embeddings: Concept = {
   id: 'embeddings', title: 'Embeddings',
   description: 'Export learned representations while preserving node identity, repeated-parent coordinates, and model provenance.',
   intro: [
-    'An embedding is a model representation of the supplied context. embed=True requests that representation in prediction output; the model learns through its configured training objectives. Enabling output on an untrained model does not produce an already learned representation.',
+    'Use embed=True to export learned representations from a fitted model. Export context for a complete observation or a particular branch, then evaluate those vectors for your downstream task.',
     'Representations are returned separately from target predictions. Use them for a downstream experiment such as retrieval or another model, and evaluate that use explicitly: a useful supervised target does not automatically establish useful similarity distances.',
   ],
   examples: scenarios.map((scenario) => ({

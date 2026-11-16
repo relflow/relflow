@@ -47,7 +47,7 @@ test('all leaf references follow Number, show standalone output trees, and repor
       expect(response?.status()).toBe(200);
       const main = page.locator('main[data-pagefind-body]');
       await expect(main.locator('h2')).toHaveText(headings);
-      for (const title of ['Predictions', 'Request Methods', 'Footguns', 'Related types'])
+      for (const title of ['Predictions', 'Request methods', 'Footguns', 'Related types'])
         await expect(main.getByRole('heading', { level: 3, name: title, exact: true })).toHaveCount(
           1,
         );

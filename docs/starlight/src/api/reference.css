@@ -1,0 +1,63 @@
+.api-reference .api-table {
+  width: 100%;
+  table-layout: fixed;
+  margin-block: 1.25rem;
+  font-size: 0.83rem;
+}
+.api-reference .api-table caption {
+  text-align: left;
+  color: var(--rf-ink);
+  font-weight: 650;
+  margin-bottom: 0.6rem;
+}
+.api-reference .api-table :is(th, td) {
+  padding: 0.65rem;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.api-reference .api-table code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.api-reference .api-table small {
+  display: block;
+  color: var(--rf-muted);
+  font-size: 0.7rem;
+  font-weight: 400;
+  margin-top: 0.25rem;
+}
+.api-reference .api-fields th:first-child,
+.api-reference .api-fields th:last-child {
+  width: 23%;
+}
+@media (max-width: 600px) {
+  .api-reference .api-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .api-reference .api-table,
+  .api-reference .api-table :is(tbody, tr, th, td) {
+    display: block;
+    width: auto;
+  }
+  .api-reference .api-table tbody tr {
+    border-bottom: 1px solid var(--rf-border);
+  }
+  .api-reference .api-table :is(th, td) {
+    border: 0;
+  }
+  .api-reference .api-table td:empty {
+    display: none;
+  }
+  .api-reference .api-table td::before {
+    content: attr(data-label);
+    display: block;
+    color: var(--rf-muted);
+    font-size: 0.7rem;
+    margin-bottom: 0.25rem;
+  }
+}

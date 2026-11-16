@@ -49,7 +49,7 @@ const lessons: Record<CaseId, { title: string; description: string; fields: stri
 
 export const dataTypes: Concept = {
   id: 'data-types',
-  title: 'Leaf Types',
+  title: 'Leaf types',
   description: 'See how typed leaves bind to values and define their representation and prediction roles.',
   intro: [],
   principles: [

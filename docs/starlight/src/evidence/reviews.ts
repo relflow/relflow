@@ -300,7 +300,7 @@ export const reviews: Record<string, Review> = {
     note: 'All five ranks are checked separately. With nine values, the quarter positions are observed items, so interpolated quantiles are not tested.',
   },
   P013: {
-    question: 'Can relflow recover a total from a Mean summary that includes count?',
+    question: 'Can relflow predict the total of repeated values?',
     modeling:
       'Repeat the same contribution one to six times. Ask a Mean branch, with item attention disabled, to predict both the average and total. Its averaged content is identical across repetition counts, but its additional count signal can distinguish them. The primary comparison measures total error against a constant predictor.',
     comparison: {
@@ -958,7 +958,7 @@ export const reviews: Record<string, Review> = {
     note: 'The flattened-data reference is an information limit, not a competing trained model. This tests sensitivity to these session partitions.',
   },
   P041: {
-    question: 'Can a count-augmented Mean summary retain different totals?',
+    question: 'Can relflow distinguish lists with the same average but different totals?',
     modeling:
       'Repeat the same amount one to six times and hide both the average and total. Disable item attention and summarize the collection with Mean, which also carries a count signal. Compare the learned total with a constant predictor on held-out records.',
     comparison: {

@@ -1,5 +1,5 @@
 ---
-title: Leaf Types
+title: Leaf types
 description: Understand how typed leaves bind to source data, represent values, and define prediction and learning behavior.
 ---
 
@@ -13,17 +13,17 @@ All input data for relflow models is represented as the leaf of a model tree. As
 - Raw data, in its nominal state, is passed to the leaf
 - A vector of standard dimensionality (as determined by the model’s initialization) is emitted by the leaf and passed along the leaf’s heritage path.
 
-## State vs Content
+## State vs content
 
-Every leaf promises to emit one vector per observation, an embedding which is learned to best represent the ingressed data. The standard relflow data leafs draw a distinction between two aspects of the observed data: state, and content.
+Every leaf promises to emit one vector per observation, an embedding which is learned to best represent the ingressed data. The standard relflow data leaves draw a distinction between two aspects of the observed data: state, and content.
 
 The state of a data observation must be one of five distinct values, given in the below table:
 
 | State | Meaning |
 | --- | --- |
 | <StateToken state="valued" /> | The data observed does exist, and is available for modeling purposes |
-| <StateToken state="null" /> | The data observed does not exist (is an instance of `None`) due to missingness |
-| <StateToken state="padded" /> | The data observed does not exist. |
+| <StateToken state="null" /> | The observation has no value for this field (`None`/null). |
+| <StateToken state="padded" /> | No collection item exists at this position; padding aligns differently sized collections. |
 | <StateToken state="masked" /> | The data observed does exist, but is intentionally hidden for model training / reconstruction |
 | <StateToken state="other" /> | The data observed is not `None`, but it also is not of a usable value for modeling (this may be a `np.NaN` value for numerical representation, or a Vector with infinite values) |
 
@@ -32,7 +32,7 @@ This state value is incorporated into the same embedding which a relflow leaf em
 1. A discrete `state` value, penalized by cross-entropy
 2. A representation of the original content, penalized with unique loss functions for each leaf.
 
-## Registry Contracts
+## Registry contracts
 
 The registry defines the following components. Output and Write are optional.
 
@@ -40,9 +40,9 @@ The registry defines the following components. Output and Write are optional.
 
 These signatures show the underlying interfaces. Implementations use relflow’s extension base classes and registration decorators.
 
-We defer discussion on how users may hook into, overwrite certain components for existing data types, and even create unique data types with custom handling, to the [BYOD section](/advanced/custom-data-types/).
+We defer discussion on how users may hook into, overwrite certain components for existing data types, and even create unique data types with custom handling, to the [Custom leaf types](/advanced/custom-data-types/).
 
-## Leaf Addresses
+## Leaf addresses
 
 The heritage path of a data leaf describes where each leaf exists in relation to all, if any, parent branches. This heritage path is represented in a 1:1 manner with standard file-path addresses, where the root directory of a file-path represents a model object.
 

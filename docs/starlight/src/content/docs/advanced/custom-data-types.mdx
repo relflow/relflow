@@ -32,7 +32,7 @@ names do not select their roles.
 | Maintain learned field state | `observe`, `learn`, and `bind` separate observations, model-owned updates, and worker-local bindings. |
 | Own external resources | The embedder’s `context`, optional decoder `attach`, and extension `callbacks` coordinate field resources and their lifecycle. |
 
-An input-only type can use the first two capabilities. It does not acquire a
+An input-only type defines its request and provides tensorization and an embedder. It does not acquire a
 supervised decoder simply because its request accepts the common `mask` and
 `embed` options. relflow checks the requested capabilities when constructing or
 mutating the graph. The [extension contract tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L223)
@@ -256,8 +256,7 @@ existing model on your own split.
 The class-schema application follows the
 [0.5.0 schema API](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/root.py#L113).
 The registration, tensorfield, and embedder interfaces use that same source
-revision. Code is a static illustration; site builds do not import the extension
-or train this model.
+revision.
 
 ## Add supervised outputs deliberately
 

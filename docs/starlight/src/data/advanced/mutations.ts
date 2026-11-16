@@ -90,7 +90,7 @@ export const mutations: Concept = {
   title: 'Mutations',
   description: 'Select, update, extend, delete, reset, and temporarily override a model schema while rebuilding its runtime graph.',
   intro: [
-    'A model schema can evolve after instantiation. Mutation methods select nodes in the resolved tree, apply an intentional change, and synchronize the runtime graph with that new schema.',
+    'Enterprise teams can start from a shared pretrained model and create versions for their own data and prediction tasks. Mutations let each team add targets or use a different subset of inputs while retaining compatible learned state.',
     'These examples start with an instance of the selected case’s model. Make edits between complete operations: mutation is prohibited during active forward, inference, or Lightning Trainer loops. Each block is an independent example, rather than a sequence of edits to one shared instance.',
   ],
   principles: [

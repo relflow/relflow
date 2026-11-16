@@ -70,11 +70,17 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   summary on the page link itself, without extra icons or controls.
   Keep native link navigation, Escape dismissal, movement into the popup,
   and both themes working. Descriptions provide native title hints without JavaScript.
-- The standalone API map groups public names and common model methods by task.
-  Its curated catalog is `src/data/api-map.ts`; each entry links to an exact
-  source definition and an existing guide when available. Preserve the documented
-  source scopes, optional serving requirements, search/filter URLs, entry anchors,
-  and full content without JavaScript. Never import the Python runtime to build it.
+- The API map groups public names and model methods by task. Its catalog in
+  `src/data/api-map.ts` owns navigation choices only: names, order, guide links,
+  and optional-dependency labels. `docs/api.py` uses locked Griffe static analysis
+  to read checked-out Python definitions, re-exports, inherited fields, signatures,
+  defaults, annotations, and docstrings. `src/api/reference.ts` runs extraction
+  once per build and supplies the map and dedicated `/api/<symbol>/` pages.
+  Never copy API prose or signatures into this catalog or import the SDK to
+  generate them. Correct API documentation at its Python definition. External
+  re-exports link upstream rather than guessing dependency signatures. Preserve
+  exact source links, map anchors, filter URLs, no-JavaScript reading, and serving
+  extra labels. Each docs build reflects that checkout's source.
 - The homepage highlights six use cases using `DataViews` with canonical
   datasets from `src/data/datasets.ts` and schemas from `src/data/use-cases.json`.
   Each use case offers Data, Model, and Schema. Keep all six choices visible,
@@ -202,12 +208,12 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   a short introduction followed by `Input values`,
   `Standardization and processor pipelines`, `How is this leaf trained?`,
   `Leaf-specific parameters`, `Errors raised`, and `Relevant evidence`, in that
-  exact order. Keep `Predictions` under training, `Request Methods` under
+  exact order. Keep `Predictions` under training, `Request methods` under
   parameters, `Footguns` under errors, and `Related types` under evidence as
   level-three subsections. Options tables use
   `Option`, `Default`, and `Purpose` columns.
   Explain when to choose the type, accepted values and missingness, output
-  semantics, and verified evidence scope. The type-selection overview is separate.
+  semantics, and verified evidence scope. Short type comparisons belong within the existing leaf pages; do not add collection overview pages.
   Use `DataTypePage` with the leaf name; keep the six reference sections
   as ordinary Markdown in its body. Predictions retains the authored output
   explanation and adds a standalone `ValueTree` fed by
@@ -221,7 +227,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   Request methods tables use `Method`, `Returns`, and `Purpose`, followed by
   short examples calling `rf.Type.method(model, "/field")` with absolute paths.
   Include explicit Python type annotations on result assignments in every
-  Request Methods snippet, matching the helper contract and example label types.
+  Request methods snippet, matching the helper contract and example label types.
   Describe only intended type-specific helpers; exclude validation hooks and
   inherited schema machinery. State explicitly when a type has no such helpers.
   Explain each type's input representation, decoder/readout, and actual content

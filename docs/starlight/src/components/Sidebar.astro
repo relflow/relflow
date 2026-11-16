@@ -25,6 +25,10 @@ function summarize(entries: Entry[]): Entry[] {
       new URL(entry.href, Astro.url).pathname === `${base}/evidence/` &&
       Astro.url.pathname.startsWith(`${base}/evidence/`) &&
       !entry.isCurrent;
+    const inApi =
+      new URL(entry.href, Astro.url).pathname === `${base}/api-map/` &&
+      Astro.url.pathname.startsWith(`${base}/api/`) &&
+      !entry.isCurrent;
     return {
       ...entry,
       attrs: {
@@ -32,7 +36,7 @@ function summarize(entries: Entry[]): Entry[] {
         'data-sidebar-summary': description,
         'data-sidebar-label': entry.label,
         title: description,
-        ...(inEvidence ? { 'aria-current': 'location' as const } : {}),
+        ...(inEvidence || inApi ? { 'aria-current': 'location' as const } : {}),
       },
     };
   });

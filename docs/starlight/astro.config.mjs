@@ -37,7 +37,11 @@ export default defineConfig({
             },
           }
         : {}),
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/relflow/relflow' }],
+      social: [
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/relflow/relflow' },
+        { icon: 'discord', label: 'Discord', href: 'https://discord.gg/DVyZUkvTFA' },
+        { icon: 'linkedin', label: 'LinkedIn', href: 'https://www.linkedin.com/company/relflow' },
+      ],
       customCss: ['./src/styles/site.css', './src/code/notes.css'],
       sidebar: [
         {
@@ -46,23 +50,23 @@ export default defineConfig({
             { label: 'What is relflow?', slug: '' },
             { label: 'Featureless modeling', slug: 'featureless' },
             { label: 'Modular modeling', slug: 'modular' },
-            { label: 'Model Scaling', slug: 'scaling' },
+            { label: 'Model scaling', slug: 'scaling' },
             { label: 'Installation', slug: 'installation' },
           ],
         },
         {
-          label: 'Core Concepts',
+          label: 'Core concepts',
           items: [
             { label: 'Model trees', slug: 'concepts/models' },
             { label: 'Context branches', slug: 'concepts/branches' },
-            { label: 'Leaf Types', slug: 'concepts/data-types' },
+            { label: 'Leaf types', slug: 'concepts/data-types' },
             { label: 'Data flow', slug: 'concepts/data-flow' },
             { label: 'Targets & masking', slug: 'concepts/targets' },
             { label: 'Runtime', slug: 'concepts/runtime' },
           ],
         },
         {
-          label: 'Leaf Types',
+          label: 'Leaf types',
           items: [
             {
               label: 'Continuous data',
@@ -102,7 +106,7 @@ export default defineConfig({
           ],
         },
         {
-          label: 'Advanced Usage',
+          label: 'Advanced usage',
           collapsed: true,
           items: [
             { label: 'Overview', slug: 'advanced' },

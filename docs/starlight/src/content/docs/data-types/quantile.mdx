@@ -3,6 +3,7 @@ title: Quantile
 description: Represent a numeric scalar by its position within the training distribution.
 ---
 
+import TypeChoice from '../../../components/TypeChoice.astro';
 import DataTypePage from '../../../components/DataTypePage.astro';
 import LeafEvidence from '../../../components/LeafEvidence.astro';
 import ValueTree from '../../../components/ValueTree.astro';
@@ -11,6 +12,8 @@ import { outputs } from '../../../datatypes/predictions';
 Use `rf.Quantile` when relative position in a numeric distribution is useful.
 The field learns an approximate training distribution and represents each
 value by its percentile within it.
+
+<TypeChoice group="numeric" />
 
 <DataTypePage name="Quantile">
 
@@ -80,7 +83,7 @@ Choose Number when predicting outside the observed range is part of your task.
 Changing the objective changes the penalty in percentile space. Reported numeric
 error metrics still use the original units. Quantile has no `jitter` option.
 
-### Request Methods
+### Request methods
 
 Inspect the training distribution of a Quantile field.
 

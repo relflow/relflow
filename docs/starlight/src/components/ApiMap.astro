@@ -1,5 +1,5 @@
 ---
-import { apiSections } from '../data/api-map';
+import { apiSections } from '../api/reference';
 
 const total = apiSections.reduce((sum, section) => sum + section.entries.length, 0);
 const workflow = [
@@ -83,7 +83,7 @@ function entryId(name: string) {
               >
                 <div class="api-symbol">
                   <h3>
-                    <a href={`#${entryId(entry.name)}`}>
+                    <a href={entry.href}>
                       <code>{entry.name}</code>
                     </a>
                   </h3>
@@ -96,7 +96,7 @@ function entryId(name: string) {
                   <p>{entry.description}</p>
                   <div class="api-entry-links">
                     {entry.guide && <a href={entry.guide}>Guide</a>}
-                    <a href={entry.source} aria-label={`Source for ${entry.name}`}>
+                    <a href={entry.sourceUrl} aria-label={`Source for ${entry.name}`}>
                       Source ↗
                     </a>
                   </div>

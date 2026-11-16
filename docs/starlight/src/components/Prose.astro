@@ -4,8 +4,9 @@ import { createSatteriMarkdownProcessor } from '@astrojs/markdown-satteri';
 
 interface Props {
   text: string;
+  sourceDocstring?: boolean;
 }
-const { text } = Astro.props;
+const { text, sourceDocstring = false } = Astro.props;
 const processor = await createSatteriMarkdownProcessor({ syntaxHighlight: false });
 const parts = text.split(/(^```[^\n]*\n[\s\S]*?^```[ \t]*$)/gm).filter((part) => part.trim());
 const blocks = await Promise.all(
@@ -13,12 +14,19 @@ const blocks = await Promise.all(
     const fence = part.match(/^```([^\n]*)\n([\s\S]*?)^```[ \t]*$/m);
     if (fence)
       return { code: fence[2].replace(/\n$/, ''), lang: fence[1].trim() || 'text', html: '' };
-    return { code: '', lang: '', html: (await processor.render(part)).code };
+    const prose = sourceDocstring
+      ? part
+          .replace(/``([^`\n]+)``/g, '`$1`')
+          .split(/(`[^`]*`)/g)
+          .map((text, index) => (index % 2 ? text : text.replace(/\bRelFlow\b/g, 'relflow')))
+          .join('')
+      : part;
+    return { code: '', lang: '', html: (await processor.render(prose)).code };
   }),
 );
 ---
 
-<div class="evidence-prose">
+<div class="reference-prose">
   {
     blocks.map((block) =>
       block.lang ? (
@@ -31,43 +39,43 @@ const blocks = await Promise.all(
 </div>
 
 <style>
-  .evidence-prose {
+  .reference-prose {
     font-size: 0.92rem;
     line-height: 1.8;
     overflow-wrap: anywhere;
   }
-  .evidence-prose :global(p) {
+  .reference-prose :global(p) {
     margin: 0.8rem 0;
   }
-  .evidence-prose :global(:is(h3, h4)) {
+  .reference-prose :global(:is(h3, h4)) {
     margin: 1.4rem 0 0.6rem;
     color: var(--rf-ink);
     line-height: 1.45;
   }
-  .evidence-prose :global(h3) {
+  .reference-prose :global(h3) {
     font-size: 1.08rem;
   }
-  .evidence-prose :global(h4) {
+  .reference-prose :global(h4) {
     font-size: 0.95rem;
   }
-  .evidence-prose :global(:is(ul, ol)) {
+  .reference-prose :global(:is(ul, ol)) {
     padding-left: 1.5rem;
     margin-block: 0.8rem;
   }
-  .evidence-prose :global(li) {
+  .reference-prose :global(li) {
     margin-block: 0.35rem;
   }
-  .evidence-prose :global(a) {
+  .reference-prose :global(a) {
     color: var(--sl-color-text-accent);
     text-underline-offset: 0.2em;
   }
-  .evidence-prose :global(.expressive-code) {
+  .reference-prose :global(.expressive-code) {
     margin-block: 1rem;
   }
-  .evidence-prose :global(code:not(pre code)) {
+  .reference-prose :global(code:not(pre code)) {
     font-size: 0.88em;
   }
-  .evidence-prose :global(table) {
+  .reference-prose :global(table) {
     display: block;
     max-width: 100%;
     overflow-x: auto;

@@ -7,13 +7,12 @@ import DataViews from '../../../components/DataViews.astro';
 import { repeatPurchaseSchema } from '../../../data/schema-examples';
 import { repeatPurchase } from '../../../data/observations';
 
-Customize how observations reach the model while preserving their structure,
-split ownership, and encoding state. Usually the right extension point is a
-source or an `IterableDataset`; a complete Lightning data module is useful when
-you also need to replace batching and loader scheduling.
+Connect a source that the built-in loaders do not already handle. Use
+`rf.CustomDataModule` for Python records, or `rf.ArrowDataModule` when your
+connector already returns Arrow. A complete Lightning data module is useful
+when you also need to replace batching and loader scheduling.
 
-The examples use the 0.5.0 API and application-supplied files. They do not
-execute during the documentation build.
+The examples use the 0.5.0 API and application-supplied files.
 
 ## Choose the boundary you need
 

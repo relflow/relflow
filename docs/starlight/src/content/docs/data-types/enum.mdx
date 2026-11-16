@@ -3,6 +3,7 @@ title: Enum
 description: Declare the complete set of allowed scalar labels in your schema.
 ---
 
+import TypeChoice from '../../../components/TypeChoice.astro';
 import DataTypePage from '../../../components/DataTypePage.astro';
 import LeafEvidence from '../../../components/LeafEvidence.astro';
 import ValueTree from '../../../components/ValueTree.astro';
@@ -11,6 +12,8 @@ import { outputs } from '../../../datatypes/predictions';
 Use `rf.Enum` when the allowed labels are part of the data contract:
 workflow states, priority levels, or a fixed set of outcomes. Declare those
 labels positionally.
+
+<TypeChoice group="labels" />
 
 <DataTypePage name="Enum">
 
@@ -76,7 +79,7 @@ Unpack a reusable label declaration with `rf.Enum(*labels)`.  `topk=[3]` adds up
 values. Folded labels must remain unique, and predictions use their folded form.
 Input label augmentation uses `p_unavailable`, which defaults to `0.01`.
 
-### Request Methods
+### Request methods
 
 Use the field's absolute schema address to inspect its declared classes and
 observed training exposure. For a trained model with an Enum field at `/destination`:

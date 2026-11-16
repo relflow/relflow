@@ -62,6 +62,24 @@
       "htmlKiB": 185,
       "htmlGzipKiB": 25,
       "elements": 2100
+    },
+    {
+      "route": "/api/rf-model/",
+      "htmlKiB": 150,
+      "htmlGzipKiB": 20,
+      "elements": 2100
+    },
+    {
+      "route": "/api/rf-number/",
+      "htmlKiB": 100,
+      "htmlGzipKiB": 18,
+      "elements": 1250
+    },
+    {
+      "route": "/api/model-fit/",
+      "htmlKiB": 100,
+      "htmlGzipKiB": 18,
+      "elements": 1250
     }
   ]
 }

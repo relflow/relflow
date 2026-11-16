@@ -1,0 +1,68 @@
+---
+interface Props {
+  group: 'numeric' | 'labels';
+}
+
+const choices = {
+  numeric: [
+    {
+      name: 'Number',
+      slug: 'number',
+      use: 'Numeric magnitude and distances matter. Values retain their original units.',
+    },
+    {
+      name: 'Quantile',
+      slug: 'quantile',
+      use: 'Position within the training distribution matters. Predicted values stay within its learned range.',
+    },
+  ],
+  labels: [
+    {
+      name: 'Category',
+      slug: 'category',
+      use: 'Labels come from training data and new labels can arrive during fitting.',
+    },
+    {
+      name: 'Enum',
+      slug: 'enum',
+      use: 'The allowed labels are declared in advance. Other non-null labels are rejected.',
+    },
+  ],
+};
+---
+
+<table class="type-choice">
+  <caption>{Astro.props.group === 'numeric' ? 'Number or Quantile?' : 'Category or Enum?'}</caption>
+  <thead>
+    <tr>
+      <th scope="col">Leaf type</th>
+      <th scope="col">Choose it when</th>
+    </tr>
+  </thead>
+  <tbody>
+    {
+      choices[Astro.props.group].map((choice) => (
+        <tr>
+          <th scope="row">
+            <a href={`/data-types/${choice.slug}/`}>{choice.name}</a>
+          </th>
+          <td>{choice.use}</td>
+        </tr>
+      ))
+    }
+  </tbody>
+</table>
+
+<style>
+  .type-choice {
+    width: 100%;
+    margin-block: 1.25rem;
+  }
+  caption {
+    text-align: start;
+    color: var(--rf-ink);
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+</style>
