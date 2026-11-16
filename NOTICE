@@ -1,0 +1,17 @@
+relflow
+Copyright 2024-2026 Grantham Taylor and Reid Taylor
+
+Public relflow releases beginning with 0.5.0 are licensed under the GNU Affero
+General Public License, version 3 only (AGPL-3.0-only). See LICENSE.
+
+Unless a file states otherwise, this covers project-authored source code,
+documentation, examples, schema machinery, cache implementations, and preset
+definitions. Third-party components retain their own licenses and notices.
+
+Previously granted Apache-2.0 permissions remain effective for code made
+available under those terms, including earlier development snapshots.
+
+Additional licensing permissions require written approval from both Grantham
+Taylor and Reid Taylor and the necessary rights for all included contributions.
+This notice grants no additional permissions and does not establish an assignment
+or contributor agreement.
