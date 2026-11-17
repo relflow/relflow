@@ -12,6 +12,7 @@ rf.Number(note="Transaction amount")  # rejected
 rf.Duration(query=("start", "end"), granularity="months")  # rejected
 rf.Duration(query="at", start=123)  # rejected
 rf.Duration(query=("start", "end"), pattern=7)  # rejected
+rf.Duration(query="at", shift="1")  # rejected
 rf.Quantile(compression="large")  # rejected
 rf.Quantile(n_bands="eight")  # rejected
 rf.Quantile(objective="l2")  # rejected

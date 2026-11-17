@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date, datetime
-from typing import TYPE_CHECKING, Literal, Self, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Self, Unpack, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -11,7 +12,7 @@ import pydantic
 
 from relflow.data.query import Projection
 from relflow.structs.enums import Component
-from relflow.structs.tree import Address, FieldOptions
+from relflow.structs.tree import Address, FieldOptions, Operand
 from relflow.tensorfields.base import Extension, RequestBase
 from relflow.tensorfields.extensions import number
 from relflow.tensorfields.shared.jitter import Jitter
@@ -30,6 +31,11 @@ class Request(number.Numeric):
     Two configured timestamps produce a constant duration. Ancestor references
     begin with ``../`` and broadcast within explicit Branch geometry.
 
+    ``shift=k`` instead reads one timestamp source and measures from the record
+    ``k`` positions earlier in the same Branch collection, so ``shift=1`` gives
+    the gap since the previous record. Records keep their source order and the
+    lookup precedes cropping; a record without that predecessor is absent.
+
     ``pattern`` uses the same format syntax as Period. Zone-aware endpoints
     describe instants, and mixed aware/naive endpoints are rejected. Inputs
     never read the wall clock. Months and years have no fixed elapsed length
@@ -41,6 +47,7 @@ class Request(number.Numeric):
     end: datetime | date | str | None = None
     granularity: Literal["seconds", "minutes", "hours", "days", "weeks"] = "days"
     pattern: str | None = None
+    shift: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] | None = None
 
     if TYPE_CHECKING:
 
@@ -51,6 +58,7 @@ class Request(number.Numeric):
             end: datetime | date | str | None = None,
             granularity: Literal["seconds", "minutes", "hours", "days", "weeks"] = "days",
             pattern: str | None = None,
+            shift: int | None = None,
             jitter: Jitter = ...,
             n_bands: int = 8,
             offset: int = 4,
@@ -101,6 +109,13 @@ class Request(number.Numeric):
     @pydantic.model_validator(mode="after")
     def check_endpoints(self) -> Self:
         constants = int(self.start is not None) + int(self.end is not None)
+        if self.shift is not None:
+            if isinstance(self.query, tuple) or constants:
+                raise ValueError(
+                    "Duration with shift measures one timestamp query against an earlier record; "
+                    "remove the configured start or end and use a single query"
+                )
+            return self
         if self.query is None and constants == 2:
             self.query = ()
         if isinstance(self.query, tuple):
@@ -113,6 +128,14 @@ class Request(number.Numeric):
         if constants != 1:
             raise ValueError("Duration with one input needs exactly one configured start or end timestamp")
         return self
+
+    def operands(self) -> tuple[Operand, ...]:
+        """With ``shift``, read the earlier record as the start and the current record as the end."""
+        operands = super().operands()
+        if self.shift is None:
+            return operands
+        (current,) = operands
+        return (replace(current, shift=self.shift), current)
 
 
 @duration.register(Component.derive)

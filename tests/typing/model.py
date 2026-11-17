@@ -27,6 +27,7 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
         amount=rf.Number,
         age=rf.Duration(query=("created_at", "observed_at"), granularity="hours"),
         since=rf.Duration(query="observed_at", start="2026-01-01", objective="huber"),
+        visits=rf.Branch(length=8, gap=rf.Duration(query="observed_at", shift=1, granularity="seconds")),
         label=rf.Category(mask=True),
     )
     assert_type(model.compile(encoders=True, pools=False), Classifier)
