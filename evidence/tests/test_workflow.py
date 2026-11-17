@@ -110,7 +110,8 @@ def test_suite_revision_cannot_replace_the_trusted_host_executor():
     checkouts = {step["with"]["path"]: step["with"] for step in STEPS if step.get("uses") == "actions/checkout@v4"}
     executor, suite = checkouts["executor"], checkouts["suite"]
     assert executor["repository"] == suite["repository"] == "relflow/relflow"
-    assert re.fullmatch(r"[0-9a-f]{40}", executor["ref"])
+    assert executor["ref"] == "${{ env.EVIDENCE_EXECUTOR }}"
+    assert re.fullmatch(r"[0-9a-f]{40}", CONFIG["env"]["EVIDENCE_EXECUTOR"])
     assert suite["ref"] == "${{ inputs.suite_ref }}"
     assert executor["persist-credentials"] is suite["persist-credentials"] is False
 
@@ -220,6 +221,8 @@ def test_every_job_checks_out_the_same_immutable_executor(job):
         if step.get("uses") == "actions/checkout@v4" and step["with"]["path"] == "executor"
     ]
     assert len(checkouts) == 1
+    assert "EVIDENCE_EXECUTOR" not in CONFIG["jobs"][job].get("env", {})
+    assert all("EVIDENCE_EXECUTOR" not in step.get("env", {}) for step in CONFIG["jobs"][job]["steps"])
     assert checkouts[0]["ref"] == "${{ env.EVIDENCE_EXECUTOR }}"
     assert re.fullmatch(r"[0-9a-f]{40}", CONFIG["env"]["EVIDENCE_EXECUTOR"])
     assert checkouts[0]["persist-credentials"] is False
@@ -228,7 +231,7 @@ def test_every_job_checks_out_the_same_immutable_executor(job):
 
 def test_consumer_resolves_inputs_with_the_same_immutable_helper_it_executes():
     consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
-    helper = consumer["jobs"]["evidence"]["uses"].rsplit("@", 1)[1]
+    helper = consumer["jobs"]["run"]["uses"].rsplit("@", 1)[1]
     resolver = next(
         step["with"]["ref"]
         for step in consumer["jobs"]["wheels"]["steps"]
@@ -262,7 +265,7 @@ def test_wheel_preparation_records_the_supported_baseline_before_building(histor
     consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
     steps = consumer["jobs"]["wheels"]["steps"]
     resolver = next(step["with"]["ref"] for step in steps if step.get("with", {}).get("path") == "executor")
-    assert resolver == consumer["jobs"]["evidence"]["uses"].rsplit("@", 1)[1]
+    assert resolver == consumer["jobs"]["run"]["uses"].rsplit("@", 1)[1]
     build = next(step["run"] for step in steps if step.get("id") == "inputs")
     assert build.index("comparison(") < build.index("worktree add") < build.index("uv build")
     assert build.index("scripts/release.py licensing") < build.index("uv build")
