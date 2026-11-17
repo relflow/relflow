@@ -10,7 +10,8 @@ from relflow.tensorfields.base import TENSORFIELDS
 
 
 def model() -> rf.Model:
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         context=rf.Number,
@@ -61,7 +62,8 @@ def descent():
 
 def contrastive(*, label: bool = False, weight: float = 1.0) -> rf.Model:
     fields = {"label": rf.Boolean(mask=True)} if label else {}
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         **fields,
@@ -122,7 +124,8 @@ def test_rank_without_contrastive_rows_still_returns_an_anchored_loss(monkeypatc
     ids=["idle", "coordinates", "bidirectional"],
 )
 def test_contrastive_runs_without_a_mixer_under_coordinates_and_bidirectional(options):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         ett=rf.Branch.chronological(

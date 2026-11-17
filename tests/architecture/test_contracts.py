@@ -124,7 +124,8 @@ def test_forward_contract_rejects_content_without_state_shape_prefix() -> None:
 
 
 def test_forward_contract_allows_target_content_wider_than_input_content() -> None:
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         attention=None,
         history=rf.Series(n_dim=1),
@@ -141,7 +142,7 @@ def test_forward_contract_allows_target_content_wider_than_input_content() -> No
 
 
 def test_forward_contract_rejects_target_content_with_wrong_coordinate_shape() -> None:
-    model = rf.Model.xs(d_model=8, attention=None, items=rf.Branch(length=2, amount=rf.Number(mask=True)))
+    model = rf.Model(preset="small", d_model=8, attention=None, items=rf.Branch(length=2, amount=rf.Number(mask=True)))
     rows = [{"items": [{"amount": 1.0}, {"amount": 2.0}]}, {"items": [{"amount": 3.0}, {"amount": 4.0}]}]
     inputs = model.encode(arrow_table(rows), strata=Strata.train)
     field = inputs[Address("/items/amount")]
@@ -365,7 +366,8 @@ def test_contract_scope_cache_is_bounded_for_new_dataloaders() -> None:
 
 
 def test_forward_accepts_forecast_extent_up_to_capacity():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=4,
         events=rf.Branch(
@@ -384,8 +386,10 @@ def test_forward_accepts_forecast_extent_up_to_capacity():
 
 
 def test_geometry_views_must_match_the_parent_shape_and_be_non_negative() -> None:
-    model = rf.Model.xs(
-        d_model=8, history=rf.Branch(length=3, amount=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=2)))
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        history=rf.Branch(length=3, amount=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=2))),
     )
     inputs = model.encode(arrow_table([{"history": [{"amount": 1.0}] * 3}]), strata=Strata.train)
     geometry = inputs[Address()][Address("history")]

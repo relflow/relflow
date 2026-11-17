@@ -815,7 +815,8 @@ def test_padding_rows_stay_zero_after_the_gap_embedding():
 
 def test_contrastive_keeps_the_full_record_for_parent_and_decoders():
     def build(contrastive):
-        return rf.Model.xs(
+        return rf.Model(
+            preset="small",
             d_model=8,
             dropout=0.0,
             label=rf.Boolean(mask=True),
@@ -848,7 +849,8 @@ def test_contrastive_keeps_the_full_record_for_parent_and_decoders():
 )
 def test_time_index_survives_variable_width_unreduced_child(options):
     torch.manual_seed(0)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         embed=True,
         events=rf.Branch(
@@ -865,7 +867,8 @@ def test_time_index_survives_variable_width_unreduced_child(options):
 
 
 def contrastive_model(mask: float) -> rf.Model:
-    return rf.Model.xs(
+    return rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         ett=rf.Branch.chronological(

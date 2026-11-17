@@ -474,7 +474,7 @@ def test_vector_declares_stacked_and_takes_n_dim_from_a_tuple_query():
 
 def test_vector_tuple_query_round_trips_yaml_and_checkpoint(tmp_path):
     seed_everything(0, workers=True)
-    model = rf.Model.xs(d_model=8, load=rf.Vector(query=("a", "b")))
+    model = rf.Model(preset="small", d_model=8, load=rf.Vector(query=("a", "b")))
     path = tmp_path / "schema.yaml"
     path.write_text(yaml.safe_dump(model.schema.model_dump(mode="json")), encoding="utf-8")
     reloaded = Schema.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
@@ -484,7 +484,7 @@ def test_vector_tuple_query_round_trips_yaml_and_checkpoint(tmp_path):
 
 
 def test_vector_tuple_query_keeps_validity_per_channel():
-    model = rf.Model.xs(d_model=8, load=rf.Vector(query=("a", "b")), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, load=rf.Vector(query=("a", "b")), label=rf.Boolean(mask=True))
     rows = pa.table({"a": [1.0, None, float("nan"), float("nan"), None], "b": [2.0, 4.0, 5.0, float("inf"), None]})
     field = model.encode(rows, strata="predict")[rf.Address("/load")]
     assert field.state.reshape(-1).tolist() == [Tokens.valued, Tokens.valued, Tokens.valued, Tokens.other, Tokens.null]
@@ -497,7 +497,7 @@ def test_vector_tuple_query_keeps_validity_per_channel():
 
 def test_vector_tuple_embedder_reads_which_channels_are_missing():
     seed_everything(0, workers=True)
-    model = rf.Model.xs(d_model=8, load=rf.Vector(query=("a", "b")), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, load=rf.Vector(query=("a", "b")), label=rf.Boolean(mask=True))
     embedder = model.nodes[rf.Address("/load")].embedder
     assert embedder.linear[0].in_features == 4
     rows = pa.table({"a": [None, 0.0], "b": [4.0, 4.0]})
@@ -509,7 +509,7 @@ def test_vector_tuple_embedder_reads_which_channels_are_missing():
 
 
 def test_vector_single_query_keeps_its_parameters():
-    model = rf.Model.xs(d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
     assert model.nodes[rf.Address("/vec")].embedder.linear[0].in_features == 2
 
 

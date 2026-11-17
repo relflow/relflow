@@ -194,7 +194,7 @@ def test_requests_do_not_stack_by_default():
 
 def test_single_source_field_rejects_a_tuple_query_naming_its_address():
     with pytest.raises(ValueError, match=r"'/amount'.*no derive component.*stacked"):
-        rf.Model.xs(d_model=8, amount=rf.Number(query=("a", "b")))
+        rf.Model(preset="small", d_model=8, amount=rf.Number(query=("a", "b")))
 
 
 def test_a_request_without_stacked_rejects_a_tuple_query_at_bind():

@@ -59,7 +59,8 @@ def test_rank_without_local_targets_still_emits_the_anchored_loss(monkeypatch):
 
 
 def test_rank_without_forecast_targets_still_emits_the_anchored_loss(monkeypatch):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=8,
         events=rf.Branch(

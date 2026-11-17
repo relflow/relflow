@@ -224,7 +224,8 @@ def test_custom_output_rejects_noncanonical_list_names_at_planning():
 @pytest.mark.integration
 def test_forecast_model_trains_and_writes_horizon_rows():
     lightning.pytorch.seed_everything(7, workers=True)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=4,
         events=rf.Branch(
@@ -249,7 +250,8 @@ def test_forecast_model_trains_and_writes_horizon_rows():
 
 def test_a_hidden_covariate_in_a_user_future_row_does_not_change_the_prediction():
     lightning.pytorch.seed_everything(7, workers=True)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         batch_size=4,
         events=rf.Branch(
@@ -277,7 +279,8 @@ def test_tokenwise_table_covers_every_grain():
 
 
 def test_steps_branch_without_reduction_writes_one_representation_per_row():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         ett=rf.Branch.chronological(length=4, reduction=None, embed=True, x=rf.Number, y=rf.Number),
     )
@@ -291,7 +294,8 @@ def test_steps_branch_without_reduction_writes_one_representation_per_row():
 
 
 def test_coordinates_branch_without_reduction_keeps_one_representation_per_token():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         ett=rf.Branch(length=4, reduction=None, embed=True, x=rf.Number, y=rf.Number),
     )
@@ -302,7 +306,8 @@ def test_coordinates_branch_without_reduction_keeps_one_representation_per_token
 
 
 def test_nested_steps_rows_carry_parent_and_row_ordinals():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         visits=rf.Branch(
             length=2,
@@ -319,7 +324,8 @@ def test_nested_steps_rows_carry_parent_and_row_ordinals():
 @pytest.mark.parametrize("ragged", [False, True], ids=["dense", "packed"])
 def test_changing_a_future_row_never_changes_earlier_row_representations(mixer, ragged):
     torch.manual_seed(0)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         dropout=0.0,
         ett=rf.Branch.chronological(length=6, mixer=mixer, reduction=None, embed=True, x=rf.Number, y=rf.Number),

@@ -284,6 +284,21 @@ again after loading a model. See the
 [policy validation](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/architecture/jacobian.py#L29)
 before integrating it with a custom training loop.
 
+## Hide whole rows
+
+A branch mask can pick rows with `select` instead of a `query` or a rate; a
+`Mask` cannot combine them:
+
+```python
+rf.Mask(select=rf.Forecast(horizon=24, targets=("OT",)), reconstruct=True)
+rf.Mask(select=rf.Spans(rate=0.15, length=8), reconstruct=True)
+```
+
+`Forecast` hides every child except the `time_index` child and its `known`
+children in the last rows of each record, and predicts its `targets`. `Spans`
+hides runs of whole rows, every child included, in training only. See
+[Chronological branches](/advanced/chronological-branches/#mask-whole-rows).
+
 ## Keep the prediction cutoff outside the mask
 
 Random reconstruction allows other retained records to inform a selected

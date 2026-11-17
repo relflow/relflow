@@ -321,11 +321,11 @@ def test_all_empty_batch_embeds_finite():
 
 def test_horizon_rejected_on_inputs():
     with pytest.raises(ValueError, match="horizon applies only to reconstruction targets"):
-        rf.Model.xs(d_model=8, signal=rf.Series(n_dim=1, horizon=4), label=rf.Boolean(mask=True))
+        rf.Model(preset="small", d_model=8, signal=rf.Series(n_dim=1, horizon=4), label=rf.Boolean(mask=True))
 
 
 def test_learn_updates_per_channel_statistics():
-    model = rf.Model.xs(d_model=8, signal=rf.Series(n_dim=2), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, signal=rf.Series(n_dim=2), label=rf.Boolean(mask=True))
     rows = pa.table({"signal": [[[1.0, 10.0], [3.0, 30.0]], [[5.0, 50.0]]], "label": [True, False]})
     model.encode(rows, strata=Strata.train)
     normalizer = model.nodes["/signal"].embedder.normalizer
@@ -393,11 +393,12 @@ def forecast(field: TensorField, module: DummyModule, scaled: torch.Tensor) -> P
 
 def test_horizon_required_on_targets():
     with pytest.raises(ValueError, match="requires horizon"):
-        rf.Model.xs(d_model=8, signal=rf.Series(n_dim=1, mask=True))
+        rf.Model(preset="small", d_model=8, signal=rf.Series(n_dim=1, mask=True))
 
 
 def test_horizon_allowed_when_ancestor_reconstructs():
-    rf.Model.xs(
+    rf.Model(
+        preset="small",
         d_model=8,
         items=rf.Branch(length=2, mask=rf.Mask(reconstruct=True), signal=rf.Series(n_dim=1, horizon=2)),
     )
@@ -490,14 +491,16 @@ def test_large_offset_series_keeps_precision():
 
 
 def test_embed_only_decoder_has_no_regression():
-    model = rf.Model.xs(d_model=8, signal=rf.Series(n_dim=1, embed=True), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, signal=rf.Series(n_dim=1, embed=True), label=rf.Boolean(mask=True))
     decoder = model.nodes["/signal"].decoder
     assert not hasattr(decoder, "regression")
     assert decoder.decode(randn(2, 8)).keys() == {TensorKey.state}
 
 
 def test_learn_updates_decoder_normalizer_for_targets():
-    model = rf.Model.xs(d_model=8, past=rf.Series(n_dim=1), future=rf.Series(n_dim=2, horizon=2, mask=True))
+    model = rf.Model(
+        preset="small", d_model=8, past=rf.Series(n_dim=1), future=rf.Series(n_dim=2, horizon=2, mask=True)
+    )
     rows = pa.table({"past": [[1.0, 2.0]] * 2, "future": [[[10.0, 100.0], [20.0, 200.0]]] * 2})
     model.encode(rows, strata=Strata.train)
     normalizer = model.nodes["/future"].decoder.normalizer
@@ -529,7 +532,8 @@ def test_write_outputs_horizon_steps_even_for_null_state():
 
 
 def test_predict_inside_branch_with_null_items_round_trips_parquet(tmp_path):
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         items=rf.Branch(length=3, future=rf.Series(n_dim=2, horizon=2, mask=True), x=rf.Number),
     )
@@ -544,7 +548,7 @@ def values_of(table: pl.DataFrame, *path: str) -> list:
 
 
 def test_classification_with_series_input():
-    model = rf.Model.xs(d_model=8, signal=rf.Series(n_dim=2), label=rf.Category(mask=True))
+    model = rf.Model(preset="small", d_model=8, signal=rf.Series(n_dim=2), label=rf.Category(mask=True))
     rows = pa.table({"signal": [[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0]]], "label": ["a", "b"]})
     result = model.training_step(model.encode(rows, strata=Strata.train), 0)
     assert torch.isfinite(result["loss"])
@@ -552,14 +556,16 @@ def test_classification_with_series_input():
 
 
 def test_embed_output_width():
-    model = rf.Model.xs(d_model=8, signal=rf.Series(n_dim=1, embed=True), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, signal=rf.Series(n_dim=1, embed=True), label=rf.Boolean(mask=True))
     table = model.predict(pa.table({"signal": [[1.0, 2.0], [3.0]], "label": [True, False]}))
     embedding = table.to_dicts()[0]["representations"][0]["embedding"]
     assert len(embedding) == 8
 
 
 def test_predict_without_target_column_outputs_horizon_steps():
-    model = rf.Model.xs(d_model=8, history=rf.Series(n_dim=1), future=rf.Series(n_dim=2, horizon=3, mask=True))
+    model = rf.Model(
+        preset="small", d_model=8, history=rf.Series(n_dim=1), future=rf.Series(n_dim=2, horizon=3, mask=True)
+    )
     table = model.predict(pa.table({"history": [[1.0, 2.0], [3.0]]}))
     for row in table.to_dicts():
         content = row["predictions"]["future"]["content"]
@@ -567,7 +573,8 @@ def test_predict_without_target_column_outputs_horizon_steps():
 
 
 def test_rebuild_keeps_weights_across_length_and_n_blocks_and_resets_only_regression_on_horizon():
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         past=rf.Series(n_dim=1, length=8, n_blocks=2),
         future=rf.Series(n_dim=1, horizon=3, mask=True),
@@ -631,7 +638,8 @@ def test_forecast_smoke(tmp_path, nested):
     seed_everything(SEED, workers=True)
     history, future = [1.0, 2.0, 3.0], [4.0, 5.0]
     if nested:
-        model = rf.Model.xs(
+        model = rf.Model(
+            preset="small",
             d_model=8,
             items=rf.Branch(length=2, history=rf.Series(n_dim=1), future=rf.Series(n_dim=1, horizon=2, mask=True)),
         )
@@ -639,7 +647,9 @@ def test_forecast_smoke(tmp_path, nested):
             {"items": [[{"history": history, "future": future}, {"history": history[:2], "future": future}]] * 4}
         )
     else:
-        model = rf.Model.xs(d_model=8, history=rf.Series(n_dim=1), future=rf.Series(n_dim=1, horizon=2, mask=True))
+        model = rf.Model(
+            preset="small", d_model=8, history=rf.Series(n_dim=1), future=rf.Series(n_dim=1, horizon=2, mask=True)
+        )
         rows = pa.table({"history": [history] * 4, "future": [future] * 4})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
@@ -694,8 +704,8 @@ def test_extension_rejects_struct_layouts(datatype):
 
 
 def test_columnar_tuple_query_matches_dense_steps():
-    dense = rf.Model.xs(d_model=8, ett=rf.Series(n_dim=2), y=rf.Number(mask=True))
-    columnar = rf.Model.xs(d_model=8, ett=rf.Series(query=("cols.a", "cols.b")), y=rf.Number(mask=True))
+    dense = rf.Model(preset="small", d_model=8, ett=rf.Series(n_dim=2), y=rf.Number(mask=True))
+    columnar = rf.Model(preset="small", d_model=8, ett=rf.Series(query=("cols.a", "cols.b")), y=rf.Number(mask=True))
     a = dense.encode(pa.table({"ett": [[[1.0, 10.0], [2.0, 20.0]]]}), strata="predict")[rf.Address("/ett")]
     cols = pa.table({"cols": [{"a": [1.0, 2.0], "b": [10.0, 20.0]}]})
     b = columnar.encode(cols, strata="predict")[rf.Address("/ett")]
@@ -704,7 +714,7 @@ def test_columnar_tuple_query_matches_dense_steps():
 
 
 def test_null_source_marks_its_steps_unobserved_without_a_warning(recwarn):
-    model = rf.Model.xs(d_model=8, ett=rf.Series(query=("cols.a", "cols.b")), y=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=8, ett=rf.Series(query=("cols.a", "cols.b")), y=rf.Number(mask=True))
     rows = pa.table({"cols": [{"a": [1.0, 2.0], "b": None}]})
     field = model.encode(rows, strata="predict")[rf.Address("/ett")]
     assert field.content["observed"].reshape(-1).tolist() == [False, False]
@@ -713,7 +723,7 @@ def test_null_source_marks_its_steps_unobserved_without_a_warning(recwarn):
 
 
 def test_dense_fixed_size_steps_with_nan_are_unobserved_steps():
-    model = rf.Model.xs(d_model=8, ett=rf.Series(query="ett", n_dim=2), y=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=8, ett=rf.Series(query="ett", n_dim=2), y=rf.Number(mask=True))
     column = pa.array([[[1.0, 2.0], [float("nan"), 3.0]]], type=pa.list_(pa.list_(pa.float64(), 2)))
     field = model.encode(pa.table({"ett": column}), strata="predict")[rf.Address("/ett")]
     assert field.content["observed"].reshape(-1).tolist() == [True, False]
@@ -721,7 +731,8 @@ def test_dense_fixed_size_steps_with_nan_are_unobserved_steps():
 
 def test_tuple_query_names_forecast_step_columns_and_round_trips_parquet(tmp_path):
     seed_everything(SEED, workers=True)
-    model = rf.Model.xs(
+    model = rf.Model(
+        preset="small",
         d_model=8,
         history=rf.Series(n_dim=2),
         future=rf.Series(query=("next.temp", "next.hum"), horizon=3, mask=True),
@@ -736,7 +747,9 @@ def test_tuple_query_names_forecast_step_columns_and_round_trips_parquet(tmp_pat
 
 
 def test_single_query_forecast_steps_stay_lists():
-    model = rf.Model.xs(d_model=8, history=rf.Series(n_dim=2), future=rf.Series(n_dim=2, horizon=2, mask=True))
+    model = rf.Model(
+        preset="small", d_model=8, history=rf.Series(n_dim=2), future=rf.Series(n_dim=2, horizon=2, mask=True)
+    )
     step = output_type(model, Address("/future")).field("content").type.value_type
     assert pa.types.is_list(step) and step.value_type == pa.float64()
 
@@ -753,7 +766,7 @@ def test_tuple_query_series_round_trips_yaml(tmp_path):
 
 @pytest.mark.parametrize("query", [("x",), ("x", "y")])
 def test_tuple_query_on_scalar_columns_is_rejected_without_a_list_level(query):
-    model = rf.Model.xs(d_model=8, ett=rf.Series(query=query), y=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=8, ett=rf.Series(query=query), y=rf.Number(mask=True))
     rows = pa.table({"x": [1.0, 2.0], "y": [3.0, 4.0]})
     with pytest.raises(ValueError, match="each tuple source must select a list per record"):
         model.encode(rows, strata="predict")

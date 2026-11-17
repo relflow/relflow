@@ -202,7 +202,8 @@ def test_native_tuner_can_prepare_a_separate_training_run(tmp_path, bound):
 @pytest.mark.integration
 def test_external_trainer_trains_validates_and_predicts_deterministically(tmp_path):
     lit.seed_everything(0, workers=True)
-    configured = rf.Model.xs(
+    configured = rf.Model(
+        preset="small",
         d_model=8,
         label=rf.Category(mask=True),
         ett=rf.Branch.chronological(

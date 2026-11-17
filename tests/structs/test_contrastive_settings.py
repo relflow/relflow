@@ -69,7 +69,8 @@ def test_branch_contrastive_round_trips_through_the_saved_schema():
 
 def test_contrastive_rejects_a_child_without_a_fixed_width_per_row():
     with pytest.raises(ValueError, match=r"branch '/ett'.*'/ett/inner'.*reduction"):
-        rf.Model.xs(
+        rf.Model(
+            preset="small",
             d_model=8,
             ett=rf.Branch(
                 length=8,

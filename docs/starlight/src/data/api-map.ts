@@ -47,6 +47,46 @@ export const apiCatalog: ApiSection[] = [
         "name": "rf.Mean"
       },
       {
+        "name": "rf.Coordinates",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Steps",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Transformer",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Conv",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Direction",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Forecast",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Spans",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Contrastive",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Crops",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
+        "name": "rf.Hierarchical",
+        "guide": "/advanced/chronological-branches/"
+      },
+      {
         "name": "rf.presets",
         "guide": "/concepts/runtime/"
       },
@@ -134,6 +174,10 @@ export const apiCatalog: ApiSection[] = [
       {
         "name": "rf.Vector",
         "guide": "/data-types/vector/"
+      },
+      {
+        "name": "rf.Series",
+        "guide": "/data-types/series/"
       }
     ]
   },
@@ -382,6 +426,9 @@ export const apiCatalog: ApiSection[] = [
       },
       {
         "name": "rf.ReductionConfig"
+      },
+      {
+        "name": "rf.Pooling"
       },
       {
         "name": "rf.Overflow"

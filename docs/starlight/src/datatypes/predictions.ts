@@ -49,6 +49,13 @@ export const outputs = {
     [0.12, -0.34, 0.08],
     'A fixed-width numeric vector matching n_dim=3; coordinates are not probabilities.',
   ),
+  series: decoded(
+    [
+      [21.5, 0.61],
+      [22.0, 0.58],
+    ],
+    'Exactly horizon forecast steps of n_dim source-unit values, shown with horizon=2 and n_dim=2. Tuple queries write each step as a struct named by its sources.',
+  ),
   ordinal: decoded(
     'medium',
     'A declared ordered label, preserving its scalar type. With no declared labels, content is an integer rank. No label probability is returned.',

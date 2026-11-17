@@ -1,10 +1,9 @@
 ---
 title: Chronological branches
-description: "Ordered rows as time series: defaults, time, direction, masking, forecasting, per-row representations, and a contrastive objective."
-engine: markdown
+description: Model ordered rows as time series with time positions, direction, row masking, forecasting, per-row representations, and a contrastive objective.
 ---
 
-A time series is a [Branch](../datatypes/branch.qmd) whose rows have an order.
+A time series is a [Branch](/concepts/branches/) whose rows have an order.
 `rf.Branch.chronological(...)` builds a plain `Branch` with settings that suit
 that order. Every setting also works on a plain `Branch`, and a saved model
 stores the result as an ordinary `Branch`. Each input record supplies a list of
@@ -13,7 +12,8 @@ struct rows, oldest first; relflow does not sort, resample, or join those rows.
 ```python
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     ett=rf.Branch.chronological(
         length=336,
         HUFL=rf.Number,
@@ -55,11 +55,11 @@ channel, so a channel can be a target or a hidden input on its own. A `Vector`
 is one field with one shared width: it suits channels that always travel
 together, and a null in one source only marks that channel missing. In both
 examples, `OT` remains a separate leaf that can be forecast. See
-[Vector](../datatypes/vector.qmd#channels-from-several-sources).
+[Vector](/data-types/vector/#channels-from-several-sources).
 
 A branch reads each row as a struct. Dense `list<fixed_size_list<C>>` data has
 no struct per row. Wrap each step in a `Preprocessor`, or read the whole run as
-one [Series](../datatypes/series.qmd):
+one [Series](/data-types/series/):
 
 ```python
 import polars as pl
@@ -75,7 +75,7 @@ rows = rf.Branch.chronological(length=336, load=rf.Vector(n_dim=7))
 run = rf.Series(query="ett", n_dim=7)
 ```
 
-See [query paths](../guides/query-paths.qmd#several-sources).
+See [query paths](/data-types/vector/#channels-from-several-sources).
 
 ## Time
 
@@ -102,7 +102,7 @@ ett = rf.Branch.chronological(
 - A row's position is its time minus the first row's time, divided by
   `time_step`. Positions may be fractional or equal, but must not decrease.
   Every present row needs a non-null, finite time. Sorting belongs in a
-  [preprocessor](../guides/preprocessing.qmd).
+  [preprocessor](/concepts/data-flow/).
 - Arrow timestamp, date, and duration columns need a `timedelta` time step;
   a temporal `time_index` without one raises when a batch is encoded. A
   `Period` can encode calendar cycles, but does not supply elapsed spacing.
@@ -115,9 +115,7 @@ well. A branch without `time_index` adds no parameters for time.
 
 ## Direction
 
-::: {.callout-warning}
-## Classification needs `direction=rf.Direction.bidirectional`
-
+:::caution[Classification needs `direction=rf.Direction.bidirectional`]
 The causal default restricts the row tokens inside the branch: each row token
 sees only the rows at or before it, so an early row never learns from a later
 one. That is right for forecasting and per-row representations. It is
@@ -129,6 +127,7 @@ only through row tokens that each saw their own past. Bidirectional lets every
 row token read the whole series before the reduction, which is why it stays the
 recommendation for classification and other whole-series targets. On easy
 tasks the gap can be small.
+
 :::
 
 UCR [GunPoint](https://timeseriesclassification.com/description.php?Dataset=GunPoint)
@@ -156,7 +155,8 @@ training = gunpoint("data/GunPoint_TRAIN.tsv").sample(fraction=1.0, shuffle=True
 train, validate = training.head(40), training.tail(10)
 test = gunpoint("data/GunPoint_TEST.tsv")
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     label=rf.Category(mask=True),
     signal=rf.Branch.chronological(
         length=150,
@@ -251,7 +251,7 @@ last_day = rf.Mask(select=rf.Forecast(horizon=24, targets=("OT",)), reconstruct=
   reconstructable leaves become targets, which makes masked-row pretraining.
 - A branch holds at most one `Forecast`.
 
-See [Masking and reconstruction](masking-and-reconstruction.qmd).
+See [Masking and reconstruction](/advanced/masking-and-pretraining/).
 
 ## Forecast
 
@@ -264,7 +264,8 @@ means `skip=True`, so `OT` would never be embedded.
 from datetime import timedelta
 import relflow as rf
 
-model = rf.Model.xs(
+model = rf.Model(
+    preset="small",
     ett=rf.Branch.chronological(
         length=336,
         time_index="date",
@@ -363,8 +364,8 @@ The prediction output then holds one representation per row: `path` names the
 branch, `parents` ends with the row ordinal, and `output_index` is `0`. With the
 causal default, the vector of row `t` depends on rows up to `t` only. Under
 `rf.Coordinates()` a branch keeps one representation per token, as before. See
-[Prediction output](../reference/prediction-output.qmd#representations) and
-[Branch summaries](branch-summaries.qmd).
+[Prediction output](/advanced/embeddings/) and
+[Branch summaries](/concepts/branches/).
 
 ## Contrastive pretraining
 
@@ -411,5 +412,5 @@ Set `mask=0.0` to keep every step. Masks apply to the crops in training only.
 rf.Branch(direction=rf.Direction.causal, fields={"direction": rf.Category})
 ```
 
-Next, read the [Branch reference](../datatypes/branch.qmd#options) and
-[Series](../datatypes/series.qmd).
+Next, read the [Branch reference](/concepts/branches/) and
+[Series](/data-types/series/).

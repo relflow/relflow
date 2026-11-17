@@ -98,13 +98,35 @@
 #
 
 # %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "pyarrow",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "structure"
+# types = ["Series"]
+# conditions = ["noise", "missing-inputs"]
+# ///
+
 """P101: a Series forecast depends on step order, not only on the values seen.
 
 Seasonal phase is visible only through the order of history steps. Shuffling
 each history keeps its values and level but removes that phase.
 """
 
+import sys
 from collections.abc import Callable, Iterator
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
 
 import lightning.pytorch as lit
 import numpy as np

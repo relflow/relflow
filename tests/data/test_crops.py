@@ -31,7 +31,9 @@ def test_starts_keep_the_parent_shape():
 
 
 def model() -> rf.Model:
-    return rf.Model.xs(d_model=8, ett=rf.Branch(length=8, x=rf.Number, contrastive=rf.Contrastive(views=CROPS)))
+    return rf.Model(
+        preset="small", d_model=8, ett=rf.Branch(length=8, x=rf.Number, contrastive=rf.Contrastive(views=CROPS))
+    )
 
 
 def table() -> pa.Table:
@@ -50,7 +52,7 @@ def test_training_geometry_carries_views_and_other_strata_carry_none():
 
 
 def test_plain_branch_geometry_has_no_views():
-    plain = rf.Model.xs(d_model=8, ett=rf.Branch(length=8, x=rf.Number))
+    plain = rf.Model(preset="small", d_model=8, ett=rf.Branch(length=8, x=rf.Number))
     assert plain.encode(table(), strata="train")[rf.Address()][rf.Address("/ett")].views is None
 
 
@@ -110,8 +112,10 @@ def test_hidden_draws_nothing_without_a_mask():
 def test_training_geometry_carries_hidden_only_for_a_positive_mask():
     masked = model().encode(table(), strata="train", seed=5)[rf.Address()][ADDRESS]
     assert masked.hidden.shape == (4, 1, 2, 8) and masked.hidden.dtype == torch.bool
-    plain = rf.Model.xs(
-        d_model=8, ett=rf.Branch(length=8, x=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=4, mask=0.0)))
+    plain = rf.Model(
+        preset="small",
+        d_model=8,
+        ett=rf.Branch(length=8, x=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=4, mask=0.0))),
     )
     assert plain.encode(table(), strata="train", seed=5)[rf.Address()][ADDRESS].hidden is None
     assert model().encode(table(), strata="predict")[rf.Address()][ADDRESS].hidden is None

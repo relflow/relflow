@@ -565,7 +565,7 @@ def test_tuple_query_leaf_projects_stacked_channels_with_validity_per_channel():
 
 
 def test_branch_rows_must_be_structs_not_fixed_size_lists():
-    model = rf.Model.xs(d_model=8, ett=rf.Branch(load=rf.Vector(n_dim=2)), y=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=8, ett=rf.Branch(load=rf.Vector(n_dim=2)), y=rf.Number(mask=True))
     rows = pa.table({"ett": pa.array([[[1.0, 2.0]]], type=pa.list_(pa.list_(pa.float64(), 2)))})
     with pytest.raises(ValueError, match=r"'/ett/load'.*expected a struct, got fixed_size_list"):
         model.encode(rows, strata="predict")

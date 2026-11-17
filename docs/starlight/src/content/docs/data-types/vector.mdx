@@ -25,6 +25,22 @@ may be null, but its individual elements must be non-null numbers. Wrong
 lengths and null elements raise errors. A vector containing NaN or infinity
 takes the `other` state.
 
+### Channels from several sources
+
+A tuple `query` reads one source per channel, so `n_dim` may be omitted:
+
+```python
+load = rf.Vector(query=("HUFL", "HULL", "OT"))
+```
+
+Every source must start at the owner record and select the same rows. A null or
+NaN in one source makes only that channel missing: the encoder sees which
+channels are missing, and the loss skips them. A vector with no finite channel
+is `other`, and a vector whose sources are all null is `null`. A single source
+keeps the rules above. Inside a
+[chronological branch](/advanced/chronological-branches/#declare-channels), one
+`Vector` per row reads all channels of the row.
+
 ## Standardization and processor pipelines
 
 Vector stores the supplied coordinates as float32 without fitting a
@@ -82,7 +98,7 @@ relflow's writer rejects affected Parquet batches before writing them.
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `n_dim` | Required | Set the positive, fixed number of coordinates. |
+| `n_dim` | Required unless `query` is a tuple | Set the positive, fixed number of coordinates. A tuple `query` sets it. |
 | `objective` | `"l2"` | Use mean squared error (`"l2"`) or mean absolute error (`"l1"`) across coordinates. |
 | `jitter` | `rf.Jitter()` | Configure training-only noise in the supplied coordinate units while preserving target vectors. |
 
