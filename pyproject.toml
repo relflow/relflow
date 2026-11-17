@@ -240,6 +240,7 @@ blocked = [
 ".github/ISSUE_TEMPLATE/*" = [".yml"]
 "src/relflow/**" = [".py"]
 "tests/**" = [".py"]
+"tests/architecture/golden/*" = [".arrow", ".pt", ".json", ".yaml"]
 "docs/tests/test_*" = [".py"]
 "docs/assets/branding/**" = [".svg", ".png", ".typ"]
 "docs/assets/fonts/*" = [".otf", ".woff2"]

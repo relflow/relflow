@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import enum
 import math
+from collections.abc import Mapping
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, NamedTuple, Unpack, cast, override
 
 import numpy as np
 import pyarrow as pa
@@ -11,6 +13,7 @@ import pyarrow.compute as pc
 import pydantic
 import torch
 from beartype import beartype
+from pydantic import StrictInt
 from tensordict import TensorDict, tensorclass
 
 from relflow.data.ragged import RaggedField
@@ -27,6 +30,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.output import array, fixed, struct
+from relflow.tensorfields.shared.channels import width
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
@@ -43,12 +47,70 @@ class Objective(enum.StrEnum):
     l1 = "l1"
     l2 = "l2"
 
-    def loss(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Mean error over every coordinate of the selected vectors."""
-        if self == Objective.l1:
-            return torch.nn.functional.l1_loss(input=inputs, target=targets)
+    def loss(self, inputs: torch.Tensor, targets: torch.Tensor, weight: torch.Tensor | None = None) -> torch.Tensor:
+        """Mean error over every coordinate of the selected vectors, or over those with weight one."""
+        error = torch.nn.functional.l1_loss if self == Objective.l1 else torch.nn.functional.mse_loss
+        if weight is None:
+            return error(input=inputs, target=targets)
+        return (error(input=inputs, target=targets, reduction="none") * weight).sum() / weight.sum()
 
-        return torch.nn.functional.mse_loss(input=inputs, target=targets)
+
+class Selected(NamedTuple):
+    """Coordinates that enter the loss, shaped ``(vectors, n_dim)``, with an optional 0/1 weight per coordinate."""
+
+    predicted: torch.Tensor
+    observed: torch.Tensor
+    weight: torch.Tensor | None = None
+
+
+class Joint:
+    """A single query: every element must be finite, or the whole vector is not a measurement."""
+
+    strict: ClassVar[bool] = True
+
+    def size(self, n_dim: int) -> int:
+        """Embedder input width for a vector of ``n_dim`` coordinates."""
+        return n_dim
+
+    def usable(self, encoded: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Return the content and a Boolean per vector that is a measurement."""
+        return encoded, np.asarray(np.isfinite(encoded).all(axis=1))
+
+    def embed(self, content: torch.Tensor) -> torch.Tensor:
+        """Embedder input for the coordinates."""
+        return content
+
+    def select(self, predicted: torch.Tensor, observed: torch.Tensor) -> Selected:
+        """Coordinates that enter the loss."""
+        return Selected(predicted, observed)
+
+
+class Channels(Joint):
+    """A tuple query: a null or non-finite channel is missing, and the others stay valid."""
+
+    strict: ClassVar[bool] = False
+
+    @override
+    def size(self, n_dim: int) -> int:
+        return n_dim * 2
+
+    @override
+    def usable(self, encoded: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        finite = np.isfinite(encoded)
+        return np.where(finite, encoded, math.nan), np.asarray(finite.any(axis=1))
+
+    @override
+    def embed(self, content: torch.Tensor) -> torch.Tensor:
+        observed = torch.isfinite(content)
+        return torch.cat([content.masked_fill(~observed, 0.0), observed.to(content.dtype)], dim=-1)
+
+    @override
+    def select(self, predicted: torch.Tensor, observed: torch.Tensor) -> Selected:
+        finite = torch.isfinite(observed)
+        return Selected(predicted, observed.masked_fill(~finite, 0.0), finite.to(predicted.dtype))
+
+
+READOUTS: Mapping[bool, Joint] = MappingProxyType({False: Joint(), True: Channels()})
 
 
 @vector.register(Component.Request)
@@ -60,25 +122,90 @@ class Request(RequestBase):
     training-only noise in the supplied coordinate units and preserves targets.
     ``objective`` selects mean ``"l1"`` or ``"l2"`` reconstruction loss across
     coordinates. ``mask=True`` makes the vector a supervised target.
-    Predictions contain a reconstructed vector of the same width.
+    Predictions contain a reconstructed vector of the same width. A tuple
+    ``query`` reads one source per element as the channels of the vector, and
+    ``n_dim`` follows from its length.
     """
 
     type: Literal["vector"] = "vector"
-    n_dim: Annotated[int, pydantic.Field(gt=0)]
+    stacked: ClassVar[bool] = True
+    n_dim: Annotated[StrictInt, pydantic.Field(gt=0)]
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
     objective: Objective = Objective.l2
+
+    @property
+    def readout(self) -> Joint:
+        """How elements become coordinates, chosen once by the kind of ``query``.
+
+        A tuple ``query`` stacks channels that each keep their own validity: a
+        channel that is null or non-finite is missing, its content is NaN, the
+        embedder is told which channels are missing, and the loss skips it. A
+        vector with no finite channel takes the ``other`` state.
+        """
+        return READOUTS[isinstance(self.query, tuple)]
+
+    @pydantic.model_validator(mode="before")
+    @classmethod
+    def check_n_dim(cls, data: Any) -> Any:
+        """Fill ``n_dim`` from a tuple ``query`` before validation.
+
+        Args:
+            data: Raw request input.
+
+        Returns:
+            The input with ``n_dim`` set to the number of tuple sources, if any.
+
+        Raises:
+            ValueError: If the tuple query is empty or disagrees with an explicit ``n_dim``.
+        """
+        return width(data=data)
 
     if TYPE_CHECKING:
 
         def __init__(
             self,
             *,
-            n_dim: int,
+            n_dim: int = ...,
             jitter: Jitter = ...,
             objective: Objective | Literal["l1", "l2"] = Objective.l2,
             type: Literal["vector"] = "vector",
             **options: Unpack[FieldOptions],
         ) -> None: ...
+
+
+def dense(values: pa.Array, *, request: Request, address: Address) -> np.ndarray:
+    """Float32 ``(vectors, n_dim)`` matrix of a list array; null channels are NaN when the request allows them.
+
+    Args:
+        values: One Arrow list per valued record.
+        request: The vector request.
+        address: Field address, for error messages.
+
+    Returns:
+        The matrix, a fresh writable array.
+
+    Raises:
+        ValueError: If a value is not a list of ``n_dim`` numeric elements, or has a null element
+            under a single query.
+    """
+    if not len(values):
+        return np.empty((0, request.n_dim), dtype=np.float32)
+    if not (
+        pa.types.is_list(values.type) or pa.types.is_large_list(values.type) or pa.types.is_fixed_size_list(values.type)
+    ):
+        raise ValueError(f"vector field at '{address}' expects an Arrow list, got {values.type}")
+    lengths = pc.list_value_length(values)
+    # pyarrow-stubs incorrectly decorates not_equal as an overload.
+    if pc.any(pc.not_equal(lengths, request.n_dim)).as_py():  # pyrefly: ignore [no-matching-overload]
+        raise ValueError(f"vector field at '{address}' expects every value to have length {request.n_dim}")
+    flattened = pc.list_flatten(values)
+    if flattened.null_count and request.readout.strict:
+        raise ValueError(f"vector field at '{address}' expects non-null numeric elements")
+    try:
+        flattened = pc.cast(flattened, pa.float32(), safe=True)
+    except pa.ArrowException as error:
+        raise ValueError(f"vector field at '{address}' could not be converted to float32") from error
+    return flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim).copy()
 
 
 @vector.register(Component.TensorField)
@@ -113,38 +240,18 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         request: Request = cast(Request, schema.requests[address])
 
         def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
-            """Dense content and state; a vector with a NaN or infinite element is not a measurement.
+            """Dense content and state; an unusable vector is not a measurement.
 
             Such a vector takes the ``other`` state and zero content, so it is
             neither projected as a value nor regressed against.
             """
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             state = field.dense.copy()
-            if not len(values):
-                encoded = np.empty((0, request.n_dim), dtype=np.float32)
-            else:
-                if not (
-                    pa.types.is_list(values.type)
-                    or pa.types.is_large_list(values.type)
-                    or pa.types.is_fixed_size_list(values.type)
-                ):
-                    raise ValueError(f"vector field at '{address}' expects an Arrow list, got {values.type}")
-                lengths = pc.list_value_length(values)
-                # pyarrow-stubs incorrectly decorates not_equal as an overload.
-                if pc.any(pc.not_equal(lengths, request.n_dim)).as_py():  # pyrefly: ignore [no-matching-overload]
-                    raise ValueError(f"vector field at '{address}' expects every value to have length {request.n_dim}")
-                flattened = pc.list_flatten(values)
-                if flattened.null_count:
-                    raise ValueError(f"vector field at '{address}' expects non-null numeric elements")
-                try:
-                    flattened = pc.cast(flattened, pa.float32(), safe=True)
-                except pa.ArrowException as error:
-                    raise ValueError(f"vector field at '{address}' could not be converted to float32") from error
-                encoded = flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim).copy()
-                finite = np.isfinite(encoded).all(axis=1)
-                if not finite.all():
-                    encoded[~finite] = 0.0
-                    state[field.place(np.logical_not(finite), fill=False)] = Tokens.other.value
+            encoded = dense(values, request=request, address=address)
+            encoded, usable = request.readout.usable(encoded)
+            if not usable.all():
+                encoded[~usable] = 0.0
+                state[field.place(np.logical_not(usable), fill=False)] = Tokens.other.value
             content = torch.from_numpy(field.place(encoded, fill=0.0, value_shape=(request.n_dim,)))
             return content, torch.from_numpy(state)
 
@@ -176,13 +283,14 @@ class Embedder(EmbedderBase):
         self.origin: Address = address
         self.destination: Address = cast("Branch", request.parent).address
         self.jitter: Jitter = request.jitter
+        self.readout: Joint = request.readout
 
         self.embeddings = torch.nn.Embedding(
             num_embeddings=len(Tokens),
             embedding_dim=schema.d_model,
         )
         self.linear = torch.nn.Sequential(
-            torch.nn.Linear(in_features=request.n_dim, out_features=schema.d_model),
+            torch.nn.Linear(in_features=self.readout.size(request.n_dim), out_features=schema.d_model),
             torch.nn.GELU(approximate="tanh"),
         )
 
@@ -198,7 +306,7 @@ class Embedder(EmbedderBase):
             eligible = state.eq(Tokens.valued).unsqueeze(-1) & torch.isfinite(content)
             content = self.jitter.apply(content, eligible)
 
-        projected = self.linear(content)
+        projected = self.linear(self.readout.embed(content))
         embeddings = self.embeddings(state)
 
         return Parcel(
@@ -275,15 +383,14 @@ def loss(
     valued = trainable & state_targets.eq(Tokens.valued.value)
     inputs = cast(torch.Tensor, prediction.payload[TensorKey.content]).reshape(-1, request.n_dim)
     targets = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(-1, request.n_dim)
-    predicted = inputs[valued]
-    observed = targets[valued]
-    if predicted.numel():
+    predicted, observed, weight = request.readout.select(inputs[valued], targets[valued])
+    if predicted.numel() and (weight is None or weight.any()):
         output += module.track(
             (address, strata, Metric.loss, TensorKey.content),
-            value=request.objective.loss(inputs=predicted, targets=observed),
+            value=request.objective.loss(inputs=predicted, targets=observed, weight=weight),
         )
 
-    decoder.metrics.record(module, strata, *errors(predicted, observed))
+    decoder.metrics.record(module, strata, *errors(predicted, observed, weight))
 
     return output
 

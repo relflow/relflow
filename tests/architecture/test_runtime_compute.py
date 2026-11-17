@@ -187,3 +187,18 @@ def test_cached_schema_plan_preserves_live_decoder_context_routes():
 
     assert execution(model) is cached
     assert seen == [(Address("/value"),), ()]
+
+
+def test_steps_embedding_geometry_uses_rows():
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        ett=rf.Branch(length=3, grain=rf.Steps(), reduction=None, embed=True, a=rf.Number, b=rf.Number),
+    )
+    rows = [{"a": float(i), "b": float(-i)} for i in range(3)]
+    inputs = model.encode(pa.table({"ett": [rows, rows[:2]]}), strata=Strata.predict)
+    (embedding,) = runtime.compute(model, inputs, plan=execution(model), decoders=(), predict=True)
+    assert embedding.address == Address("/ett")
+    assert embedding.payload[TensorKey.embedding].shape == (2, 3, 8)
+    assert embedding.positions is None and embedding.spans is None and embedding.slots is None

@@ -6,6 +6,7 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
+from relflow.architecture import runtime
 from relflow.architecture.contracts import (
     CONTRACT_SCOPES,
     ContractScheduler,
@@ -119,6 +120,38 @@ def test_forward_contract_rejects_content_without_state_shape_prefix() -> None:
     inputs[Address("/color")].content = inputs[Address("/color")].content[:, :0]
 
     with pytest.raises(ForwardContractError, match="content.*state shape"):
+        model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_allows_target_content_wider_than_input_content() -> None:
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        attention=None,
+        history=rf.Series(n_dim=1),
+        future=rf.Series(n_dim=1, horizon=3, mask=True),
+    )
+    inputs = model.encode(
+        arrow_table([{"history": [1.0, 2.0], "future": [3.0, 4.0, 5.0]}] * 2),
+        strata=Strata.train,
+    )
+    future = inputs[Address("/future")]
+    assert future.content["values"].shape[-2] != future.targets["content"]["values"].shape[-2]
+
+    model(inputs, strata=Strata.train)
+
+
+def test_forward_contract_rejects_target_content_with_wrong_coordinate_shape() -> None:
+    model = rf.Model(preset="small", d_model=8, attention=None, items=rf.Branch(length=2, amount=rf.Number(mask=True)))
+    rows = [{"items": [{"amount": 1.0}, {"amount": 2.0}]}, {"items": [{"amount": 3.0}, {"amount": 4.0}]}]
+    inputs = model.encode(arrow_table(rows), strata=Strata.train)
+    field = inputs[Address("/items/amount")]
+    field.targets = TensorDict(
+        {"state": field.targets["state"], "content": torch.zeros(2, 7, dtype=field.targets["content"].dtype)},
+        batch_size=[2],
+    )
+
+    with pytest.raises(ForwardContractError, match=r"targets\[content\].*state shape"):
         model(inputs, strata=Strata.train)
 
 
@@ -330,3 +363,44 @@ def test_contract_scope_cache_is_bounded_for_new_dataloaders() -> None:
         assert scheduler.should_check(model, inputs, strata=Strata.train, dataloader_idx=index)
 
     assert len(scheduler._counts) == CONTRACT_SCOPES
+
+
+def test_forward_accepts_forecast_extent_up_to_capacity():
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        batch_size=4,
+        events=rf.Branch(
+            length=3,
+            direction=rf.Direction.causal,
+            overflow="tail",
+            mask=rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True),
+            value=rf.Number,
+            load=rf.Number,
+        ),
+    )
+    table = pa.table({"events": [[{"value": float(i), "load": 1.0} for i in range(8)]]})
+    batch = model.encode(table, strata="train")
+    output = runtime.step(model, batch, 0, strata=rf.Strata.train)
+    assert output is not None and torch.isfinite(output["loss"])
+
+
+def test_geometry_views_must_match_the_parent_shape_and_be_non_negative() -> None:
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        history=rf.Branch(length=3, amount=rf.Number, contrastive=rf.Contrastive(views=rf.Crops(width=2))),
+    )
+    inputs = model.encode(arrow_table([{"history": [{"amount": 1.0}] * 3}]), strata=Strata.train)
+    geometry = inputs[Address()][Address("history")]
+    assert geometry.views.shape == (1, 1, 2)
+    sanitize(model, inputs, strata=Strata.train)
+
+    original = geometry.views
+    geometry.views = torch.zeros(1, 2, dtype=torch.int64)
+    with pytest.raises(ForwardContractError, match="/history.*views must be int64 with shape"):
+        sanitize(model, inputs, strata=Strata.train)
+
+    geometry.views = -torch.ones_like(original)
+    with pytest.raises(ForwardContractError, match="/history.*views must be non-negative"):
+        sanitize(model, inputs, strata=Strata.train)

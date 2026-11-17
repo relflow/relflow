@@ -301,11 +301,29 @@ def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple
                 f"forward branch geometry '{address}' slots must start with parent shape {parent_shape}, "
                 f"got {tuple(geometry.slots.shape)}"
             )
+        if geometry.views is not None and (
+            geometry.views.dtype != torch.int64 or tuple(geometry.views.shape) != (*parent_shape, 2)
+        ):
+            message = (
+                f"forward branch geometry '{address}' views must be int64 with shape {(*parent_shape, 2)}, "
+                f"got {geometry.views.dtype} with shape {tuple(geometry.views.shape)}"
+            )
+            raise ForwardContractError(message)
+        if geometry.hidden is not None and (
+            geometry.hidden.dtype != torch.bool
+            or tuple(geometry.hidden.shape) != (*parent_shape, 2, geometry.slots.shape[-1])
+        ):
+            message = (
+                f"forward branch geometry '{address}' hidden must be bool with shape "
+                f"{(*parent_shape, 2, geometry.slots.shape[-1])}, "
+                f"got {geometry.hidden.dtype} with shape {tuple(geometry.hidden.shape)}"
+            )
+            raise ForwardContractError(message)
         extent = geometry.slots.shape[-1]
-        if (address == Address() and extent != 1) or (branch.length is not None and extent > branch.length):
+        if (address == Address() and extent != 1) or (branch.capacity is not None and extent > branch.capacity):
             raise ForwardContractError(
                 f"forward branch geometry '{address}' extent must be "
-                f"{'one' if address == Address() else f'at most {branch.length}'}, got {extent}"
+                f"{'one' if address == Address() else f'at most {branch.capacity}'}, got {extent}"
             )
         module_device = getattr(module, "device", None)
         if len(devices) != 1 or (
@@ -333,6 +351,9 @@ def require_geometry_values(module: "Model", inputs: TensorDict) -> None:
             raise ForwardContractError(
                 f"forward branch geometry '{address}' validity must agree with collection lengths"
             )
+        if geometry.views is not None and (geometry.views < 0).any():
+            message = f"forward branch geometry '{address}' views must be non-negative"
+            raise ForwardContractError(message)
         positions = torch.arange(geometry.slots.shape[-1], device=geometry.slots.device)
         if (geometry.slots & (positions >= geometry.lengths.unsqueeze(-1))).any():
             raise ForwardContractError(f"forward branch geometry '{address}' slots must lie within collection lengths")
@@ -400,13 +421,14 @@ def require_core_tensors(
     if TensorKey.content in targets.keys():
         target_content_name = f"{TensorKey.targets}[{TensorKey.content}]"
         target_content = require_tensor_tree(address, target_content_name, targets[TensorKey.content])
-        require_matching_tree_shapes(
-            address,
-            actual_name=target_content_name,
-            actual=target_content,
-            expected_name=TensorKey.content,
-            expected=content,
-        )
+        # Targets share the keys of content and leading coordinate axes; trailing axes
+        # belong to the extension, so a target may differ in width from its input.
+        if set(target_content) != set(content):
+            raise ForwardContractError(
+                f"forward input '{address}' {target_content_name} keys must match {TensorKey.content} keys: "
+                f"expected {format_paths(content)}, got {format_paths(target_content)}"
+            )
+        require_content_prefix_shapes(address=address, content=target_content, state=state, name=target_content_name)
 
 
 def require_tensor_devices(module: "Model", address: Address, tensorfield: TensorFieldBase) -> None:
@@ -553,6 +575,8 @@ def require_content_prefix_shapes(
     address: Address,
     content: dict[tuple[str, ...], torch.Tensor],
     state: torch.Tensor,
+    *,
+    name: str = TensorKey.content,
 ) -> None:
     state_shape = tuple(state.shape)
     state_rank = len(state_shape)
@@ -560,7 +584,7 @@ def require_content_prefix_shapes(
         if len(tensor.shape) < state_rank or tuple(tensor.shape[:state_rank]) != state_shape:
             suffix = format_path(path)
             raise ForwardContractError(
-                f"forward input '{address}' {TensorKey.content}{suffix} must start with {TensorKey.state} "
+                f"forward input '{address}' {name}{suffix} must start with {TensorKey.state} "
                 f"shape {state_shape}, "
                 f"got {tuple(tensor.shape)}"
             )

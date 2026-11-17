@@ -46,10 +46,12 @@ from relflow.data.sources import source
 from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
 from relflow.inspection import check, inspect
+from relflow.structs.contrastive import Contrastive, Crops, Hierarchical
 from relflow.structs.enums import (
     AttentionInput,
     AttentionMode,
     Component,
+    Direction,
     Metric,
     Overflow,
     OverflowInput,
@@ -68,6 +70,9 @@ from relflow.structs.experiment import (
     predicate,
     where,
 )
+from relflow.structs.grain import Coordinates, Pooling, Steps
+from relflow.structs.masking import Forecast, Spans
+from relflow.structs.mixer import Conv, Transformer
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
 from relflow.structs.structure import Branch, Mask
 from relflow.structs.tree import Address, Leaf, MaskInput
@@ -94,6 +99,7 @@ from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.number import Request as Number
 from relflow.tensorfields.extensions.ordinal import Request as Ordinal
 from relflow.tensorfields.extensions.quantile import Request as Quantile
+from relflow.tensorfields.extensions.series import Request as Series
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
@@ -158,7 +164,14 @@ __all__ = [
     "Category",
     "Component",
     "Context",
+    "Conv",
+    "Coordinates",
+    "Pooling",
     "CustomDataModule",
+    "Contrastive",
+    "Crops",
+    "Direction",
+    "Hierarchical",
     "DuckDBDataModule",
     "DateParts",
     "Enum",
@@ -202,12 +215,16 @@ __all__ = [
     "ReductionConfig",
     "RollbackCheckpoint",
     "RuntimePlacementCallback",
+    "Series",
     "Set",
     "SchedulerConfig",
     "Scheduler",
     "SchedulerOptions",
     "SchemaField",
     "SyntheticDataModule",
+    "Forecast",
+    "Spans",
+    "Steps",
     "Strata",
     "StrataInput",
     "StratumConfig",
@@ -217,6 +234,7 @@ __all__ = [
     "TensorKey",
     "Text",
     "Tokens",
+    "Transformer",
     "TreeFieldInput",
     "Vector",
     "VocabularySyncCallback",

@@ -2379,6 +2379,21 @@ export const reviews: Record<string, Review> = {
     },
     note: 'This is interpolation. Declared ordered labels are a separate condition, and Category cannot emit labels absent from its learned output vocabulary.',
   },
+  P101: {
+    question: 'Can a series forecast use the order of its steps?',
+    modeling:
+      'Generate noisy two-channel seasonal series and forecast the next eight steps from 48 history steps. Compare a model reading ordered history with repeating the last observed step and with the same model trained and scored on histories whose steps are shuffled.',
+    comparison: {
+      metric: 'MAE',
+      kind: 'Controlled comparison',
+      conditions: [
+        { label: 'Repeat last step', path: ['last_step_mae'], format: 'number' },
+        { label: 'Shuffled history', path: ['shuffled_mae'], format: 'number' },
+        { label: 'Ordered history', path: ['ordered_mae'], format: 'number' },
+      ],
+    },
+    note: 'Shuffling keeps every value and level but removes the seasonal phase. Irregular sampling, longer horizons, and real benchmark series receive separate gates.',
+  },
   P108: {
     question: 'Can Group recover nonlinear identity regimes?',
     modeling:

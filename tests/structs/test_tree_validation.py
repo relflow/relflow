@@ -1,7 +1,13 @@
+from typing import ClassVar
+from unittest.mock import patch
+
 import pydantic
 import pytest
 
+import relflow as rf
+from relflow.structs.enums import Component
 from relflow.structs.tree import Address, Leaf, Mask, Node
+from relflow.tensorfields.base import TENSORFIELDS
 
 
 class AddressPayload(pydantic.BaseModel):
@@ -157,3 +163,91 @@ def test_node_description_trims_and_accepts_optional_metadata():
 def test_node_description_empty_string_becomes_none():
     node = Node.model_validate({"name": "ok_name", "type": "node", "description": "   ", "n_heads": 4})
     assert node.description is None
+
+
+def test_leaf_accepts_a_tuple_query_and_coerces_a_list():
+    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ["ett.HUFL", "ett.OT"]})
+    assert leaf.query == ("ett.HUFL", "ett.OT")
+
+
+def test_leaf_rejects_an_invalid_tuple_query_source():
+    with pytest.raises(ValueError, match="invalid query"):
+        Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "[")})
+
+
+@pytest.mark.parametrize(
+    ("query", "match"),
+    [((), "empty tuple query"), (("a", "a"), "repeats 'a'"), (("a", "../b"), "ancestor branch")],
+)
+def test_stacked_request_rejects_empty_or_repeated_sources(query, match):
+    class Stacking(Leaf):
+        stacked: ClassVar[bool] = True
+
+    leaf = Stacking.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": query})
+    with pytest.raises(ValueError, match=match):
+        leaf.post_bind_validate()
+
+
+def test_requests_do_not_stack_by_default():
+    assert Leaf.stacked is False
+
+
+def test_single_source_field_rejects_a_tuple_query_naming_its_address():
+    with pytest.raises(ValueError, match=r"'/amount'.*no derive component.*stacked"):
+        rf.Model(preset="small", d_model=8, amount=rf.Number(query=("a", "b")))
+
+
+def test_a_request_without_stacked_rejects_a_tuple_query_at_bind():
+    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "b")})
+    with pytest.raises(ValueError, match="no derive component"):
+        leaf.post_bind_validate()
+
+
+def test_request_declaring_stacked_and_derive_is_rejected_naming_the_address():
+    class Both(Leaf):
+        stacked: ClassVar[bool] = True
+
+    leaf = Both.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": ("a", "b")})
+    with patch.dict(TENSORFIELDS[leaf.type].components, {Component.derive: object()}):
+        with pytest.raises(ValueError, match=r"both stacked and a derive.*choose one"):
+            leaf.post_bind_validate()
+
+
+FORECAST = rf.Forecast(horizon=2, targets=("value",))
+
+
+@pytest.mark.parametrize("other", [{"query": "keep"}, {"rate": 0.5}])
+def test_mask_select_is_exclusive_with_query_and_rate(other):
+    with pytest.raises(ValueError, match="select cannot be combined with query or rate"):
+        rf.Mask(select=rf.Spans(rate=0.2), reconstruct=True, **other)
+
+
+def test_forecast_mask_requires_reconstruct():
+    with pytest.raises(ValueError, match=r"Forecast.*reconstruct=True"):
+        rf.Mask(select=FORECAST)
+
+
+def test_forecast_mask_rejects_skip():
+    with pytest.raises(ValueError, match=r"Forecast.*drop skip=True"):
+        rf.Mask(select=FORECAST, skip=True, reconstruct=True)
+
+
+def test_row_selector_on_a_leaf_is_rejected():
+    with pytest.raises(ValueError, match="row selectors apply to branches"):
+        rf.Number(mask=rf.Mask(select=rf.Spans(rate=0.2), reconstruct=True))
+
+
+def test_mask_without_select_keeps_its_serialized_form():
+    assert rf.Mask.model_validate({"rate": 0.5}) == rf.Mask(rate=0.5)
+    assert rf.Mask(rate=0.5).select is None
+    assert rf.Mask(rate=0.5).model_dump() == {
+        "query": None,
+        "rate": 0.5,
+        "skip": False,
+        "dropout": True,
+        "reconstruct": False,
+    }
+    assert "select" not in rf.Number(mask=True).model_dump(mode="json")["mask"][0]
+    dumped = rf.Mask(select=FORECAST, reconstruct=True).model_dump()["select"]
+    assert dumped["targets"] == ("value",)
+    assert dumped["known"] == ()

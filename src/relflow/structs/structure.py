@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import builtins
+import datetime
 from collections.abc import Mapping
+from types import MappingProxyType
 from typing import Annotated, Any, Literal, Self, TypeAlias, cast
 
 import pydantic
 
 from relflow.structs import declaration
-from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
+from relflow.structs.contrastive import Contrastive
+from relflow.structs.enums import AttentionInput, AttentionMode, Direction, Overflow, OverflowInput
+from relflow.structs.grain import Coordinates, GrainConfig, Steps
+from relflow.structs.masking import Forecast
+from relflow.structs.mixer import Conv, MixerConfig, Transformer
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
@@ -21,6 +27,89 @@ RequestTypes: TypeAlias = Leaf
 
 OMITTED = object()
 
+# Options left at these values are omitted from dumps, so a plain branch keeps
+# the schema, YAML and checkpoint text it had before the options existed.
+IMPLICIT: Mapping[str, object] = MappingProxyType(
+    {
+        "grain": Coordinates(),
+        "mixer": Transformer(),
+        "direction": Direction.bidirectional,
+        "time_index": None,
+        "time_step": None,
+        "contrastive": None,
+    }
+)
+
+
+def check_forecast_children(
+    branch: Branch,
+    *,
+    singular: str,
+    plural: str,
+    names: tuple[str, ...],
+    taken: Mapping[str, str],
+    remedy: str,
+) -> None:
+    """Require distinct names of direct leaf children that no other Forecast role claims.
+
+    Args:
+        branch: The branch that holds the Forecast mask.
+        singular: Role of one name in messages, such as ``target``.
+        plural: Role of the whole tuple in messages, such as ``targets``.
+        names: The names a Forecast field lists.
+        taken: Names another role claims, each with the reason it cannot appear here.
+        remedy: What to do when a name is a child branch.
+
+    Raises:
+        ValueError: A name repeats, is unknown, is claimed, or is a child branch.
+    """
+    where = label(branch)
+    children = {field.name: field for field in branch.fields}
+    repeated = sorted({name for name in names if names.count(name) > 1})
+    if repeated:
+        message = f"{where} Forecast {plural} name {repeated} more than once; list each {singular} child once"
+        raise ValueError(message)
+    for name in names:
+        if name not in children:
+            message = (
+                f"{where} Forecast {singular} '{name}' is not a child of the branch; "
+                f"name direct leaf children such as {sorted(str(child) for child in children)}"
+            )
+            raise ValueError(message)
+        if name in taken:
+            message = f"{where} Forecast {singular} '{name}' {taken[name]}"
+            raise ValueError(message)
+        if not isinstance(children[name], Leaf):
+            message = f"{where} Forecast {singular} '{name}' is a branch; {remedy}"
+            raise ValueError(message)
+
+
+def check_contrastive(branch: Branch) -> None:
+    """Require a fixed token count per row for every child of a contrastive branch.
+
+    Args:
+        branch: The branch to check.
+
+    Raises:
+        ValueError: A child branch has ``reduction=None``.
+    """
+    if branch.contrastive is None:
+        return
+    unreduced = next((f for f in branch.fields if isinstance(f, Branch) and f.reduction is None), None)
+    if unreduced is None:
+        return
+    message = (
+        f"branch '{branch.address}' contrastive views need a fixed width per row, but child "
+        f"'{unreduced.address}' has reduction=None; set a reduction on that child or remove contrastive"
+    )
+    raise ValueError(message)
+
+
+def label(branch: Branch) -> str:
+    """Name a branch in messages: its address or name once bound, else ``a branch``."""
+    name = branch.address or branch.name
+    return f"branch '{name}'" if name else "a branch"
+
 
 def bounds(branch: Branch) -> None:
     """Keep a collection cap and its overflow policy as one configuration."""
@@ -28,17 +117,18 @@ def bounds(branch: Branch) -> None:
     if branch.length is not None and (
         not isinstance(branch.length, int) or isinstance(branch.length, bool) or branch.length < 1
     ):
-        raise ValueError(
+        message = (
             f"branch '{branch.address or branch.name}' length must be a positive integer or None, got {branch.length!r}"
         )
-    if branch.length is None:
-        if branch.overflow is not None:
-            location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
-            raise ValueError(
-                f"unbounded branch{location} cannot configure overflow={branch.overflow!r}; "
-                "set a finite length or remove the overflow policy"
-            )
-    elif branch.overflow is None:
+        raise ValueError(message)
+    if branch.length is None and branch.overflow is not None:
+        location = f" '{branch.address or branch.name}'" if branch.address or branch.name else ""
+        message = (
+            f"unbounded branch{location} cannot configure overflow={branch.overflow!r}; "
+            "set a finite length or remove the overflow policy"
+        )
+        raise ValueError(message)
+    if branch.length is not None and branch.overflow is None:
         branch.overflow = Overflow.head
 
 
@@ -67,7 +157,15 @@ class Branch(Node, metaclass=BranchMeta):
 
     ``attention=None`` disables coordinate and sequence attention independently
     of the reduction. ``ffnx`` multiplies this node's feed-forward hidden width
-    and defaults to 8 independently of its parent.
+    and defaults to 8 independently of its parent. ``grain`` chooses what one
+    sequence token stands for, ``mixer`` chooses the sequence mixer (``None``
+    disables sequence mixing while keeping coordinate attention), and
+    ``direction`` sets which steps a token may see. ``time_index`` names a
+    child leaf whose values give each row a position in time, relative to the
+    first row of its record and non-decreasing; ``time_step`` is the unit of
+    those positions. They set attention positions and a learned gap embedding;
+    they do not resample rows. ``contrastive`` adds a training objective that
+    contrasts two crops of each record; see ``Contrastive``.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     Subclasses may declare children in their class bodies; constructing those
     subclasses configures the enclosing branch without replacing children.
@@ -83,6 +181,12 @@ class Branch(Node, metaclass=BranchMeta):
     overflow: Overflow | None = None
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
+    grain: GrainConfig = pydantic.Field(default_factory=Coordinates)
+    mixer: MixerConfig | None = pydantic.Field(default_factory=Transformer)
+    direction: Direction = Direction.bidirectional
+    time_index: str | None = None
+    time_step: float | datetime.timedelta | None = None
+    contrastive: Contrastive | None = None
     # The before-validator normalizes this public Boolean default to a tuple.
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     fields: list[Branch | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
@@ -101,6 +205,12 @@ class Branch(Node, metaclass=BranchMeta):
         n_heads: int = cast(int, OMITTED),
         ffnx: int = cast(int, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
+        grain: GrainConfig = cast(GrainConfig, OMITTED),
+        mixer: MixerConfig | None = cast(MixerConfig | None, OMITTED),
+        direction: Direction = cast(Direction, OMITTED),
+        time_index: str | None = cast(str | None, OMITTED),
+        time_step: float | datetime.timedelta | None = cast(float | datetime.timedelta | None, OMITTED),
+        contrastive: Contrastive | None = cast(Contrastive | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
@@ -121,6 +231,12 @@ class Branch(Node, metaclass=BranchMeta):
             n_heads=n_heads,
             ffnx=ffnx,
             reduction=reduction,
+            grain=grain,
+            mixer=mixer,
+            direction=direction,
+            time_index=time_index,
+            time_step=time_step,
+            contrastive=contrastive,
             dropout=dropout,
             mask=mask,
             type=type,
@@ -128,6 +244,65 @@ class Branch(Node, metaclass=BranchMeta):
         # Pydantic owns ordinary defaults; omitted options remain available for
         # a model preset to fill without replacing explicit defaults or None.
         super().__init__(**{name: value for name, value in data.items() if value is not OMITTED})
+
+    @classmethod
+    def chronological(
+        cls,
+        *,
+        length: int | None = None,
+        overflow: OverflowInput | None = cast(OverflowInput | None, OMITTED),
+        grain: GrainConfig = cast(GrainConfig, OMITTED),
+        mixer: MixerConfig | None = cast(MixerConfig | None, OMITTED),
+        direction: Direction = cast(Direction, OMITTED),
+        **options: Any,
+    ) -> Self:
+        """Build a branch of ordered rows with time series defaults.
+
+        The result is a plain ``Branch``: one token per row (``grain=Steps()``),
+        a dilated convolution mixer (``mixer=Conv()``) and causal steps
+        (``direction=Direction.causal``). A bounded branch keeps the most
+        recent rows (``overflow="tail"``). Every explicit argument replaces its
+        default. Rows are positioned by their count unless ``time_index`` is
+        set, in which case rows also receive a learned time-gap embedding.
+
+        The causal default suits forecasting and per-row targets. Classification
+        and other whole-series targets need
+        ``direction=rf.Direction.bidirectional``, because a causal branch lets
+        no row see the rows after it.
+
+        Args:
+            length: Row cap, or ``None`` to keep every row.
+            overflow: Which rows to keep beyond ``length``; ``"tail"`` when omitted and bounded.
+            grain: What one sequence token stands for.
+            mixer: The sequence mixer.
+            direction: Which steps a token may see.
+            **options: Any other ``Branch`` option, child field or ``fields`` mapping.
+
+        Returns:
+            A plain ``Branch``.
+
+        Raises:
+            ValueError: If the resulting options contradict each other, such as
+                ``mixer=Conv()`` without ``grain=Steps()`` or a ``time_index``
+                that names no child. The message names the branch and the remedy.
+        """
+        defaults: dict[str, Any] = {"grain": Steps(), "mixer": Conv(), "direction": Direction.causal}
+        if length is not None:
+            defaults["overflow"] = Overflow.tail
+        given: dict[str, Any] = {
+            name: value
+            for name, value in (("overflow", overflow), ("grain", grain), ("mixer", mixer), ("direction", direction))
+            if value is not OMITTED
+        }
+        merged: dict[str, Any] = {**defaults, **given, **options}
+        return cls(length=length, **merged)
+
+    @pydantic.model_serializer(mode="wrap")
+    def serialize_options(self, handler: pydantic.SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Dump the branch without options that still hold their implicit value."""
+        payload = handler(self)
+        implicit = {name for name, value in IMPLICIT.items() if getattr(self, name) == value}
+        return {key: value for key, value in payload.items() if key not in implicit}
 
     @pydantic.field_validator("mask", mode="before")
     @classmethod
@@ -178,9 +353,145 @@ class Branch(Node, metaclass=BranchMeta):
             compile(self.query)
         return self
 
+    @pydantic.model_validator(mode="after")
+    def check_time_index(self) -> Self:
+        if self.time_index is None:
+            return self
+        child = next((field for field in self.fields if field.name == self.time_index), None)
+        where = label(self)
+        if child is None:
+            message = (
+                f"{where} sets time_index={self.time_index!r}, but has no child named {self.time_index!r}; "
+                "name an existing child leaf or add one"
+            )
+            raise ValueError(message)
+        if isinstance(child, Branch):
+            message = (
+                f"{where} sets time_index={self.time_index!r}, which must name a leaf, not a child branch; "
+                "name a leaf child holding the time of each row"
+            )
+            raise ValueError(message)
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def check_time_step(self) -> Self:
+        if self.time_step is None:
+            return self
+        where = label(self)
+        if self.time_index is None:
+            message = f"{where} sets time_step={self.time_step!r}, which requires time_index; name the time child"
+            raise ValueError(message)
+        step = self.time_step
+        seconds = step.total_seconds() if isinstance(step, datetime.timedelta) else step
+        if seconds <= 0:
+            message = f"{where} time_step must be positive, got {self.time_step!r}"
+            raise ValueError(message)
+        return self
+
+    @pydantic.model_validator(mode="after")
+    def check_forecast(self) -> Self:
+        forecasts = [mask.select for mask in self.mask if isinstance(mask.select, Forecast)]
+        if not forecasts:
+            return self
+        where = label(self)
+        if len(forecasts) > 1:
+            message = f"{where} has {len(forecasts)} Forecast masks; use at most one Forecast per branch"
+            raise ValueError(message)
+        if self.direction == Direction.bidirectional:
+            message = (
+                f"{where} uses Mask(select=Forecast(...)) with direction=bidirectional, which lets rows see "
+                "the future they predict; set direction=rf.Direction.causal"
+            )
+            raise ValueError(message)
+        if self.overflow == Overflow.head:
+            message = (
+                f"{where} uses Mask(select=Forecast(...)) with overflow='head', which can exclude the latest "
+                'context and anchor future slots to an earlier row; set overflow="tail" or "error", '
+                "or use Branch.chronological"
+            )
+            raise ValueError(message)
+        forecast = forecasts[0]
+        check_forecast_children(
+            self,
+            singular="target",
+            plural="targets",
+            names=forecast.targets,
+            taken={
+                name: "is the time_index child; targets are values to predict, so name another child"
+                for name in filter(None, (self.time_index,))
+            },
+            remedy="targets must be direct leaf children, so name a leaf inside it on that branch instead",
+        )
+        check_forecast_children(
+            self,
+            singular="known",
+            plural="known",
+            names=forecast.known,
+            taken={
+                **{
+                    name: "is also a target; a known covariate stays visible, so remove it from known or from targets"
+                    for name in forecast.targets
+                },
+                **{
+                    name: "is the time_index child, which always stays visible; remove it from known"
+                    for name in filter(None, (self.time_index,))
+                },
+            },
+            remedy="known covariates must be direct leaf children, so move them up or leave the branch hidden",
+        )
+        time_child = next((field for field in self.fields if field.name == self.time_index), None)
+        query = getattr(time_child, "query", None)
+        if query is None:
+            return self
+        from relflow.data.query import Member, compile
+
+        steps = compile(query).steps if isinstance(query, str) else ()
+        if len(steps) == 1 and isinstance(steps[0], Member):
+            return self
+        message = (
+            f"{where} time_index child '{self.time_index}' must read a single member for Forecast slots, "
+            f"got query {query!r}; derive the time column in a Preprocessor"
+        )
+        raise ValueError(message)
+
+    @pydantic.model_validator(mode="after")
+    def check_steps(self) -> Self:
+        if not isinstance(self.grain, Steps):
+            return self
+        unreduced = next((f for f in self.fields if isinstance(f, Branch) and f.reduction is None), None)
+        if unreduced is None:
+            return self
+        message = (
+            f"{label(self)} sets grain=Steps(), so rows pool to one token, but child branch "
+            f"'{unreduced.name}' needs a reduction; set reduction=rf.Attention() or rf.Mean() on it"
+        )
+        raise ValueError(message)
+
+    @pydantic.model_validator(mode="after")
+    def check_conv(self) -> Self:
+        if not isinstance(self.mixer, Conv) or isinstance(self.grain, Steps):
+            return self
+        message = (
+            f"{label(self)} sets mixer=Conv(), which convolves over rows and "
+            "requires grain=Steps(); set grain=rf.Steps() or mixer=rf.Transformer()"
+        )
+        raise ValueError(message)
+
     def model_post_init(self, __context: object) -> None:
         for field in self.fields:
             field.parent = self
+
+    @property
+    def forecast(self) -> Forecast | None:
+        """The one ``Forecast`` selector of this branch mask, if any."""
+        return next((mask.select for mask in self.mask if isinstance(mask.select, Forecast)), None)
+
+    @property
+    def capacity(self) -> int | None:
+        """Rows this branch may hold: ``length``, plus the forecast horizon; ``None`` when unbounded."""
+        if self.length is None or self.forecast is None:
+            return self.length
+        return self.length + self.forecast.horizon
 
     @pydantic.model_validator(mode="after")
     def check_unique_child_names(self) -> Self:
@@ -196,6 +507,7 @@ class Branch(Node, metaclass=BranchMeta):
 
     def post_bind_validate(self) -> None:
         bounds(self)
+        check_contrastive(self)
         if len(self.mask) == 0:
             return None
 

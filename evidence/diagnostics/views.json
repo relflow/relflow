@@ -715,6 +715,13 @@
     "comparison": "Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.",
     "limit": "Withheld ranks lie inside the observed range. One seed does not establish arbitrary extrapolation; Category has no output classes for the withheld answers. Without a matching recorded run, only the split design is illustrated."
   },
+  "P101": {
+    "mode": "forecast",
+    "target": "future",
+    "focus": "Does a Series forecast use the order of its history steps?",
+    "comparison": "Compare ordered-history error with repeating the last step and with a model trained on shuffled history steps.",
+    "limit": "The series are synthetic two-channel seasonal waves with dropped steps; one seed does not establish behavior on irregular or real time series."
+  },
   "P108": {
     "mode": "grouping",
     "target": "y",

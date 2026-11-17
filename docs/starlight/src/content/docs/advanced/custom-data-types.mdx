@@ -328,11 +328,20 @@ The extension's `types` contract applies to those derived values.
 
 Each `../` prefix selects a source from one enclosing branch, aligned with the
 retained child records. It does not perform a relational join, and a path cannot
-ascend past the model root. Tuple queries require a registered derive component;
-an ordinary field uses one source query. The
+ascend past the model root. Tuple queries require a registered derive component
+or a stacked request; an ordinary field uses one source query. The
 [derivation protocol](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/base.py#L76)
 and [source projection checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L567)
 define this boundary.
+
+## Stack several sources as channels
+
+A request that reads several sources as channels of one value sets
+`stacked: ClassVar[bool] = True`, as `Vector` and `Series` do. Its values then
+arrive as `fixed_size_list<N>` along a trailing channel axis, with a null
+element where a source is missing. A request that declares both `stacked` and
+`Component.derive` is rejected: choose one. A stacked field may be absent from
+prediction input when it is a reconstruction target.
 
 ## Check the extension boundary
 

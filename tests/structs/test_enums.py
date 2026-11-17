@@ -1,4 +1,4 @@
-from relflow.structs.enums import AttentionMode, Strata
+from relflow.structs.enums import AttentionMode, Direction, Strata
 
 
 def test_strata_normalizes_strings():
@@ -18,3 +18,7 @@ def test_attention_mode_kv_heads():
     assert AttentionMode.mha.kv_heads(8) == 8
     assert AttentionMode.gqa.kv_heads(8) == 4
     assert AttentionMode.mqa.kv_heads(8) == 1
+
+
+def test_direction_has_causal():
+    assert Direction("causal") is Direction.causal

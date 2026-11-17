@@ -131,6 +131,11 @@ class LearnedQueryCrossAttention(Pool):
         if self.mass_projection is not None:
             torch.nn.init.zeros_(self.mass_projection.weight)
 
+    @property
+    def n_context(self) -> int:
+        """Number of learned queries, which is the number of output tokens per row."""
+        return self.queries.shape[0]
+
     def forward(
         self,
         memory: torch.Tensor,
@@ -266,7 +271,19 @@ class MeanPool(Pool):
         self.n_context = n_context
         self.mass_direction = torch.nn.Parameter(torch.zeros(d_model)) if d_model is not None else None
 
-    def forward(self, memory: torch.Tensor, present: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self,
+        memory: torch.Tensor,
+        present: torch.Tensor | None = None,
+        *,
+        context: torch.Tensor | None = None,
+        evidence: torch.Tensor | None = None,
+        memory_positions: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Average present rows; ``context``, ``evidence`` and ``memory_positions`` are ignored.
+
+        They exist so every reducer accepts one call form.
+        """
         if present is None:
             present = torch.ones(memory.shape[:2], dtype=torch.bool, device=memory.device)
         if present.dtype != torch.bool or tuple(present.shape) != tuple(memory.shape[:2]):

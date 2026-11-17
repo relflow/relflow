@@ -1,9 +1,12 @@
+import math
 from types import SimpleNamespace
 
 import pyarrow as pa
 import pydantic
 import pytest
 import torch
+import yaml
+from lightning.pytorch import seed_everything
 from tensordict import TensorDict
 
 import relflow as rf
@@ -462,3 +465,111 @@ def test_vector_training_survives_a_non_finite_element(tmp_path):
         default_root_dir=tmp_path,
     )
     assert all(torch.isfinite(parameter).all() for parameter in model.parameters())
+
+
+def test_vector_declares_stacked_and_takes_n_dim_from_a_tuple_query():
+    assert rf.Vector.stacked is True
+    assert rf.Vector(query=("HUFL", "HULL", "OT")).n_dim == 3
+
+
+def test_vector_tuple_query_round_trips_yaml_and_checkpoint(tmp_path):
+    seed_everything(0, workers=True)
+    model = rf.Model(preset="small", d_model=8, load=rf.Vector(query=("a", "b")))
+    path = tmp_path / "schema.yaml"
+    path.write_text(yaml.safe_dump(model.schema.model_dump(mode="json")), encoding="utf-8")
+    reloaded = Schema.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    assert (reloaded.requests["/load"].query, reloaded.requests["/load"].n_dim) == (("a", "b"), 2)
+    loaded = rf.Model.load(model.save(tmp_path / "model.ckpt"))
+    assert loaded.schema.requests["/load"].query == ("a", "b")
+
+
+def test_vector_tuple_query_keeps_validity_per_channel():
+    model = rf.Model(preset="small", d_model=8, load=rf.Vector(query=("a", "b")), label=rf.Boolean(mask=True))
+    rows = pa.table({"a": [1.0, None, float("nan"), float("nan"), None], "b": [2.0, 4.0, 5.0, float("inf"), None]})
+    field = model.encode(rows, strata="predict")[rf.Address("/load")]
+    assert field.state.reshape(-1).tolist() == [Tokens.valued, Tokens.valued, Tokens.valued, Tokens.other, Tokens.null]
+    content = field.content.reshape(5, 2)
+    assert content[0].tolist() == [1.0, 2.0]
+    assert torch.isnan(content[1, 0]) and content[1, 1].item() == 4.0
+    assert torch.isnan(content[2, 0]) and content[2, 1].item() == 5.0
+    assert content[3].tolist() == [0.0, 0.0]
+
+
+def test_vector_tuple_embedder_reads_which_channels_are_missing():
+    seed_everything(0, workers=True)
+    model = rf.Model(preset="small", d_model=8, load=rf.Vector(query=("a", "b")), label=rf.Boolean(mask=True))
+    embedder = model.nodes[rf.Address("/load")].embedder
+    assert embedder.linear[0].in_features == 4
+    rows = pa.table({"a": [None, 0.0], "b": [4.0, 4.0]})
+    field = model.encode(rows, strata="predict")[rf.Address("/load")]
+    inputs = TensorInput(content=field.content, state=field.state, batch_size=field.batch_size)
+    payload = embedder.eval()(inputs).payload
+    assert torch.isfinite(payload).all()
+    assert not torch.equal(payload[0], payload[1])
+
+
+def test_vector_single_query_keeps_its_parameters():
+    model = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    assert model.nodes[rf.Address("/vec")].embedder.linear[0].in_features == 2
+
+
+def test_vector_tuple_loss_counts_only_observed_channels():
+    schema = rf.Schema.from_tree(
+        d_model=16, n_layers=1, n_heads=4, items=rf.Branch(length=2, embedding=rf.Vector(query=("a", "b"), mask=True))
+    )
+    rows = arrow_table([{"items": [{"a": 1.0, "b": None}, {"a": 3.0, "b": 4.0}]}])
+    field = tensorize(
+        TensorField,
+        coalesce(rows, schema=schema, strata=Strata.train).fields[ADDRESS],
+        TENSORFIELDS["vector"],
+        address=ADDRESS,
+        schema=schema,
+        strata=Strata.train,
+    )
+    targets = field.targets[TensorKey.content]
+    logits = torch.full((*field.state.shape, len(Tokens)), -50.0)
+    logits.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
+    predicted = torch.nan_to_num(targets, nan=100.0) + 2.0  # a missing channel must not count
+    payload = TensorDict({TensorKey.state: logits, TensorKey.content: predicted}, batch_size=field.state.shape[:1])
+    prediction = Prediction(address=ADDRESS, payload=payload)
+    output = loss(module=DummyModule(schema), prediction=prediction, batch=field, strata=Strata.train)
+    assert torch.isclose(output, torch.tensor(4.0, dtype=output.dtype))  # l2 of +2 over 3 observed channels
+
+
+def test_channels_select_keeps_vectors_two_dimensional_with_observed_weights():
+    predicted = torch.zeros(2, 2)
+    observed = torch.tensor([[1.0, math.nan], [3.0, 4.0]])
+    selected = rf.Vector(query=("a", "b")).readout.select(predicted, observed)
+    assert selected.predicted.shape == selected.observed.shape == (2, 2)
+    assert selected.weight is not None and selected.weight.tolist() == [[1.0, 0.0], [1.0, 1.0]]
+    assert torch.isfinite(selected.observed).all()
+
+
+@pytest.mark.parametrize("objective", ["l1", "l2"])
+def test_fully_valid_tuple_query_loss_matches_the_single_query_loss(objective):
+    losses = []
+    for options in ({"n_dim": 2}, {"query": ("a", "b")}):
+        schema = rf.Schema.from_tree(
+            d_model=16,
+            n_layers=1,
+            n_heads=4,
+            items=rf.Branch(length=2, embedding=rf.Vector(objective=objective, mask=True, **options)),
+        )
+        rows = arrow_table([{"items": [{"a": 1.0, "b": 2.0}, {"a": 3.0, "b": 5.0}]}])
+        if "n_dim" in options:
+            rows = arrow_table([{"items": [{"embedding": [1.0, 2.0]}, {"embedding": [3.0, 5.0]}]}])
+        field = tensorize(
+            TensorField,
+            coalesce(rows, schema=schema, strata=Strata.train).fields[ADDRESS],
+            TENSORFIELDS["vector"],
+            address=ADDRESS,
+            schema=schema,
+            strata=Strata.train,
+        )
+        logits = torch.full((*field.state.shape, len(Tokens)), -50.0)
+        logits.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
+        predicted = field.targets[TensorKey.content] + torch.tensor([1.0, 3.0])
+        payload = TensorDict({TensorKey.state: logits, TensorKey.content: predicted}, batch_size=field.state.shape[:1])
+        prediction = Prediction(address=ADDRESS, payload=payload)
+        losses.append(loss(module=DummyModule(schema), prediction=prediction, batch=field, strata=Strata.train))
+    torch.testing.assert_close(losses[0], losses[1])

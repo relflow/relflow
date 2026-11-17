@@ -56,3 +56,27 @@ def test_rank_without_local_targets_still_emits_the_anchored_loss(monkeypatch):
     assert validated["loss"].item() == 0.0 and not validated["loss"].requires_grad
     assert {entry["name"] for entry in entries} == {"loss/validate"}
     assert entries[0]["batch_size"] == 0 and torch.equal(entries[0]["value"], torch.zeros(()))
+
+
+def test_rank_without_forecast_targets_still_emits_the_anchored_loss(monkeypatch):
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        batch_size=8,
+        events=rf.Branch(
+            length=3,
+            direction=rf.Direction.causal,
+            overflow="tail",
+            mask=rf.Mask(select=rf.Forecast(horizon=1, targets=("value",)), reconstruct=True),
+            value=rf.Number,
+            load=rf.Number,
+        ),
+    )
+    item = pa.struct([("value", pa.float64()), ("load", pa.float64())])
+    batch = model.encode(pa.table({"events": pa.array([[], None], type=pa.list_(item))}), strata="train")
+    monkeypatch.setattr(runtime, "all_reduce_max", lambda tensor: torch.ones_like(tensor))
+    output = runtime.step(model, batch, 0, strata=rf.Strata.train)
+    assert output is not None and output["loss"].requires_grad and output["loss"].item() == 0.0
+    output["loss"].backward()
+    assert all(parameter.grad is not None for parameter in model.nodes["/events/value"].decoder.parameters())
+    assert "/events/load" not in model.schema.objectives

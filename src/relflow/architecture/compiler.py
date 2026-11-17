@@ -10,6 +10,7 @@ from typing import Any, Generic, ParamSpec, cast
 import torch
 
 from relflow.architecture.encoder import BranchEncoder
+from relflow.architecture.mixers import TransformerMixer
 from relflow.architecture.packed import customized
 from relflow.architecture.pool import CrossAttentionBlock, LearnedQueryCrossAttention
 
@@ -63,14 +64,14 @@ class Region(Generic[P]):
         # Keep them eager instead of caching a graph for every grouping.
         if kwargs.get("packing") is not None:
             return cast(torch.Tensor, self.eager(*args, **kwargs))
-        layers = (
-            owner.encoder
+        layers: list[torch.nn.Module] = (
+            [cast(torch.nn.Module, owner.encoder)]  # every mixer is a module; the protocol only hides it
             if isinstance(owner, BranchEncoder)
             else [*owner.blocks, owner.norm, *([owner.mass_projection] if owner.mass_projection is not None else [])]
         )
         # Torch skips guards for hooks by default. Check outside the graph so
         # callbacks added after warmup and custom replacements still run eager.
-        if customized(layers, additional=(CrossAttentionBlock,)):
+        if customized(layers, additional=(CrossAttentionBlock, TransformerMixer)):
             return cast(torch.Tensor, self.eager(*args, **kwargs))
         if self.retain_graph:
             from torch._functorch import config
@@ -131,7 +132,13 @@ def compile(
     replacements = []
     for module in model.modules():
         if not (
-            (encoders and type(module) is BranchEncoder and len(module.encoder))
+            # Only a non-empty transformer stack is compiled; other mixers stay eager.
+            (
+                encoders
+                and type(module) is BranchEncoder
+                and type(module.encoder) is TransformerMixer
+                and len(module.encoder)
+            )
             or (pools and type(module) is LearnedQueryCrossAttention)
         ):
             continue

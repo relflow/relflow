@@ -38,6 +38,7 @@ from lightning.pytorch import Callback
 from tensordict import TensorClass, TensorDict, TensorDictBase
 from typing_extensions import TypeVar as DefaultTypeVar
 
+from relflow.architecture.grain import RowReadout, readouts
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.architecture.rotary import coordinates, flatten, signal
 from relflow.data.arrow import Geometry, variants
@@ -318,8 +319,8 @@ class DecoderBase(torch.nn.Module):
             if isinstance(node, Leaf):
                 self.memory_coordinates[origin] = (
                     tuple(node.address for node in path[:-1]),
-                    tuple(node.length for node in path[:-1]),
-                    path[-1].length,
+                    tuple(node.capacity for node in path[:-1]),
+                    path[-1].capacity,
                 )
                 continue
             outer = path[:-2]
@@ -329,10 +330,10 @@ class DecoderBase(torch.nn.Module):
             ):
                 capacity = width
                 if len(path) > 1:
-                    capacity = None if path[-2].length is None or capacity is None else path[-2].length * capacity
+                    capacity = None if path[-2].capacity is None or capacity is None else path[-2].capacity * capacity
                 table[origin] = (
                     tuple(node.address for node in outer),
-                    tuple(node.length for node in outer),
+                    tuple(node.capacity for node in outer),
                     capacity,
                 )
 
@@ -369,13 +370,19 @@ class DecoderBase(torch.nn.Module):
                 return math.prod(cast(tuple[int, ...], shape)) == n_context
 
             branch = schema.branches[context_address]
-            lengths = tuple(node.length for node in branch.path if getattr(node, "type", None) == "branch")
+            lengths = tuple(
+                cast("Branch", node).capacity for node in branch.path if getattr(node, "type", None) == "branch"
+            )
             output = schema.branch_outputs[context_address]
             if any(dimension is None for dimension in (*self.shape, *lengths, output)):
                 axes = tuple(node.address for node in branch.path if getattr(node, "type", None) == "branch")
                 return axes[:-1] == self.axes and output == 1
             return math.prod(cast(tuple[int, ...], (*lengths[1:-1], output))) == n_context
 
+        # A leaf under a row-token grain reads its own row, so no sibling conditions it.
+        readout = readouts[type(cast("Branch", request.parent).grain)]
+        if readout is not None:
+            self.context_addresses = ()
         self.aligned_addresses = frozenset(item for item in self.context_addresses if aligns(item))
 
         self.context_projection = (
@@ -388,7 +395,10 @@ class DecoderBase(torch.nn.Module):
             if self.aligned_addresses and request.pooling == "query"
             else None
         )
+        self.pool: LearnedQueryCrossAttention | MeanPool | RowReadout
         match request.pooling:
+            case _ if readout is not None:
+                self.pool = readout()
             case "query":
                 self.pool = LearnedQueryCrossAttention(
                     ffnx=request.ffnx,
@@ -572,7 +582,8 @@ class DecoderBase(torch.nn.Module):
             )
             memory_positions = []
             offset = torch.zeros(batch_size, dtype=torch.int64, device=device)
-            for parcel in parcels:
+            # A row readout hands each target its own row token, so memory has no positions to rank.
+            for parcel in () if isinstance(self.pool, RowReadout) else parcels:
                 size = math.prod(parcel.present.shape[1:])
                 if parcel.positions is None or parcel.spans is None:
                     ranks = torch.arange(size, device=device).expand(batch_size, size)
@@ -596,7 +607,7 @@ class DecoderBase(torch.nn.Module):
                     )
                 memory_positions.append(ranks + offset.unsqueeze(-1))
                 offset = offset + span
-            memory_positions = torch.cat(memory_positions, dim=1)
+            memory_positions = torch.cat(memory_positions, dim=1) if memory_positions else None
             context = (
                 self.context(contexts or (), batch_size=batch_size, n_context=original_count)
                 if selected_indices is None
@@ -615,7 +626,13 @@ class DecoderBase(torch.nn.Module):
                 )
             else:
                 pooled = self.pool(stacked, present=present)
-                if count != self.n_context:
+                if pooled.shape[1] != count and isinstance(self.pool, RowReadout):
+                    message = (
+                        f"decoder '{self.address}' reads {pooled.shape[1]} row tokens for {count} target coordinates; "
+                        "its branch must hold one row token per target row"
+                    )
+                    raise ValueError(message)
+                if pooled.shape[1] != count:
                     pooled = pooled[:, :1].expand(batch_size, count, self.d_model)
             if context is not None:
                 pooled = pooled + context * 0.0

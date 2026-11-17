@@ -54,6 +54,7 @@ class TensorKey(enum.StrEnum):
     topk = "topk"
     embedding = "embedding"
     inferred = "inferred"
+    objective = "objective"
 
 
 class Metric(enum.StrEnum):
@@ -89,6 +90,17 @@ class Overflow(enum.StrEnum):
     tail = "tail"
     random = "random"
     error = "error"
+
+
+class Direction(enum.StrEnum):
+    """Which steps of a branch sequence one token may see.
+
+    ``bidirectional`` sees every step. ``causal`` sees the steps at or before its
+    own, so tokens of one step see each other and no token sees a later step.
+    """
+
+    bidirectional = "bidirectional"
+    causal = "causal"
 
 
 AttentionInput: TypeAlias = AttentionMode | Literal["mha", "gqa", "mqa"] | None

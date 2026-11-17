@@ -2,13 +2,16 @@
 
 import functools
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias, TypedDict, cast
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Protocol, Self, TypeAlias, TypedDict, cast
 
 import pydantic
 from anytree import NodeMixin
 from pydantic_core import CoreSchema
 
 from relflow.structs.enums import Overflow
+from relflow.structs.masking import Forecast, SelectorConfig, Spans
 
 if TYPE_CHECKING:
     from relflow.structs.structure import Branch
@@ -23,7 +26,8 @@ class Mask(pydantic.BaseModel):
     samples coordinates during training. ``skip=True`` prevents embedding;
     ``reconstruct=True`` makes selected coordinates supervised targets.
     ``dropout`` defaults to the opposite of ``reconstruct``. These last two
-    effects cannot both be enabled.
+    effects cannot both be enabled. ``select`` picks whole rows of a branch with
+    a ``Forecast`` or ``Spans`` selector instead of ``query`` or ``rate``.
     """
 
     model_config = pydantic.ConfigDict(frozen=True, extra="forbid")
@@ -33,6 +37,7 @@ class Mask(pydantic.BaseModel):
     skip: bool = False
     dropout: bool | None = None
     reconstruct: bool = False
+    select: SelectorConfig | None = None
 
     @pydantic.field_validator("rate", mode="before")
     @classmethod
@@ -47,6 +52,22 @@ class Mask(pydantic.BaseModel):
         if dropout and self.reconstruct:
             raise ValueError("Mask.dropout=True cannot be combined with reconstruct=True")
 
+        if self.select is not None and (self.query is not None or self.rate is not None):
+            message = (
+                "Mask.select cannot be combined with query or rate; use one selection per Mask "
+                "and combine Masks in a tuple"
+            )
+            raise ValueError(message)
+        if isinstance(self.select, Forecast) and not self.reconstruct:
+            message = "Mask(select=Forecast(...)) hides target values to predict them; set reconstruct=True"
+            raise ValueError(message)
+        if isinstance(self.select, Forecast) and self.skip:
+            message = (
+                "Mask(select=Forecast(...)) hides only the last rows, but skip=True removes the fields "
+                "from every row and hides the history; drop skip=True"
+            )
+            raise ValueError(message)
+
         if self.query is not None:
             from relflow.data.query import compile
 
@@ -54,6 +75,35 @@ class Mask(pydantic.BaseModel):
 
         object.__setattr__(self, "dropout", dropout)
         return self
+
+    @pydantic.model_serializer(mode="wrap")
+    def serialize_select(self, handler: pydantic.SerializerFunctionWrapHandler) -> dict[str, Any]:
+        """Omit ``select`` while unset so masks saved before row selectors keep their form."""
+        return {key: value for key, value in handler(self).items() if key != "select" or value is not None}
+
+    def hides(self, *, owner: "Branch", leaf: "Address") -> bool:
+        """Whether this mask hides ``leaf`` where it selects coordinates of ``owner``.
+
+        Args:
+            owner: The node that holds this mask.
+            leaf: Address of a descendant leaf.
+
+        Returns:
+            True when the leaf value is hidden in selected coordinates.
+        """
+        return scopes[type(self.select)].hides(self.select, owner=owner, leaf=leaf)
+
+    def supervises(self, *, owner: "Branch", leaf: "Address") -> bool:
+        """Whether a reconstructing mask makes ``leaf`` a target in selected coordinates.
+
+        Args:
+            owner: The node that holds this mask.
+            leaf: Address of a descendant leaf.
+
+        Returns:
+            True when the leaf is a reconstruction target.
+        """
+        return scopes[type(self.select)].supervises(self.select, owner=owner, leaf=leaf)
 
     @classmethod
     def normalize(cls, value: Any) -> tuple["Mask", ...]:
@@ -154,6 +204,44 @@ class Address(str):
         from pydantic_core import core_schema
 
         return core_schema.no_info_after_validator_function(cls, core_schema.str_schema())
+
+
+class Scope(Protocol):
+    """Which descendant leaves a selector hides and which it makes targets."""
+
+    def hides(self, select: Any, *, owner: "Branch", leaf: Address) -> bool: ...
+
+    def supervises(self, select: Any, *, owner: "Branch", leaf: Address) -> bool: ...
+
+
+@dataclass(frozen=True, kw_only=True)
+class Everywhere:
+    """Hide and supervise every descendant leaf, the rule of query and rate masks."""
+
+    def hides(self, select: Any, *, owner: "Branch", leaf: Address) -> bool:
+        return True
+
+    def supervises(self, select: Any, *, owner: "Branch", leaf: Address) -> bool:
+        return True
+
+
+@dataclass(frozen=True, kw_only=True)
+class ForecastScope:
+    """Hide all but the time index and known children; supervise only the targets."""
+
+    def hides(self, select: Forecast, *, owner: "Branch", leaf: Address) -> bool:
+        exempt = (*select.known, *filter(None, (owner.time_index,)))
+        return leaf not in {Address(owner.address or "", name) for name in exempt}
+
+    def supervises(self, select: Forecast, *, owner: "Branch", leaf: Address) -> bool:
+        return leaf in {Address(owner.address or "", name) for name in select.targets}
+
+
+# Which descendant leaves a mask hides and which it makes reconstruction targets, by selector settings type;
+# ``None`` (query and rate policies) hides and supervises every descendant.
+scopes: Mapping[type, Scope] = MappingProxyType(
+    {type(None): Everywhere(), Spans: Everywhere(), Forecast: ForecastScope()}
+)
 
 
 class Node(NodeMixin, pydantic.BaseModel):
@@ -271,6 +359,8 @@ class Leaf(Node):
     else:
         type: str
     query: str | tuple[str, ...] | None = None
+    # Declared by the extension request; shared code never infers it from the type name.
+    stacked: ClassVar[bool] = False
     nullable: bool = True
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
@@ -288,6 +378,16 @@ class Leaf(Node):
     @classmethod
     def check_mask(cls, value: Any) -> tuple[Mask, ...]:
         return Mask.normalize(value)
+
+    @pydantic.model_validator(mode="after")
+    def check_select(self) -> Self:
+        if any(mask.select is not None for mask in self.mask):
+            message = (
+                f"leaf '{self.name or self.type}' mask uses Mask(select=...); row selectors apply to branches, "
+                "so move the Mask to the parent Branch"
+            )
+            raise ValueError(message)
+        return self
 
     @property
     def embedded(self) -> bool:
@@ -316,27 +416,64 @@ class Leaf(Node):
             scope(expression)
         return self
 
+    def check_sources(self) -> None:
+        """Reject an empty or repeated source list for a request that stacks channels.
+
+        Raises:
+            ValueError: If no source is named, one source repeats, or one ascends to an ancestor branch.
+        """
+        from relflow.data.query import scope
+
+        sources = cast(tuple[str, ...], self.query)
+        if not sources:
+            message = f"field '{self.address}' has an empty tuple query; name at least one source"
+            raise ValueError(message)
+        repeated = next((text for index, text in enumerate(sources) if text in sources[:index]), None)
+        if repeated is not None:
+            message = f"field '{self.address}' query tuple {sources!r} repeats {repeated!r}; name each source once"
+            raise ValueError(message)
+        ascending = next((text for text in sources if scope(text)[0]), None)
+        if ascending is not None:
+            message = (
+                f"field '{self.address}' stacks source {ascending!r} from an ancestor branch; "
+                "stacked sources must read the owner branch rows"
+            )
+            raise ValueError(message)
+
     def post_bind_validate(self) -> None:
         """Check scoped sources and derived-input capability against the live registry."""
         from relflow.data.query import scope
         from relflow.structs.enums import Component
         from relflow.tensorfields.base import TENSORFIELDS
 
-        if isinstance(self.query, tuple) and Component.derive not in TENSORFIELDS[self.type].components:
-            raise ValueError(
+        if isinstance(self.query, tuple) and not (
+            Component.derive in TENSORFIELDS[self.type].components or type(self).stacked
+        ):
+            message = (
                 f"field '{self.address}' has multiple source queries but extension '{self.type}' has no "
-                "derive component; register Component.derive or use one query"
+                "derive component and its Request does not declare stacked = True; "
+                "register Component.derive, declare stacked, or use one query"
             )
+            raise ValueError(message)
+        if type(self).stacked and Component.derive in TENSORFIELDS[self.type].components:
+            message = (
+                f"field '{self.address}' extension '{self.type}' declares both stacked and a derive component; "
+                "choose one"
+            )
+            raise ValueError(message)
+        if isinstance(self.query, tuple) and type(self).stacked:
+            self.check_sources()
         if self.query is None:
             return
         ancestors = sum(node.type == "branch" for node in self.path) - 1
         for expression in (self.query,) if isinstance(self.query, str) else self.query:
             depth, _ = scope(expression)
             if depth > ancestors:
-                raise ValueError(
+                message = (
                     f"source query {expression!r} at '{self.address}' ascends {depth} owner branches, "
                     f"but only {ancestors} ancestor branches exist; keep the source within the model root"
                 )
+                raise ValueError(message)
 
     @functools.cached_property
     def shape(self) -> tuple[int | None, ...]:
@@ -344,7 +481,7 @@ class Leaf(Node):
 
         for node in self.path:
             if node.type == "branch":
-                out.append(cast("Branch", node).length)
+                out.append(cast("Branch", node).capacity)
 
         return tuple(out)
 

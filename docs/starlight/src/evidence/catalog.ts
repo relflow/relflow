@@ -7,6 +7,7 @@ export const leafTypes = [
   'Number',
   'Quantile',
   'Vector',
+  'Series',
   'Ordinal',
   'Category',
   'Boolean',

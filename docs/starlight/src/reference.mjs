@@ -75,6 +75,10 @@ export const reference = {
       title: 'Fixed-width numeric values',
       text: 'Represent an existing numeric vector with exactly n_dim coordinates. Values are stored as float32 without fitting a normalizer.',
     },
+    Series: {
+      title: 'Ordered numeric steps',
+      text: 'Represent one multichannel run of ordered numeric steps per record. As a target with horizon, it forecasts that many steps in source units.',
+    },
     Group: {
       title: 'Shared identity representations',
       text: 'Map known identities to a fixed number of shared representations, learned through downstream objectives while visible as context. Use assignments to inspect identity routing; group IDs have no predefined business meaning.',

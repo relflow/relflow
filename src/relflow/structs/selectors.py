@@ -99,7 +99,11 @@ class NodeAttribute(pydantic.BaseModel):
             return (
                 isinstance(node, Leaf)
                 and node.active
-                and any(policy.reconstruct for owner in node.path for policy in getattr(owner, "mask", ()))
+                and any(
+                    policy.reconstruct and policy.supervises(owner=owner, leaf=node.address)
+                    for owner in node.path
+                    for policy in getattr(owner, "mask", ())
+                )
             )
 
         return getattr(node, self.name, default)

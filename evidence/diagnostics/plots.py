@@ -2114,6 +2114,22 @@ def recent_history(bundle: Bundle, spec: dict):
     )
 
 
+def forecast(bundle: Bundle, spec: dict):
+    m = bundle.record["metrics"]
+    fig, ax = plt.subplots(figsize=(8, 3.8), layout="constrained")
+    dots(
+        ax,
+        ["Ordered history", "Shuffled history steps", "Repeat the last step"],
+        {"Test MAE": [m["ordered_mae"], m["shuffled_mae"], m["last_step_mae"]]},
+        xlabel="Mean absolute error over every forecast step and channel",
+    )
+    return (
+        fig,
+        "The shuffled model trains and is scored on histories whose steps are permuted, so it sees the same values without their order. Repeating the last step needs no training.",
+        {},
+    )
+
+
 def precision_offsets(bundle: Bundle, spec: dict):
     m = bundle.record["metrics"]["arms"]
     arms = ["zero", "wide", "centered", "float32"]
@@ -2393,6 +2409,7 @@ HANDLERS = {
     "unknown-fallback": unknown_fallback,
     "quantile-source-units": quantile_source_units,
     "recent-history": recent_history,
+    "forecast": forecast,
     "precision-offsets": precision_offsets,
     "jitter-noise": jitter_noise,
     "context-extrapolation": context_extrapolation,

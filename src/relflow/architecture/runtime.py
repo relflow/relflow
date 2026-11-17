@@ -16,8 +16,10 @@ from tensordict import TensorDict
 from relflow.architecture import output
 from relflow.architecture.binding import bind
 from relflow.architecture.contracts import sanitize
-from relflow.architecture.encoder import BranchEncoder, locate, sequence
+from relflow.architecture.encoder import BranchEncoder, locate
+from relflow.architecture.grain import readouts
 from relflow.architecture.node import NodeModule
+from relflow.architecture.objectives import Objective, objectives
 from relflow.architecture.output import OutputPlan
 from relflow.data.arrow import Encoded, Retain, mappings
 from relflow.data.datasets.base import EncodedInput
@@ -39,13 +41,12 @@ from relflow.tensorfields.base import (
     TENSORFIELDS,
     DecoderBase,
     EmbedderBase,
-    Extension,
-    RequestBase,
     TensorFieldBase,
 )
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.structs.structure import Branch
 
 __all__ = ["ExecutionPlan", "Output", "PredictionInput", "encode", "forward", "predict", "step", "transfer"]
 
@@ -64,6 +65,7 @@ class DecoderRoute:
 
     address: Address
     heritage: tuple[Address, ...]
+    readout: Address | None
     embed: bool
     decode: bool
 
@@ -75,9 +77,16 @@ class ExecutionPlan:
     requests: tuple[Address, ...]
     depthwise: tuple[tuple[Address, ...], ...]
     embeds: frozenset[Address]
-    objectives: tuple[Address, ...]
+    objectives: tuple[Objective, ...]
     decoders: tuple[DecoderRoute, ...]
     sequenced: frozenset[Address]
+    passthrough: frozenset[Address]
+
+
+def row_branch(module: Model, address: Address) -> Address | None:
+    """Return the parent branch of a leaf when its decoder reads that branch row tokens."""
+    parent = cast("Branch", module.schema.requests[address].parent)
+    return parent.address if readouts[type(parent.grain)] is not None else None
 
 
 def execution(module: Model) -> ExecutionPlan:
@@ -88,13 +97,14 @@ def execution(module: Model) -> ExecutionPlan:
 
     requests = tuple(module.schema.active_requests)
     embeds = frozenset(module.schema.embed)
-    objectives = tuple(module.schema.objectives)
+    entries = objectives(module)
     decodes = frozenset(module.schema.decodes)
-    selected = set(objectives) | decodes | embeds
+    selected = {entry.address for entry in entries} | decodes | embeds
     decoders = tuple(
         DecoderRoute(
             address=address,
-            heritage=tuple(module.schema.requests[address].heritage),
+            heritage=() if row_branch(module, address) else tuple(module.schema.requests[address].heritage),
+            readout=row_branch(module, address),
             embed=address in embeds,
             decode=address in decodes,
         )
@@ -105,10 +115,17 @@ def execution(module: Model) -> ExecutionPlan:
         requests=requests,
         depthwise=tuple(tuple(depth) for depth in reversed(module.schema.depthwise)),
         embeds=embeds,
-        objectives=objectives,
+        objectives=entries,
         decoders=decoders,
         # Only ancestors of a decoded leaf need their encoded sequence beside the summary.
-        sequenced=frozenset(item for route in decoders for item in route.heritage),
+        passthrough=frozenset(
+            address
+            for address in embeds
+            if address in module.schema.branches and output.passthrough(module.schema.branches[address])
+        ),
+        sequenced=frozenset(item for route in decoders for item in route.heritage).union(
+            route.readout for route in decoders if route.readout is not None
+        ),
     )
     return module.execution_plan
 
@@ -120,17 +137,15 @@ def participation(
 ) -> tuple[set[Address], set[Address]]:
     """Resolve local objectives and those selected on any distributed rank."""
 
-    objectives = execution(module).objectives
-    if strata == Strata.predict or not objectives:
+    entries = execution(module).objectives
+    if strata == Strata.predict or not entries:
         return set(), set()
 
-    local = torch.stack([cast(TensorFieldBase, inputs[address]).trainable.any() for address in objectives]).to(
-        dtype=torch.uint8
-    )
+    local = torch.stack([entry.select(inputs, strata) for entry in entries]).to(dtype=torch.uint8)
     selected = torch.stack((local, all_reduce_max(local.clone()))).tolist()
     return (
-        {address for address, active in zip(objectives, selected[0], strict=True) if active},
-        {address for address, active in zip(objectives, selected[1], strict=True) if active},
+        {entry.address for entry, active in zip(entries, selected[0], strict=True) if active},
+        {entry.address for entry, active in zip(entries, selected[1], strict=True) if active},
     )
 
 
@@ -272,11 +287,20 @@ def compute(
             processed[encoded.destination].append(encoded)
             outgoing[encoded.origin] = encoded
 
+            if encoded.objective is not None:
+                predictions.append(
+                    Prediction(
+                        address=encoded.origin,
+                        payload=TensorDict(
+                            {TensorKey.objective: encoded.objective}, batch_size=encoded.objective.shape[0]
+                        ),
+                        batch_size=encoded.objective.shape[0],
+                    )
+                )
+
             if address in plan.embeds:
                 positions, spans, slots = (
-                    sequence(processed[address], order=encoder.child_order)
-                    if encoder.reduction is None
-                    else (None, None, None)
+                    encoder.arrange(processed[address]) if address in plan.passthrough else (None, None, None)
                 )
                 predictions.append(
                     Prediction(
@@ -304,6 +328,10 @@ def compute(
                 kept = outgoing[item].sequence
                 if kept is not None:
                     parcels.append(kept)
+
+        if route.readout in outgoing:
+            row = outgoing[route.readout]
+            parcels.append(row if row.sequence is None else row.sequence)
 
         node_module = cast(NodeModule, module.nodes[address])
         decoder: DecoderBase = node_module.decoder
@@ -339,6 +367,7 @@ def objective(
 ) -> torch.Tensor:
     """Evaluate local reconstruction losses and retain every participating decoder's backward edges."""
 
+    entries = {entry.address: entry for entry in execution(module).objectives}
     losses: dict[Address, torch.Tensor] = {}
     anchors: list[torch.Tensor] = []
     for prediction in predictions:
@@ -358,12 +387,9 @@ def objective(
             continue
 
         address = Address(str(prediction.address))
-        request: RequestBase = module.schema.requests[address]
-        extension: Extension = TENSORFIELDS[request.type]
-        loss = extension.loss(
-            module=module, prediction=prediction, batch=cast(TensorFieldBase, inputs[address]), strata=strata
-        )
-        losses[address] = loss * torch.tensor(request.weight)
+        entry = entries[address]
+        loss = entry.evaluate(module=module, prediction=prediction, inputs=inputs, strata=strata)
+        losses[address] = loss * torch.tensor(entry.weight)
 
     if strata == Strata.train:
         if not anchors:
@@ -401,9 +427,7 @@ def objective(
             # Every rank uses schema objective order. Missing local targets
             # contribute constant zero rows, separate from decoder anchors.
             zero = anchor.new_zeros(())
-            ordered = [
-                losses.get(address, zero) for address in execution(module).objectives if address in participating
-            ]
+            ordered = [losses.get(entry.address, zero) for entry in entries.values() if entry.address in participating]
             return combine(module, ordered, anchor)
     return loss
 

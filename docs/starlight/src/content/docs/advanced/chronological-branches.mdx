@@ -1,0 +1,416 @@
+---
+title: Chronological branches
+description: Model ordered rows as time series with time positions, direction, row masking, forecasting, per-row representations, and a contrastive objective.
+---
+
+A time series is a [Branch](/concepts/branches/) whose rows have an order.
+`rf.Branch.chronological(...)` builds a plain `Branch` with settings that suit
+that order. Every setting also works on a plain `Branch`, and a saved model
+stores the result as an ordinary `Branch`. Each input record supplies a list of
+struct rows, oldest first; relflow does not sort, resample, or join those rows.
+
+```python
+import relflow as rf
+
+model = rf.Model(
+    preset="small",
+    ett=rf.Branch.chronological(
+        length=336,
+        HUFL=rf.Number,
+        OT=rf.Number,
+    ),
+)
+```
+
+## What the defaults change
+
+| Option | `Branch(...)` | `Branch.chronological(...)` |
+| --- | --- | --- |
+| `overflow` | `"head"` when `length` is set | `"tail"` when `length` is set: keep the latest rows |
+| `grain` | `rf.Coordinates()` | `rf.Steps()` |
+| `mixer` | `rf.Transformer()` | `rf.Conv()` |
+| `direction` | `rf.Direction.bidirectional` | `rf.Direction.causal` |
+| `time_index`, `time_step`, `contrastive` | `None` | `None` |
+
+With `length=None`, either constructor keeps all rows and sets `overflow=None`;
+bound untrusted input separately. An explicit argument replaces its default.
+`length` caps rows, not model parameters or the length of every input record.
+
+## Declare channels
+
+Declare one `Number` per channel, or read all channels of a row as one
+`Vector`:
+
+```python
+per_channel = rf.Branch.chronological(
+    length=336, HUFL=rf.Number, HULL=rf.Number, OT=rf.Number
+)
+per_row = rf.Branch.chronological(
+    length=336, load=rf.Vector(query=("HUFL", "HULL")), OT=rf.Number
+)
+```
+
+Separate `Number` fields keep a normalizer, a decoder, and a mask for each
+channel, so a channel can be a target or a hidden input on its own. A `Vector`
+is one field with one shared width: it suits channels that always travel
+together, and a null in one source only marks that channel missing. In both
+examples, `OT` remains a separate leaf that can be forecast. See
+[Vector](/data-types/vector/#channels-from-several-sources).
+
+A branch reads each row as a struct. Dense `list<fixed_size_list<C>>` data has
+no struct per row. Wrap each step in a `Preprocessor`, or read the whole run as
+one [Series](/data-types/series/):
+
+```python
+import polars as pl
+
+
+@rf.preprocess
+def wrap(frame: pl.DataFrame) -> pl.DataFrame:
+    step = pl.struct(pl.element().alias("load"))
+    return frame.with_columns(pl.col("ett").list.eval(step))
+
+
+rows = rf.Branch.chronological(length=336, load=rf.Vector(n_dim=7))
+run = rf.Series(query="ett", n_dim=7)
+```
+
+See [query paths](/data-types/vector/#channels-from-several-sources).
+
+## Time
+
+By default a row has the position of its count in the record. Name a leaf child
+with `time_index` to give each row a position in time:
+
+```python
+import datetime
+
+ett = rf.Branch.chronological(
+    length=336,
+    time_index="date",
+    time_step=datetime.timedelta(hours=1),
+    date=rf.Period("hour_of_day", "day_of_week"),
+    OT=rf.Number,
+)
+```
+
+- `time_index` names a direct leaf child. Its raw Arrow values set positions;
+  its ordinary `Period` or `Number` embedding remains a separate input.
+- `time_step` is the unit of the positions: a `timedelta` for temporal columns,
+  a number for numeric ones. Numeric times can omit it, using a unit of 1.
+  Neither setting changes the input values or resamples rows.
+- A row's position is its time minus the first row's time, divided by
+  `time_step`. Positions may be fractional or equal, but must not decrease.
+  Every present row needs a non-null, finite time. Sorting belongs in a
+  [preprocessor](/concepts/data-flow/).
+- Arrow timestamp, date, and duration columns need a `timedelta` time step;
+  a temporal `time_index` without one raises when a batch is encoded. A
+  `Period` can encode calendar cycles, but does not supply elapsed spacing.
+
+With `time_index`, each row token also receives a learned embedding of the time
+since the previous row, in `time_step` units, before any mixer; the first row
+gets zero. A convolution assumes evenly spaced rows, so without this embedding
+`rf.Conv` would ignore irregular time. Attention reads the real positions as
+well. A branch without `time_index` adds no parameters for time.
+
+## Direction
+
+:::caution[Classification needs `direction=rf.Direction.bidirectional`]
+The causal default restricts the row tokens inside the branch: each row token
+sees only the rows at or before it, so an early row never learns from a later
+one. That is right for forecasting and per-row representations. It is
+measured by step, not by token: tokens of one step still see each other.
+
+The reduction that summarizes the branch for its parent is not restricted. It
+reads every row token, so a causal classifier still uses the whole series, but
+only through row tokens that each saw their own past. Bidirectional lets every
+row token read the whole series before the reduction, which is why it stays the
+recommendation for classification and other whole-series targets. On easy
+tasks the gap can be small.
+
+:::
+
+UCR [GunPoint](https://timeseriesclassification.com/description.php?Dataset=GunPoint)
+is a binary hand-motion task. Its 50 training and 150 test records each contain
+one 150-step series; class `1` is gun-draw and class `2` is pointing. The UCR TSV
+files store label in first column and 150 readings in remaining columns.
+
+```python
+import polars as pl
+import relflow as rf
+
+
+def gunpoint(path: str) -> pl.DataFrame:
+    wide = pl.read_csv(path, separator="\t", has_header=False)
+    label, *steps = wide.columns
+    return wide.select(
+        pl.col(label).cast(pl.String).alias("label"),
+        pl.concat_list(
+            *(pl.struct(pl.col(name).alias("value")) for name in steps)
+        ).alias("signal"),
+    )
+
+
+training = gunpoint("data/GunPoint_TRAIN.tsv").sample(fraction=1.0, shuffle=True, seed=0)
+train, validate = training.head(40), training.tail(10)
+test = gunpoint("data/GunPoint_TEST.tsv")
+
+model = rf.Model(
+    preset="small",
+    label=rf.Category(mask=True),
+    signal=rf.Branch.chronological(
+        length=150,
+        direction=rf.Direction.bidirectional,
+        value=rf.Number,
+    ),
+)
+data = rf.PolarsDataModule(
+    train=train,
+    validate=validate,
+    num_workers=0,
+    persistent_workers=False,
+    pin_memory=False,
+)
+model.fit(data, batch_size=16, max_epochs=30)
+
+predicted = model.predict(test.drop("label"))
+guess = predicted["predictions"].struct.field("label").struct.field("content").struct.field("value")
+accuracy = (guess == test["label"]).mean()
+```
+
+The validation rows come only from the official training split. Keep the official
+test split for final scoring. `accuracy` compares predicted labels with those
+held-out answers.
+
+When the classes differ only in the order of the rows, the label loss can stay at
+chance for a few hundred optimizer steps before it falls. Judge such a model on a
+budget of optimizer steps, not epochs: with a small dataset, use a smaller
+`batch_size` or more epochs.
+
+`direction=` is accepted on child branches only; the generated root has no
+direction. Use `rf.Direction.causal` with forecasting.
+
+## Grain and mixer
+
+`grain` decides what one token of the branch sequence stands for, and `mixer`
+decides how those tokens mix.
+
+| Option | Value | Effect |
+| --- | --- | --- |
+| `grain` | `rf.Coordinates()` | One token per leaf coordinate of every row. |
+| `grain` | `rf.Steps()` | One token per row. `Steps(pooling="query")` pools the leaves with a learned query; `pooling="mean"` averages them. |
+| `mixer` | `rf.Transformer()` | Rotary self-attention layers. |
+| `mixer` | `rf.Conv(n_blocks=6)` | Dilated convolution blocks. Each step feature sees `1 + 4*(2^n_blocks - 1)` steps: 253 at the default of six. |
+| `mixer` | `None` | No sequence mixing; coordinate attention remains. |
+
+Set them on any branch:
+
+```python
+# One token per leaf coordinate of every row: the standard grain.
+tokens = rf.Branch(length=336, grain=rf.Coordinates(), HUFL=rf.Number, OT=rf.Number)
+
+# One token per row, mixed by four dilated convolution blocks.
+rows = rf.Branch(
+    length=336,
+    overflow="tail",
+    grain=rf.Steps(pooling="mean"),
+    mixer=rf.Conv(n_blocks=4),
+    direction=rf.Direction.causal,
+    HUFL=rf.Number,
+    OT=rf.Number,
+)
+```
+
+`Conv` is causal when `direction` is causal and looks both ways otherwise.
+
+For 336 rows and 7 channels, `Coordinates` gives the sequence encoder 2352
+tokens and `Steps` gives 336. The test
+`test_steps_sequence_tokens_measured_at_336_rows_and_7_channels` asserts both
+numbers. Attention cost grows with the square of that width.
+
+Leaves under `Steps` read only the token of their own row, so a decoder never
+reads a later row through pooling. `rf.Conv()` requires `grain=rf.Steps()`, and
+`rf.Steps()` rejects a child branch with `reduction=None`.
+
+## Mask whole rows
+
+`rf.Mask(select=...)` hides rows of a branch instead of coordinates chosen by a
+rate or a query:
+
+```python
+spans = rf.Mask(select=rf.Spans(rate=0.15, length=8), reconstruct=True)
+last_day = rf.Mask(select=rf.Forecast(horizon=24, targets=("OT",)), reconstruct=True)
+```
+
+- `select` cannot be combined with `query` or `rate` in the same `Mask`. A tuple
+  of masks hides the union of its selections.
+- `select` on a leaf raises; set it on a branch.
+- `Spans` hides about `rate` of the rows in runs of `length`, every child of a
+  hidden row included, nested collections too. It applies in training only.
+  `length=1` selects independent rows. With `reconstruct=True` its
+  reconstructable leaves become targets, which makes masked-row pretraining.
+- A branch holds at most one `Forecast`.
+
+See [Masking and reconstruction](/advanced/masking-and-pretraining/).
+
+## Forecast
+
+This example forecasts `OT` hourly and uses `promotion` as a schedule known
+before the forecast cutoff. Past target values stay visible, so `OT` is an
+ordinary input child. Never write `OT=rf.Number(mask=True)` here: `mask=True`
+means `skip=True`, so `OT` would never be embedded.
+
+```python
+from datetime import timedelta
+import relflow as rf
+
+model = rf.Model(
+    preset="small",
+    ett=rf.Branch.chronological(
+        length=336,
+        time_index="date",
+        time_step=timedelta(hours=1),
+        mask=rf.Mask(
+            select=rf.Forecast(horizon=24, targets=("OT",), known=("promotion",)),
+            reconstruct=True,
+        ),
+        date=rf.Period("hour_of_day", "day_of_week"),
+        promotion=rf.Boolean,
+        HUFL=rf.Number,
+        OT=rf.Number,
+    ),
+)
+```
+
+- `Forecast(horizon=k, targets=(...), known=(...))` hides every child except the
+  `time_index` child and the `known` children in the last `k` rows, nested
+  branches included. Only `targets` become reconstruction targets; other
+  hidden children have no loss term.
+- `targets` and `known` name direct leaf children, never the `time_index` child,
+  and must not overlap. Use `known` for covariates available in advance, such
+  as calendar fields or planned prices.
+- The mask needs `reconstruct=True` and rejects `skip=True`. `Forecast` needs
+  `direction=rf.Direction.causal`, and the `time_index` child must read a single
+  member.
+- `length` is the context cap. Training, validation, and test retain up to
+  `length + horizon` rows, then hide the last `horizon`; prediction retains up
+  to `length` observed rows before its future rows. Supply enough training
+  history to give the model the intended context.
+
+At prediction a future row is a trailing row in which every target child is
+null. For the model above, an application can supply records like this; the
+timestamps should be Arrow temporal values in the processed data:
+
+```yaml
+ett:
+  - date: "2026-05-28T10:00:00Z"
+    promotion: false
+    HUFL: 4.2
+    OT: 7.0
+  - date: "2026-05-28T11:00:00Z"
+    promotion: true
+    OT: null
+  - date: "2026-05-28T12:00:00Z"
+    promotion: false
+    OT: null
+```
+
+The first row is observed history; the final two are requested future hours.
+Their promotion values remain visible; `HUFL` is hidden whether supplied or
+omitted. A historical training record instead supplies the observed `OT` for
+the final `horizon` rows so the mask can learn to reconstruct it.
+
+- A record with any future row gets no automatic rows. More than `horizon`
+  future rows raise.
+- Otherwise `k` rows are appended and fill only the `time_index` child. This
+  matches training only when `known` is empty. With `known` set, provide
+  future rows or prediction raises; there are no scheduled values to invent.
+- Non-known children in future rows are hidden whatever they hold.
+
+If an application provides `scheduled_rows` as a list of future row structs
+with dates, promotion flags, and null `OT` values, append them before encoding:
+
+```python
+import polars as pl
+import relflow as rf
+
+
+@rf.preprocess
+def append_future(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(ett=pl.concat_list("ett", "scheduled_rows")).drop("scheduled_rows")
+
+
+requests = pl.read_parquet("data/forecast-requests.parquet")
+predictions = model.predict(requests, preprocess=append_future)
+```
+
+Keep each `scheduled_rows` list in timestamp order, at most `horizon` rows
+long. Give its structs the same child fields and compatible types as `ett`;
+set unknown inputs and targets to null. The application supplies the Parquet
+file and its schedule. A missing `known` column raises `MissingFieldError`; a
+null known value in a future row raises a value error. Predicted rows appear as
+ordinary rows of the branch list, with `inferred: true` on the `OT` result.
+
+## Representations
+
+A reduction passes `K` summaries per record to the parent. To keep one vector
+per row, set `reduction=None` and use `rf.Steps()`, then `embed=True`:
+
+```python
+rows = rf.Branch.chronological(length=336, reduction=None, embed=True, HUFL=rf.Number, OT=rf.Number)
+```
+
+The prediction output then holds one representation per row: `path` names the
+branch, `parents` ends with the row ordinal, and `output_index` is `0`. With the
+causal default, the vector of row `t` depends on rows up to `t` only. Under
+`rf.Coordinates()` a branch keeps one representation per token, as before. See
+[Prediction output](/advanced/embeddings/) and
+[Branch summaries](/concepts/branches/).
+
+## Contrastive pretraining
+
+`contrastive` adds a training objective that needs no labels:
+
+```python
+rows = rf.Branch.chronological(
+    length=336,
+    contrastive=rf.Contrastive(views=rf.Crops(width=128, overlap=0.5, mask=0.5), loss=rf.Hierarchical(), weight=1.0),
+    HUFL=rf.Number,
+    OT=rf.Number,
+)
+```
+
+Each record yields two crops of `width` rows that share a fraction `overlap`.
+The loss pulls matching rows of the two crops together, pushes apart rows of
+other records and other rows of the same record, and repeats at coarser time
+scales. Records shorter than `width` are masked, not padded with data.
+
+Each crop also hides a random share of its steps before the mixer. `mask` is the
+probability that a step is hidden, `0.5` by default, and each crop draws its own
+steps. Without it the two crops hold identical inputs on the rows they share, and
+the branch can match rows by recognizing the input instead of learning
+structure. A hidden step keeps its place and position and its token is zeroed.
+Set `mask=0.0` to keep every step. Masks apply to the crops in training only.
+
+- It runs in training only. The decoders and the parent still see the full
+  record.
+- It costs about three times the memory and compute of the branch, because two
+  crops are encoded in addition to the full record.
+- It rejects a child branch with `reduction=None`.
+- Under distributed training, records are compared within the batch of each
+  device only.
+- A model whose only objective is contrastive logs no `loss/validate`, so pass
+  `early_stopping=False, rollback=False` to `fit`, or add a reconstruction
+  target.
+
+## Name clashes
+
+`grain`, `mixer`, `direction`, `time_index`, `time_step`, and `contrastive` are
+`Branch` options. A child with one of these names goes in `fields`:
+
+```python
+rf.Branch(direction=rf.Direction.causal, fields={"direction": rf.Category})
+```
+
+Next, read the [Branch reference](/concepts/branches/) and
+[Series](/data-types/series/).

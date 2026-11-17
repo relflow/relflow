@@ -25,6 +25,11 @@ inference crops a history, offsets describe the retained structure; recover
 business identities from retained source values rather than treating a bare
 ordinal as a permanent record identifier.
 
+A branch with `grain=rf.Steps()` and `reduction=None` keeps one vector per row.
+With `embed=True` it writes one representation per row, with `parents` ending in
+the row ordinal and `output_index` `0`; `rf.Coordinates()` keeps one per token.
+See [Chronological branches](/advanced/chronological-branches/#representations).
+
 The representation struct has these four fields. It does not use the rich
 target result’s `state`, `content`, and `inferred` contract. Every exported
 embedding must match the model’s common vector width, including when only one

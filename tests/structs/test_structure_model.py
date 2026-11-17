@@ -1,11 +1,16 @@
+from datetime import timedelta
+from textwrap import dedent
 from typing import Literal
 
 import pydantic
 import pytest
+import yaml
 
 import relflow as rf
 from relflow.structs.enums import Overflow
 from relflow.structs.experiment import Schema
+from relflow.structs.grain import Steps
+from relflow.structs.mixer import Conv
 from relflow.structs.structure import Branch
 from relflow.tensorfields.extensions.category import Request as Category
 
@@ -306,3 +311,296 @@ def test_inactive_leaf_nodes_are_kept_in_tree_but_removed_from_runtime_maps():
     assert structure.shapes["/branch/category_leaf"] == (1, 4)
     assert structure.reconstruct == []
     assert structure.embed == []
+
+
+def test_plain_branch_resolves_todays_sequence_settings_and_dumps_without_them():
+    branch = rf.Branch(value=rf.Number)
+    assert branch.grain == rf.Coordinates()
+    assert branch.mixer == rf.Transformer()
+    assert branch.direction is rf.Direction.bidirectional
+    for mode in ("python", "json"):
+        assert {"grain", "mixer", "direction"}.isdisjoint(branch.model_dump(mode=mode))
+
+
+def test_branch_sequence_settings_round_trip_when_changed():
+    branch = rf.Branch(mixer=None, value=rf.Number)
+    payload = branch.model_dump(mode="json", round_trip=True)
+    assert payload["mixer"] is None
+    assert rf.Branch.model_validate(payload).mixer is None
+    restored = rf.Branch.model_validate({"type": "branch", "fields": [], "grain": {"type": "steps"}})
+    assert restored.grain == Steps()
+
+
+def test_branch_rejects_unknown_direction():
+    with pytest.raises(pydantic.ValidationError, match="bidirectional"):
+        rf.Branch.model_validate({"type": "branch", "fields": [], "direction": "sideways"})
+
+
+def test_child_named_items_is_still_a_child():
+    branch = rf.Branch(items=rf.Branch(value=rf.Number))
+    assert [child.name for child in branch.fields] == ["items"]
+
+
+def test_time_index_must_name_a_child_leaf():
+    with pytest.raises(ValueError, match="time_index='when'.*no child named 'when'"):
+        rf.Branch(length=4, time_index="when", ts=rf.Number, value=rf.Number)
+
+
+def test_time_index_cannot_name_a_child_branch():
+    with pytest.raises(ValueError, match="time_index='ts'.*must name a leaf"):
+        rf.Branch(length=4, time_index="ts", ts=rf.Branch(length=2, x=rf.Number), value=rf.Number)
+
+
+def test_time_step_requires_time_index():
+    with pytest.raises(ValueError, match="time_step.*requires time_index"):
+        rf.Branch(length=4, time_step=2.0, value=rf.Number)
+
+
+@pytest.mark.parametrize("step", [0.0, -1.0, timedelta(0), timedelta(seconds=-1)])
+def test_time_step_must_be_positive(step):
+    with pytest.raises(ValueError, match="time_step must be positive"):
+        rf.Branch(length=4, time_index="ts", time_step=step, ts=rf.Number)
+
+
+def test_steps_rejects_unreduced_child_branch():
+    with pytest.raises(ValueError, match="child branch 'parts'.*needs a reduction"):
+        rf.Branch(length=4, grain=Steps(), parts=rf.Branch(length=2, reduction=None, x=rf.Number))
+
+
+def test_conv_requires_steps():
+    with pytest.raises(ValueError, match="mixer=Conv.*requires grain=Steps"):
+        rf.Branch(length=4, mixer=Conv(), value=rf.Number)
+
+
+def test_plain_branch_dumps_without_time_settings():
+    branch = rf.Branch(length=4, ts=rf.Number, value=rf.Number)
+    for mode in ("python", "json"):
+        assert {"time_index", "time_step"}.isdisjoint(branch.model_dump(mode=mode))
+
+
+def test_child_named_time_is_still_a_child():
+    branch = rf.Branch(time=rf.Number, value=rf.Number)
+    assert [child.name for child in branch.fields] == ["time", "value"]
+
+
+@pytest.mark.parametrize("step", [3600.0, timedelta(hours=1)])
+def test_time_settings_round_trip_through_yaml(step):
+    branch = rf.Branch(length=4, time_index="ts", time_step=step, ts=rf.Number, value=rf.Number)
+    restored = rf.Branch.model_validate(yaml.safe_load(yaml.safe_dump(branch.model_dump(mode="json"))))
+    assert restored.time_index == "ts"
+    assert restored.time_step == step
+    assert type(restored.time_step) is type(step)
+
+
+def test_chronological_fills_defaults():
+    branch = rf.Branch.chronological(length=336, value=rf.Number)
+    assert type(branch) is rf.Branch
+    assert branch.overflow == Overflow.tail
+    assert branch.grain == rf.Steps() and branch.mixer == rf.Conv() and branch.direction == rf.Direction.causal
+    assert branch.time_index is None and branch.time_step is None
+
+
+def test_chronological_unbounded_keeps_overflow_none():
+    assert rf.Branch.chronological(value=rf.Number).overflow is None
+
+
+def test_explicit_arguments_override_defaults():
+    branch = rf.Branch.chronological(
+        length=8, overflow="head", mixer=None, direction=rf.Direction.bidirectional, value=rf.Number
+    )
+    assert branch.overflow == Overflow.head and branch.mixer is None
+    assert branch.direction == rf.Direction.bidirectional
+
+
+def test_chronological_with_transformer_and_coordinates_is_allowed():
+    rf.Branch.chronological(length=8, grain=rf.Coordinates(), mixer=rf.Transformer(), value=rf.Number)
+
+
+def test_chronological_rejects_missing_time_index_child():
+    with pytest.raises(ValueError, match="no child named 'ts'"):
+        rf.Branch.chronological(length=8, time_index="ts", value=rf.Number)
+
+
+def test_chronological_rejects_conv_with_coordinates():
+    with pytest.raises(ValueError, match="requires grain=Steps"):
+        rf.Branch.chronological(length=8, grain=rf.Coordinates(), value=rf.Number)
+
+
+def test_chronological_loads_from_model_yaml_as_a_plain_branch(tmp_path):
+    model = rf.Model(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        ett=rf.Branch.chronological(
+            length=8, time_index="ts", time_step=3600.0, ts=rf.Number, value=rf.Number(mask=True)
+        ),
+    )
+    path = tmp_path / "model.yaml"
+    path.write_text(
+        dedent(
+            """
+            d_model: 16
+            n_layers: 1
+            n_heads: 4
+            fields:
+              ett:
+                type: branch
+                length: 8
+                overflow: tail
+                grain: {type: steps}
+                mixer: {type: conv}
+                direction: causal
+                time_index: ts
+                time_step: 3600.0
+                fields:
+                  ts: {type: number}
+                  value: {type: number, mask: true}
+            """
+        )
+    )
+    loaded = rf.Model.from_yaml(path)
+    assert loaded.schema.branches["/ett"].model_dump() == model.schema.branches["/ett"].model_dump()
+    assert type(loaded.schema.branches["/ett"]) is rf.Branch
+    assert "chronological" not in yaml.safe_dump(model.schema.model_dump(mode="json"))
+
+
+def test_chronological_docstring_warns_about_classification():
+    assert "direction=rf.Direction.bidirectional" in rf.Branch.chronological.__doc__
+
+
+CAUSAL = rf.Direction.causal
+FORECAST = rf.Mask(select=rf.Forecast(horizon=2, targets=("value",)), reconstruct=True)
+
+
+def forecast_mask(targets: tuple[str, ...], known: tuple[str, ...] = ()) -> rf.Mask:
+    return rf.Mask(select=rf.Forecast(horizon=2, targets=targets, known=known), reconstruct=True)
+
+
+def checked(mask: rf.Mask) -> rf.Branch:
+    return rf.Branch(
+        length=3,
+        direction=CAUSAL,
+        overflow="tail",
+        mask=mask,
+        time_index="ts",
+        time_step=1.0,
+        ts=rf.Number,
+        value=rf.Number,
+        load=rf.Number,
+        tags=rf.Branch(length=2, name=rf.Category),
+    )
+
+
+def test_forecast_with_bidirectional_direction_is_rejected():
+    with pytest.raises(ValueError, match=r"branch.*Forecast.*direction=bidirectional.*Direction\.causal"):
+        rf.Branch(length=3, mask=FORECAST, value=rf.Number)
+
+
+@pytest.mark.parametrize("overflow", [None, "head"])
+def test_forecast_with_head_overflow_is_rejected(overflow):
+    with pytest.raises(ValueError, match=r"branch.*Forecast.*head.*overflow=.tail."):
+        rf.Branch(length=3, direction=CAUSAL, overflow=overflow, mask=FORECAST, value=rf.Number)
+
+
+@pytest.mark.parametrize("overflow", ["tail", "random", "error"])
+def test_forecast_keeps_compatible_explicit_overflow_policies(overflow):
+    branch = rf.Branch(length=3, direction=CAUSAL, overflow=overflow, mask=FORECAST, value=rf.Number)
+    assert branch.overflow == Overflow(overflow)
+
+
+def test_chronological_forecast_with_bidirectional_direction_is_rejected():
+    with pytest.raises(ValueError, match=r"Direction\.causal"):
+        rf.Branch.chronological(length=3, direction=rf.Direction.bidirectional, mask=FORECAST, value=rf.Number)
+
+
+def test_a_branch_accepts_one_forecast_only():
+    second = rf.Mask(select=rf.Forecast(horizon=3, targets=("value",)), reconstruct=True)
+    with pytest.raises(ValueError, match="at most one Forecast"):
+        rf.Branch(length=3, direction=CAUSAL, mask=(FORECAST, second), value=rf.Number)
+
+
+@pytest.mark.parametrize(
+    ("targets", "message"),
+    [
+        (("missing",), r"Forecast target 'missing'.*not a child"),
+        (("ts",), r"Forecast target 'ts'.*time_index"),
+        (("tags",), r"Forecast target 'tags'.*branch"),
+        (("value", "value"), r"Forecast targets.*'value'.*more than once"),
+    ],
+)
+def test_forecast_targets_must_be_distinct_direct_leaf_children(targets, message):
+    with pytest.raises(ValueError, match=message):
+        checked(forecast_mask(targets))
+
+
+@pytest.mark.parametrize(
+    ("known", "message"),
+    [
+        (("missing",), r"branch.*Forecast known 'missing'.*not a child"),
+        (("value",), r"branch.*Forecast known 'value'.*target"),
+        (("ts",), r"branch.*Forecast known 'ts'.*time_index"),
+        (("tags",), r"branch.*Forecast known 'tags'.*branch"),
+        (("load", "load"), r"branch.*Forecast known.*'load'.*more than once"),
+    ],
+)
+def test_forecast_known_must_be_distinct_direct_leaf_covariates(known, message):
+    with pytest.raises(ValueError, match=message):
+        checked(forecast_mask(("value",), known))
+
+
+def test_forecast_accepts_known_covariates():
+    assert checked(forecast_mask(("value",), ("load",))).forecast.known == ("load",)
+
+
+def test_forecast_time_index_child_must_read_one_member():
+    with pytest.raises(ValueError, match=r"time_index child 'ts'.*single member"):
+        rf.Branch(
+            length=3,
+            direction=CAUSAL,
+            overflow="tail",
+            mask=FORECAST,
+            time_index="ts",
+            time_step=1.0,
+            ts=rf.Number(query="meta.ts"),
+            value=rf.Number,
+        )
+
+
+def test_capacity_adds_the_forecast_horizon_to_the_length():
+    forecasting = rf.Branch(length=3, direction=CAUSAL, overflow="tail", mask=FORECAST, value=rf.Number)
+    assert forecasting.capacity == 5
+    assert forecasting.forecast == FORECAST.select
+    assert rf.Branch(direction=CAUSAL, mask=FORECAST, value=rf.Number).capacity is None
+    assert rf.Branch(length=3, value=rf.Number).capacity == 3
+    assert rf.Branch(length=3, value=rf.Number).forecast is None
+
+
+def test_forecast_branch_round_trips_through_yaml_schema():
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        events=rf.Branch(length=3, direction=CAUSAL, overflow="tail", mask=FORECAST, value=rf.Number),
+    )
+    restored = rf.Schema.model_validate_json(schema.model_dump_json())
+    assert restored.branches["/events"].mask == (FORECAST,)
+    assert restored.branches["/events"].capacity == 5
+
+
+@pytest.mark.parametrize(
+    ("options", "problem"),
+    [
+        ({"time_index": "missing"}, "no child named 'missing'"),
+        ({"time_step": 1.0}, "requires time_index"),
+        ({"mixer": rf.Conv()}, "requires grain=Steps()"),
+        (
+            {"mask": rf.Mask(select=rf.Forecast(horizon=2, targets=("gone",)), reconstruct=True)},
+            "set direction=rf.Direction.causal",
+        ),
+    ],
+    ids=["time_index", "time_step", "conv", "forecast"],
+)
+def test_unbound_branch_errors_never_name_none(options, problem):
+    with pytest.raises(ValueError, match=problem) as caught:
+        rf.Branch(length=4, x=rf.Number, **options)
+    assert "None" not in str(caught.value)

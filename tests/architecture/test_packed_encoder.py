@@ -6,6 +6,7 @@ from torch.utils._python_dispatch import TorchDispatchMode
 
 import relflow as rf
 from relflow.architecture.encoder import BranchEncoder
+from relflow.architecture.mixers import TransformerMixer
 from relflow.structs.packages import Parcel
 
 
@@ -185,7 +186,7 @@ def test_custom_layer_needs_only_original_forward_protocol(scope):
         for value in result:
             torch.testing.assert_close(value.payload, (values * 2).masked_fill(~present[..., None], 0))
     else:
-        encoder.encoder = torch.nn.ModuleList([Layer()])
+        encoder.encoder = TransformerMixer([Layer()])
         values = torch.randn(4, 7, 20, dtype=torch.float64)
         present = presence()
         result = encoder([parcel(values, present)])
@@ -403,3 +404,39 @@ def test_sequence_layernorm_keeps_dense_normalization_axes():
     expected = torch.zeros_like(values)
     expected[active] = reference.compute(values[active], present[active])
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+
+def causal_run(*, change=None, hook=False):
+    torch.manual_seed(5)
+    schema = rf.Schema.from_tree(
+        d_model=20,
+        n_layers=2,
+        n_heads=4,
+        seq=rf.Branch(length=7, direction=rf.Direction.causal, reduction=None, value=rf.Number),
+    )
+    encoder = BranchEncoder(schema, "/seq").double().eval()
+    if hook:
+        encoder.encoder.register_forward_hook(lambda *args: None)
+    present = presence()
+    values = torch.randn(4, 7, 20, dtype=torch.float64).masked_fill(~present[..., None], 0.0)
+    if change is not None:
+        values[change] = torch.randn(20, dtype=torch.float64)
+    item = Parcel(
+        payload=values[:, None],
+        present=present[:, None],
+        origin="/seq/value",
+        destination="/seq",
+        batch_size=4,
+    )
+    return encoder([item]).payload
+
+
+def test_packed_causal_matches_dense_causal():
+    torch.testing.assert_close(causal_run(hook=True), causal_run(), atol=1e-10, rtol=0)
+
+
+def test_packed_causal_ignores_future_rows():
+    base = causal_run()
+    other = causal_run(change=(0, 5))
+    torch.testing.assert_close(other[0, :5], base[0, :5], atol=1e-12, rtol=0)
+    assert not torch.allclose(other[0, 5], base[0, 5])
