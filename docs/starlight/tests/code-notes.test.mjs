@@ -91,6 +91,15 @@ writer = rf.Writer("predictions", format="ipc")`);
   );
 });
 
+test('Duration shift notes stay attached to Duration calls', async () => {
+  const notes =
+    await annotations(`gap = rf.Duration(query="booked_at", shift=1, granularity="hours")
+lag = rf.Duration(query="booked_at", shift=3)`);
+  assert.match(notes.find((note) => note.value === 'shift=1').text, /one record earlier/);
+  assert.match(notes.find((note) => note.value === 'shift=3').text, /3 records earlier/);
+  assert.deepEqual(await annotations('frame.with_columns(other(shift=1))'), []);
+});
+
 test('known model classes, loaded instances, and typed instances retain workflow notes', async () => {
   const notes = await annotations(`class Customer(rf.Model):
     amount = rf.Number

@@ -243,6 +243,10 @@ export const reference = {
       title: 'Elapsed-time unit',
       text: 'Write and model Duration values in this fixed unit. Days are 24 hours and weeks are seven days; months and years are not fixed units.',
     },
+    shift: (/** @type {{count: string | number}} */ { count }) => ({
+      title: 'Gap between records',
+      text: `Subtract the timestamp ${Number(count) === 1 ? 'one record' : `${count} records`} earlier in the same branch collection, in source order and before cropping. A record without that predecessor is absent rather than zero.`,
+    }),
     query: {
       title: 'Explicit source paths',
       text: 'Read source values through paths relative to this node’s parent record. Duration accepts a pair of paths in start, end order; ../ selects an ancestor record within branch geometry.',

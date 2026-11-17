@@ -334,6 +334,36 @@ an ordinary field uses one source query. The
 and [source projection checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L567)
 define this boundary.
 
+A request can also read an operand from an earlier record of its own
+collection. Override `operands()` to return `Operand(query, shift)` entries in
+derive order, keeping the declared query paths and changing only their shifts.
+A positive `shift` reads that source the given number of records earlier in
+the owner branch collection, before `length` and `overflow` cropping;
+positions before the collection start are structurally absent. Binding rejects
+shifts on ancestor sources and at the model root, and a request without a
+derive component reads exactly one operand. Duration's `shift` option uses
+this protocol to pass the earlier and current timestamps as its two operands.
+
+```python
+from dataclasses import replace
+from typing import Literal
+
+import relflow as rf
+from relflow.structs.tree import Operand
+
+previous = rf.Extension(name="acme_previous_bearing", types=(int | float,))
+
+
+@previous.register(rf.Component.Request)
+class PreviousBearing(rf.RequestBase):
+    """The bearing recorded one record earlier in the same collection."""
+
+    type: Literal["acme_previous_bearing"] = "acme_previous_bearing"
+
+    def operands(self) -> tuple[Operand, ...]:
+        return tuple(replace(operand, shift=1) for operand in super().operands())
+```
+
 ## Check the extension boundary
 
 Before using a new type in a larger model, check its independent contracts:

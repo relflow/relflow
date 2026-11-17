@@ -185,7 +185,10 @@ model = rf.Model(
 - `Duration(query=(start_path, end_path), granularity="days")` computes signed
   elapsed time before Number's numeric modeling. A single query pairs with a
   configured `start` or `end`; ancestor sources use leading `../` within an
-  explicit Branch. Endpoints must agree on aware versus naive semantics.
+  explicit Branch. `shift=k` instead subtracts the same query's timestamp `k`
+  records earlier in its Branch collection, in source order and before
+  cropping; records without that predecessor are absent. Endpoints must agree
+  on aware versus naive semantics.
 - `Period` is for calendar parts (`DateParts` remains a compatible alias).
   Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset

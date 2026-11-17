@@ -118,6 +118,11 @@ const pythonRules = [
     note: reference.options.granularity,
   },
   {
+    pattern: /\bshift\s*=\s*(\d+)\b/g,
+    accept: (_match, context, offset) => context.callAt(offset) === 'rf.Duration',
+    note: (match) => reference.options.shift({ count: match[1] }),
+  },
+  {
     pattern: /\bquery(?=\s*=)/g,
     note: reference.options.query,
   },
