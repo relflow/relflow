@@ -4,11 +4,13 @@ Requirements: uv and Python 3.12 or newer. From the directory containing
 repeat_purchase.py, run:
 
 uv run --no-project --python 3.12 \
-  --with "relflow @ git+https://github.com/relflow/relflow.git@dc64b85d75a85b3cef8ceada1869ee512f2fbe65" \
+  --with "relflow==0.5.0" \
   repeat_purchase.py
 
-This pins the relflow 0.5.0 candidate used for this example. No text encoder
-or other model weights are needed. To check only the execution path, append
+This uses the published relflow 0.5.0 package. No text encoder
+or other model weights are needed. The separate recorded-source.py and
+recorded-run.json preserve an earlier captured execution; a new run writes its
+own receipt and does not replace that historical record. To check only the execution path, append
 --smoke. Use --output DIRECTORY to select the artifact directory.
 
 The script creates 512 fictional training customers and 128 separate

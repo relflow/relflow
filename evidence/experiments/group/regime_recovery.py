@@ -5,11 +5,6 @@
 # - Group
 # description: Repeated identities follow four hidden numerical rules. Test whether four fixed Group slots recover
 #   the groups while predicting new observations.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Stable groups — ARI
 #   metric:
@@ -33,6 +28,51 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: The entity identity is visible input; y is the hidden prediction target.
+#   alt: Model tree with event, entity, x, y. The entity identity is visible input; y is the hidden prediction target.
+# evidence-review:
+#   question: Can Group recover known hidden regimes?
+#   modeling: Assign 64 recurring identities to four hidden linear response rules. Hide each new numeric answer and
+#     learn assignments into four fixed Group slots. Compare agreement with the true partition against a no-regime
+#     control that preserves numeric records but shuffles which identity accompanies each rule.
+#   comparison:
+#     metric: Adjusted Rand index
+#     kind: Controlled comparison
+#     conditions:
+#     - label: No persistent identity–rule link
+#       path:
+#       - group_counts
+#       - '4'
+#       - no_regime
+#       - adjusted_rand
+#       format: number
+#     - label: Stable hidden rules
+#       path:
+#       - group_counts
+#       - '4'
+#       - stable
+#       - adjusted_rand
+#       format: number
+#     definition: Agreement with the true groups, ignoring group names. One is exact agreement; independent groupings
+#       average around zero and can score below zero.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The model is supplied four slots. This tests recovery for known identities, not adaptive group-count selection
+#     or generalization to new identities.
+# evidence-plot:
+#   mode: group-learning
+#   target: y
+#   focus: Do the learned groups recover the generating partition and help prediction?
+#   comparison: Show the true-versus-assigned partition beside prediction error and the no-regime control.
+#   limit: Group identifiers are arbitrary; occupancy alone is not recovery, and ARI is invariant to renaming.
+#   supplements:
+#     groups:
+#       mode: group-composition
+#     predictions:
+#       mode: group-predictions
 # ---
 #
 # The model sees an opaque identity and a numeric input `x`, then predicts `y`.
@@ -75,10 +115,7 @@
 # given this table or a device's true group. It learns from individual labeled
 # measurements, and the evaluator keeps the true grouping for scoring.
 #
-# ```{typst}
-# //| label: fig-proof-group-regime-recovery
-# //| fig-cap: "The entity identity is visible input; y is the hidden prediction target."
-# //| fig-alt: "Model tree with event, entity, x, y. The entity identity is visible input; y is the hidden prediction target."
+# ```typst
 # #tree(node("event", kind: "root", children: (
 #   node("entity", type: "Group", detail: "Repeated identity; fixed group slots"),
 #   node("x", type: "Number"),
@@ -125,19 +162,10 @@
 #
 # ## Result
 #
-# {{< evidence P111 status >}}
-#
 # Archived results use the former Cluster contract and do not validate this Group-based source.
 # Current runs compare assignment recovery and held-out prediction with four fixed Group slots.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P111 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P111 script >}}
+# ## Method
 #
 # ### Process, observability, and split unit
 #
@@ -183,8 +211,6 @@
 # This task has strongly separated intercepts; crossing curves, unbalanced
 # groups, unseen identities, and a benefit over a parameter-matched Category
 # model remain separate questions.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -435,6 +461,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

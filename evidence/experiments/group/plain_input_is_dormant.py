@@ -5,11 +5,6 @@
 # - Group
 # description: Use a Group field as input beside a hidden prediction target and require its assignments to recover
 #   the label groups.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Label agreement at the final epoch
 #   metric:
@@ -17,12 +12,45 @@
 #   - -1
 #   format: number
 # - label: Held-out label accuracy
-#   metric: [heldout_accuracy]
+#   metric:
+#   - heldout_accuracy
 #   format: percent
 # - label: Shuffled-identity accuracy
-#   metric: [shuffled_accuracy]
+#   metric:
+#   - shuffled_accuracy
 #   format: percent
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can a plain Group recover label groups?
+#   modeling: Generate five label groups with ten recurring identities each, plus unrelated context. Train a sibling
+#     label predictor while leaving the Group state unmasked. Score whether the final assignments recover the hidden
+#     label groups.
+#   comparison:
+#     metric: Adjusted Rand index
+#     kind: Recorded measurement
+#     conditions:
+#     - label: Final assignment agreement
+#       path:
+#       - adjusted_rand
+#       - -1
+#       format: number
+#     definition: Agreement with the true groups, ignoring group names. One is exact agreement; independent groupings
+#       average around zero and can score below zero.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Assignments learn from the downstream label objective. This is a current Group hypothesis, not a reused
+#     measurement from the retired Cluster experiment; held-out label and shuffled-ID accuracy are separate gates.
+# evidence-plot:
+#   mode: trajectory
+#   focus: Can a plain-input Group recover label groups?
+#   comparison: Follow assignment agreement, then compare held-out predictions with shuffled identities.
+#   limit: The held-out rows have new nuisance values but familiar identities; this does not test unseen identities.
 # ---
 #
 # A Group field learns assignments from downstream objectives. This experiment checks whether that
@@ -44,10 +72,7 @@
 # synthetic identifiers, not evidence about real merchants. Predicting L2 for this familiar identity
 # and updating the adaptive grouping mechanism are separate behaviors.
 #
-# ```{typst}
-# //| label: fig-proof-group-plain-input-is-dormant
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("event", kind: "root", children: (
 #   node("merchant_id", type: "Group", width: 150pt,),
 #   node("context", type: "Number"),
@@ -62,19 +87,10 @@
 #
 # ## Result
 #
-# {{< evidence P109 status >}}
-#
 # Archived measurements use the former Cluster contract and do not validate this Group-based
 # source. This run requires Group assignments to recover the stable labels.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P109 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P109 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -102,8 +118,6 @@
 # This proof tests new observations of known identities, not unseen identities.
 # The default seed is 10901; fresh confirmation seeds 10902 and 10903 are
 # declared before evaluation. They are separate experiments, not retries.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -273,6 +287,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

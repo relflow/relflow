@@ -4,11 +4,6 @@
 # categories:
 # - Vocabulary
 # description: Train on common and rare labels, changing which labels appear first.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Common-label coverage, rare first
 #   metric:
@@ -23,6 +18,47 @@
 #   - common_coverage
 #   format: percent
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, code, target. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: Does label encounter order limit vocabulary coverage?
+#   modeling: 'Present the same four observed labels in two orders: rare labels first or common labels first. Let
+#     the input vocabulary grow automatically while learning each label’s numerical effect. Compare how many common
+#     labels are represented after training.'
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Proportion
+#     conditions:
+#     - label: Common-label coverage, rare first
+#       path:
+#       - arms
+#       - rare_first
+#       - common_coverage
+#       format: percent
+#     - label: Common-label coverage, common first
+#       path:
+#       - arms
+#       - common_first
+#       - common_coverage
+#       format: percent
+#     definition: Recorded fraction of the population named in each condition. See the method for its denominator.
+#     direction: Task-specific interpretation
+#     domain:
+#     - 0
+#     - 1
+#   note: Coverage measures admitted labels, not predictive accuracy. Additional gates require all four labels to
+#     be stored and their effects to be learned.
+# evidence-plot:
+#   mode: regression
+#   target: target
+#   focus: Which labels receive a finite vocabulary's capacity?
+#   comparison: Compare common-first and rare-first admission orders, including unknown-label renaming.
+#   limit: Admission order changes which input labels have learned rows; it does not change the test generator.
+# evidence-cost:
+#   baseline: 17
+#   candidate: 16
 # ---
 #
 # This experiment asks whether the first labels encountered can crowd out useful labels that arrive
@@ -39,10 +75,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-capacity-admission-order
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, code, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("code", type: "Category", body: [Growing vocabulary with stable IDs]),
 #   node("target", kind: "target", type: "Number"),
@@ -65,8 +98,6 @@
 #
 # ## Result
 #
-# {{< evidence P057 status >}}
-#
 # Storage grows and retains earlier labels in both orders. This single-consumer experiment does not test distributed encounter order.
 #
 # Vocabulary coverage and prediction quality answer different questions here. Complete coverage shows
@@ -74,14 +105,7 @@
 # learned. The rare labels diagnose admission and stable ordering, not dependable rare-label accuracy.
 # The controlled one-consumer setup also leaves distributed encounter ordering outside this claim.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P057 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P057 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -109,8 +133,6 @@
 # preservation after growth later in training. Dedicated runtime tests cover
 # those invariants separately, including two-rank DDP, persistent workers,
 # gradient accumulation, and checkpoint resume.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -258,6 +280,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

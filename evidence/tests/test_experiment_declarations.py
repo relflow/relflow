@@ -144,63 +144,10 @@ def test_archived_catalog_can_still_be_read_without_importing_it(tmp_path):
 
 def test_complete_catalog_uses_one_declaration_per_experiment():
     root = Path(__file__).resolve().parents[2] / "evidence"
-    entries = registry(root, measurements=False, lane="all")
+    entries = registry(root, measurements=False)
     assert entries
     for identifier, entry in entries.items():
         text = (root / entry["script"]).read_text()
         assert declaration(text).id == identifier
         assert "PROOF_ID =" not in text
         assert "# evidence-id:" not in text
-
-
-def test_lanes_are_explicit_static_and_default_to_complete_core(tmp_path):
-    core = tmp_path / "experiments/family/core.py"
-    research = tmp_path / "research/family/research.py"
-    core.parent.mkdir(parents=True)
-    research.parent.mkdir(parents=True)
-    core.write_text(script())
-    research.write_text(
-        script('@experiment("P902", seed=456)').replace(
-            "# title:", '# evidence-requires: ["offline encoder snapshot"]\n# title:'
-        )
-    )
-
-    assert list(registry(tmp_path, measurements=False)) == ["P901"]
-    selected = registry(tmp_path, measurements=False, lane="research")
-    assert list(selected) == ["P902"]
-    assert selected["P902"]["lane"] == "research"
-    assert selected["P902"]["script"] == "research/family/research.py"
-    assert set(registry(tmp_path, measurements=False, lane="all")) == {"P901", "P902"}
-    assert not (tmp_path / "executed").exists()
-
-
-def test_research_ids_cannot_collide_with_core_or_be_reclassified_by_metadata(tmp_path):
-    core = tmp_path / "experiments/family/core.py"
-    research = tmp_path / "research/family/research.py"
-    core.parent.mkdir(parents=True)
-    research.parent.mkdir(parents=True)
-    core.write_text(script())
-    research.write_text(script().replace("# title:", '# evidence-requires: ["extra"]\n# title:'))
-    with pytest.raises(ValueError, match="duplicate evidence ID"):
-        registry(tmp_path, measurements=False)
-    research.unlink()
-    core.write_text(script().replace("# title:", "# evidence-lane: research\n# title:"))
-    with pytest.raises(ValueError, match="directory owns its lane"):
-        registry(tmp_path, measurements=False)
-
-
-@pytest.mark.parametrize("requirement", [None, '"extra"', "[]", '[""]', "[1]"])
-def test_research_requires_explicit_nonempty_provisioning_descriptions(tmp_path, requirement):
-    path = tmp_path / "research/family/research.py"
-    path.parent.mkdir(parents=True)
-    text = script()
-    if requirement is not None:
-        text = text.replace("# title:", f"# evidence-requires: {requirement}\n# title:")
-    path.write_text(text)
-    with pytest.raises(ValueError, match="evidence-requires"):
-        registry(tmp_path, measurements=False, lane="research")
-
-
-def test_invalid_lane_does_not_silently_select_an_empty_suite(tmp_path):
-    with pytest.raises(ValueError, match="Evidence lane"):
-        registry(tmp_path, measurements=False, lane="typo")

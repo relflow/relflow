@@ -3,13 +3,7 @@
 # title: Can an inferred rule work beyond its examples?
 # categories:
 # - Composition
-# description: A set of numeric examples defines a fresh rule; the model predicts a hidden answer at a requested
-#   query.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: A set of numeric examples defines a fresh rule; the model predicts a hidden answer at a requested query.
 # evidence-readout:
 # - label: Four examples, outside range
 #   metric:
@@ -24,6 +18,41 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Composition
+# evidence-diagram:
+#   caption: Visible inputs and the hidden prediction target for this controlled task.
+#   alt: A set of numeric examples defines a fresh rule; the model predicts a hidden answer at a requested query.
+# evidence-review:
+#   question: Can an inferred rule work beyond its examples?
+#   modeling: Give each record examples from a fresh straight-line rule and hide its answer at a query x. Train with
+#     four examples and queries inside their span. Compare a context model with a query-only control on queries beyond
+#     the examples, using the same four-example test records.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Query only · outside example range
+#       path:
+#       - query_only
+#       - count_4/outside
+#       - normalized_rmse
+#       format: number
+#     - label: Four visible examples · outside range
+#       path:
+#       - context
+#       - count_4/outside
+#       - normalized_rmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: Two- and eight-example conditions are checked separately. This tests a bounded affine family, not arbitrary
+#     rule induction or unlimited extrapolation.
+# evidence-plot:
+#   target: answer
+#   focus: Where do context examples stop supporting extrapolation?
+#   comparison: Separate familiar, outside-range, sparse-context, and altered-example conditions with least squares.
+#   limit: Context count, query range, and consistency are distinct information boundaries.
+#   renderer: plot
 # ---
 #
 # Each record supplies examples from a new linear rule, but never supplies its slope or intercept. The
@@ -44,10 +73,7 @@
 # answer: 4.0
 # ```
 #
-# ```{typst}
-# //| label: fig-evidence-p097
-# //| fig-cap: "Visible inputs and the hidden prediction target for this controlled task."
-# //| fig-alt: "A set of numeric examples defines a fresh rule; the model predicts a hidden answer at a requested query."
+# ```typst
 # #tree(node("task", kind: "root", children: (node("examples", kind: "branch", children: (node("x", type: "Number"), node("y", type: "Number"))), node("query", type: "Number"), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
@@ -61,21 +87,12 @@
 #
 # ## Result
 #
-# {{< evidence P097 status >}}
-#
 # These checks define a new experiment. A full recorded run is required before claiming that the model
 # meets them. Lower normalized error is better; a value of one matches the stated constant reference. The
 # numerical gates are provisional and must be calibrated on separate validation seeds rather than adjusted
 # after seeing acceptance-test outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P097 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P097 script >}}
+# ## Method
 #
 # ### Process, controls, and held-out evaluation
 #
@@ -90,12 +107,11 @@
 # must remain unchanged across inference. These provisional checks concern this bounded affine family; they
 # do not establish arbitrary algorithm induction.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -279,8 +295,47 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair
+
+    m = bundle.record["metrics"]
+    counts = [2, 4, 8]
+    fig, axes = axes_pair(width=10, height=4.8)
+    for ax, region, title in zip(
+        axes,
+        ["inside", "outside"],
+        ["Queries inside the context range", "Queries outside the context range"],
+        strict=True,
+    ):
+        series = {
+            "Intact context": [m["context"][f"count_{n}/{region}"]["normalized_rmse"] for n in counts],
+            "Context swapped across tasks": [
+                m["context"][f"count_{n}/{region}"]["swapped_context"]["normalized_rmse"] for n in counts
+            ],
+            "Query-only model": [m["query_only"][f"count_{n}/{region}"]["normalized_rmse"] for n in counts],
+            "Least-squares reference": [
+                m["context"][f"count_{n}/{region}"]["least_squares"]["normalized_rmse"] for n in counts
+            ],
+        }
+        for index, (name, values) in enumerate(series.items()):
+            ax.plot(counts, values, marker=MARKERS[index], color=COLORS[index], label=name, lw=1.7)
+        ax.set(
+            xticks=counts,
+            xlabel="Visible context examples",
+            ylabel="RMSE / task baseline RMSE",
+            title=title,
+            ylim=(0, 1.65),
+        )
+        ax.axhline(1, color="gray", ls=":")
+        ax.grid(alpha=0.18)
+        ax.legend(fontsize=8)
+    return (
+        fig,
+        "Markers are the three evaluated context counts; both panels share the same error scale. The least-squares reference uses the supplied examples directly. The query-only control and swapped context isolate dependence on task information. Extrapolation is scored separately from interpolation, including its unmet checks.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

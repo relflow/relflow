@@ -15,8 +15,21 @@ ROOT = Path(__file__).resolve().parents[1]
 PROOFS = ROOT / "experiments"
 
 
+def test_shared_rendering_and_publication_never_list_experiment_ids():
+    shared = [
+        *(ROOT.parent / "docs/starlight/src/evidence").glob("*.ts"),
+        ROOT / "diagnostics/plots.py",
+        ROOT / "record.py",
+    ]
+    for path in shared:
+        assert not re.search(r"\bP\d{3}\b", path.read_text()), f"{path}: move experiment-specific data into its script"
+    for path in ("diagnostics/views.json", "timings.json"):
+        assert not (ROOT / path).exists(), f"{path}: experiments own their metadata"
+    assert not (ROOT.parent / "docs/starlight/src/evidence/reviews.ts").exists()
+
+
 def test_every_experiment_declares_its_imported_dependencies_without_importing_models():
-    for entry in registry(ROOT, measurements=False, lane="all").values():
+    for entry in registry(ROOT, measurements=False).values():
         path = ROOT / entry["script"]
         source = path.read_text()
         assert not re.search(r"\]\([^)]*\.qmd(?:[)#?])", source), f"{path}: link to a current Starlight route"
@@ -38,7 +51,7 @@ def test_every_experiment_declares_its_imported_dependencies_without_importing_m
             for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.ImportFrom) and node.module
         }
-        expected = imports - sys.stdlib_module_names - {"reporting", "policies"}
+        expected = imports - sys.stdlib_module_names - {"reporting", "policies", "evidence"}
         assert expected <= dependencies, f"{path}: missing dependencies {expected - dependencies}"
         assert {"pyyaml", "torch", "relflow"} <= dependencies, f"{path}: reporter dependencies are explicit"
         assert 'Path(__file__).resolve().parents[2] / "experiments"' in source
@@ -49,13 +62,14 @@ def test_every_experiment_declares_its_imported_dependencies_without_importing_m
 
 
 def test_registered_proofs_have_unique_standalone_scripts() -> None:
-    entries = registry(ROOT, lane="all")
+    entries = registry(ROOT)
     assert entries, "declare each experiment with @experiment"
 
     paths = Counter(entry["script"] for entry in entries.values())
     assert all(count == 1 for count in paths.values()), "each proof ID must own one experiment script"
     expected = {ROOT / path for path in paths}
-    actual = set(PROOFS.rglob("*.py")) | set((ROOT / "research").rglob("*.py"))
+    actual = set(PROOFS.rglob("*.py"))
+    assert not (ROOT / "research").exists(), "keep canonical experiments together"
     actual -= {PROOFS / name for name in ("policies.py", "reporting.py", "run.py", "source.py", "render.py")}
     assert actual == expected, f"proof scripts and results registry disagree: {actual ^ expected}"
     assert not list(PROOFS.rglob("test_*.py")), "learning experiments belong in standalone scripts"
@@ -64,7 +78,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
 
     for identifier, entry in entries.items():
         path = ROOT / entry["script"]
-        assert path.parent.parent in {PROOFS, ROOT / "research"} and path.is_file(), path
+        assert path.parent.parent == PROOFS and path.is_file(), path
         page = Path(entry["page"])
         assert page.suffix == ".py" and page.parent.parent == Path("docs/evidence"), page
         assert path.parent.name == page.parent.name, f"{path}: keep the script in its documented category"
@@ -88,7 +102,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
 
 
 def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
-    entries = registry(ROOT, lane="all")
+    entries = registry(ROOT)
     sibling_modules = {Path(entry["script"]).stem for entry in entries.values()}
     for entry in entries.values():
         path = ROOT / entry["script"]
@@ -158,7 +172,7 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
 
 
 def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
-    entries = registry(ROOT, lane="all")
+    entries = registry(ROOT)
     for entry in entries.values():
         path = ROOT / entry["script"]
         module = ast.parse(path.read_text(), filename=str(path))
@@ -207,7 +221,7 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
 
 
 def test_experiments_expose_the_shared_reporting_entrypoint() -> None:
-    entries = registry(ROOT, lane="all")
+    entries = registry(ROOT)
     for entry in entries.values():
         path = ROOT / entry["script"]
         module = ast.parse(path.read_text(), filename=str(path))
@@ -256,7 +270,7 @@ def markdown(source: Path) -> str:
 
 
 def test_every_registered_proof_has_a_small_readable_overview() -> None:
-    entries = registry(ROOT, lane="all")
+    entries = registry(ROOT)
     documented: Counter[str] = Counter()
     for identifier, entry in entries.items():
         page = ROOT / entry["script"]
@@ -274,21 +288,18 @@ def test_every_registered_proof_has_a_small_readable_overview() -> None:
         assert "evidence-source" not in metadata and "evidence-status" not in metadata, (
             f"{page}: status is derived from the measured result"
         )
-        sections = set(re.findall(r"\{\{<\s*evidence\s+([^\s>]+)\s+([^\s>]+)\s*>\}\}", text))
-        expected = {(identifier, part) for part in ("status", "evidence", "script")}
-        assert sections == expected, f"{page}: render recorded evidence and reproduction commands for {identifier}"
-        overview, details = text.split('<details class="evidence-details">', maxsplit=1)
-        assert "<summary>Experiment details and code</summary>" in details, page
-        assert f"{{{{< evidence {identifier} evidence >}}}}" in details, page
-        assert f"{{{{< evidence {identifier} script >}}}}" in details, page
-        assert metadata["toc"] is False, f"{page}: optional details must not fill the contents menu"
+        assert not {"execute", "code-fold", "toc"} & metadata.keys(), f"{page}: remove retired presentation options"
+        assert "{{<" not in text and "evidence-details" not in text, f"{page}: use plain Markdown sections"
+        overview, details = text.split("## Method", maxsplit=1)
+        assert details.strip(), f"{page}: retain the scientific method"
         assert re.findall(r"^## (.+)$", overview, flags=re.MULTILINE) == ["Example", "Comparison", "Result"], page
-        result = overview.split("## Result\n", maxsplit=1)[1]
-        insight = re.sub(r"\{\{<.*?>\}\}", "", result).strip()
+        insight = overview.split("## Result\n", maxsplit=1)[1].strip()
         assert insight, f"{page}: interpret the result and name its limits in the authored script"
         assert 1 <= len(metadata["evidence-readout"]) <= 3, f"{page}: keep the result comparison small"
-        assert "```{typst}" in text and "#tree(" in text, f"{page}: missing model tree"
-        assert "//| fig-alt:" in text, f"{page}: missing tree description"
+        assert "```typst" in text and "#tree(" in text, f"{page}: missing model tree"
+        diagram = metadata["evidence-diagram"]
+        assert diagram["caption"] and diagram["alt"], f"{page}: describe the model tree"
+        assert "//|" not in text, f"{page}: keep diagram metadata in the header"
         assert len(re.findall(r"^```yaml\s*$", text, flags=re.MULTILINE)) == 1, f"{page}: show one example record"
         assert "#tree(" not in details, f"{page}: keep one diagram beside the example"
 

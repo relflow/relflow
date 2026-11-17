@@ -4,11 +4,6 @@
 # categories:
 # - Calibration
 # description: Predict a yes/no answer from a visible yes/no input.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Matching answers
 #   metric:
@@ -19,6 +14,44 @@
 #   - noise_auc
 #   format: auc
 # evidence-group: Calibration
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with calibration, x, segment, tags, leak, target. Amber cards are hidden prediction targets. Other
+#     fields provide the input.
+# evidence-review:
+#   question: Can relflow learn a signal without inventing one?
+#   modeling: Train two yes/no predictors with the same architecture and budget. In one dataset, the visible Boolean
+#     matches the hidden answer. In the control, the visible Boolean and balanced answer are independent. Evaluate
+#     both on fresh records using AUC.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: AUC
+#     conditions:
+#     - label: Unrelated answers
+#       path:
+#       - noise_auc
+#       format: auc
+#     - label: Matching answers
+#       path:
+#       - signal_auc
+#       format: auc
+#     definition: 'Ranking score: 0.5 is chance and 1 is perfect separation. This is not the percentage of correct
+#       predictions.'
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The unrelated-input control should remain near chance. High accuracy on its training rows would not establish
+#     a learnable test signal.
+# evidence-plot:
+#   target: target
+#   focus: Can a real signal be distinguished from independent noise?
+#   comparison: Compare the two independently fitted arms using held-out AUC.
+#   limit: An AUC summary does not determine an entire ROC curve; a curve is shown only when individual scores exist.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 17
+#   candidate: 17
 # ---
 #
 # This is a sanity check for interpreting learning experiments: can the same training setup learn an
@@ -45,10 +78,7 @@
 # independently: the same visible true can accompany either target. A single illustrated row cannot
 # show the difference; it is a relationship across many independent examples.
 #
-# ```{typst}
-# //| label: fig-evidence-calibration-signal-vs-noise
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with calibration, x, segment, tags, leak, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("calibration", kind: "root", children: (
 #   node("x", type: "Number"),
 #   node("segment", type: "Category"),
@@ -70,25 +100,15 @@
 #
 # ## Result
 #
-# {{< evidence P017 status >}}
-#
 # The real signal is learned; unrelated answers remain near chance. This basic check makes harder
 # learning results easier to interpret.
-#
 #
 # AUC measures whether positive targets tend to receive higher scores than negative ones: 0.5 is
 # chance ranking and 1 is perfect ranking. The checks require high signal AUC, noise AUC near 0.5,
 # and a large gap between them. This basic control does not prove calibrated probabilities or
 # establish that more complex tasks are free from leakage.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P017 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P017 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -108,13 +128,11 @@
 # Record the resulting distributions before freezing the gates, and reconcile
 # the implemented 2,048 test rows with the evidence plan's 4,096-row requirement.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
@@ -223,8 +241,26 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+
+    from evidence.diagnostics.plots import dots
+
+    m = bundle.record["metrics"]
+    labels = ["Learnable signal", "Independent noise"]
+    values = [m["signal_auc"], m["noise_auc"]]
+    fig, ax = plt.subplots(figsize=(8, 3.8), layout="constrained")
+    dots(
+        ax, labels, {"Held-out AUC": values}, xlabel="Ranking AUC (higher is better)", reference=(0.5, "Chance ranking")
+    )
+    ax.set_xlim(-0.02, 1.03)
+    return (
+        fig,
+        "These are the proof's independent held-out ranking scores. AUC is not accuracy, and no unobserved ROC curve is drawn from these summary values.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

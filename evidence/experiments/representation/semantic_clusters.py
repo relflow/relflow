@@ -3,13 +3,8 @@
 # title: Do reconstruction embeddings separate transaction styles in new records?
 # categories:
 # - Representation
-# description: Fit four clusters without labels, then measure their agreement with hidden transaction styles
-#   on independent records and compare trained, untrained, shuffled-view, and raw representations.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Fit four clusters without labels, then measure their agreement with hidden transaction styles on independent
+#   records and compare trained, untrained, shuffled-view, and raw representations.
 # evidence-readout:
 # - label: Trained embedding ARI
 #   metric:
@@ -30,6 +25,67 @@
 #   - ari
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Train by reconstructing sampled fields, freeze the root embedding, then cluster without labels.
+#   alt: Account model with merchant pattern and payment rhythm Enum fields and a sixteen-coordinate cashflow Vector.
+#     The root exports one frozen embedding; hidden style labels stay outside the model.
+# evidence-review:
+#   question: Do reconstruction embeddings separate transaction styles in new records?
+#   modeling: Generate three noisy views of four hidden styles, then pretrain an encoder by reconstructing hidden
+#     fields without style labels. Freeze the embeddings and fit four clusters on unlabeled training records. Compare
+#     test-set group agreement with untrained and shuffled-view encoders and raw features.
+#   comparison:
+#     metric: Adjusted Rand index
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Untrained encoder
+#       path:
+#       - mean
+#       - untrained
+#       - ari
+#       format: number
+#     - label: Shuffled-view pretraining
+#       path:
+#       - mean
+#       - permuted
+#       - ari
+#       format: number
+#     - label: Raw features
+#       path:
+#       - mean
+#       - raw
+#       - ari
+#       format: number
+#     - label: Reconstruction pretraining
+#       path:
+#       - mean
+#       - aligned
+#       - ari
+#       format: number
+#     definition: Agreement with the true groups, ignoring group names. One is exact agreement; independent groupings
+#       average around zero and can score below zero.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Four clusters are supplied to the clustering algorithm. Agreement is scored on independent records over
+#     three seeds; this does not discover the number of styles.
+# evidence-plot:
+#   target: class
+#   focus: Do reconstructed representations form useful held-out semantic groups?
+#   comparison: Compare aligned, permuted, untrained, and raw views across every declared seed.
+#   limit: Any projection is fitted on training vectors; the original-space clustering and neighbor metrics remain
+#     authoritative.
+#   geometry:
+#   - aligned
+#   - untrained
+#   supplements:
+#     geometry:
+#       mode: representation-geometry
+#   renderer: plot
+# evidence-cost:
+#   baseline: 179
+#   candidate: 179
 # ---
 #
 # This experiment asks whether learning to reconstruct related fields makes a
@@ -60,10 +116,7 @@
 # useful in the account vector. The hidden style itself is never a reconstruction
 # answer, and its label is excluded from clustering.
 #
-# ```{typst}
-# //| label: fig-evidence-semantic-clusters
-# //| fig-cap: "Train by reconstructing sampled fields, freeze the root embedding, then cluster without labels."
-# //| fig-alt: "Account model with merchant pattern and payment rhythm Enum fields and a sixteen-coordinate cashflow Vector. The root exports one frozen embedding; hidden style labels stay outside the model."
+# ```typst
 # #tree(node("account", kind: "root", body: [Export one frozen embedding], children: (
 #   node("merchant_pattern", type: "Enum", body: [Noisy spending view; sampled reconstruction]),
 #   node("payment_rhythm", type: "Enum", body: [Independent noisy payment view]),
@@ -85,28 +138,18 @@
 # its hidden style; four matching neighbors would give agreement of 0.8. Those
 # labels are used only for evaluation, never to select the clusters.
 #
-#
 # Compare the same fixed clustering and neighborhood rules on reconstruction
 # embeddings, identically initialized untrained embeddings, embeddings trained
 # with independently shuffled views, and all raw input coordinates.
 #
 # ## Result
 #
-# {{< evidence P080 status >}}
-#
 # Compare both the absolute agreement checks and the trained-versus-control
 # scores. Training may meet its criteria without beating raw features. The
 # experiment concerns new records of four shared synthetic styles and a supplied
 # cluster count; it does not demonstrate discovery of real financial segments.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P080 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P080 script >}}
+# ## Method
 #
 # ### What the model can observe
 #
@@ -158,13 +201,11 @@
 # count is known from the synthetic generator. These checks cannot establish
 # an appropriate number of groups, semantic fairness, or real-world usefulness.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -540,8 +581,34 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    trials = m["trials"]
+    arms = list(trials[0]["arms"])
+    for ax, key, label in zip(
+        axes,
+        ["ari", "neighbor_agreement"],
+        ["Held-out adjusted Rand agreement", "Held-out neighbor agreement"],
+        strict=True,
+    ):
+        dots(
+            ax,
+            [human(arm) for arm in arms],
+            {f"Seed {trial['seed']}": [trial["arms"][arm][key] for arm in arms] for trial in trials},
+            xlabel=label,
+            reference=(0, "Chance-adjusted zero") if key == "ari" else None,
+        )
+    return (
+        fig,
+        "All three declared seeds are plotted individually. These clustering and neighborhood measurements use the original representation space; they do not rely on a two-dimensional projection.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

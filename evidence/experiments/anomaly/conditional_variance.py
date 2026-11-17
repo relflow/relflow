@@ -3,13 +3,8 @@
 # title: Do legitimate noisy groups trigger too many anomaly warnings?
 # categories:
 # - Anomaly
-# description: Predict an expected response in quiet and noisy groups, then compare
-#   global and group-specific residual thresholds.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Predict an expected response in quiet and noisy groups, then compare global and group-specific residual
+#   thresholds.
 # evidence-readout:
 # - label: Conditional anomaly ranking
 #   metric:
@@ -22,6 +17,45 @@
 #   - precision_at_one_percent
 #   format: percent
 # evidence-group: Anomaly
+# evidence-diagram:
+#   caption: Visible fields supply evidence; prediction targets are hidden.
+#   alt: Predict an expected response in quiet and noisy groups, then compare global and group-specific residual thresholds.
+# evidence-review:
+#   question: Do group-specific thresholds reduce false alarms on noisy groups?
+#   modeling: Generate legitimate responses from quiet and noisy groups, then use one fitted predictor to score reconstruction
+#     errors. Compare a global anomaly threshold with separate thresholds for each group, all chosen from clean validation
+#     data. Measure false alarms on legitimate noisy-group records.
+#   comparison:
+#     metric: False positive rate
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Global threshold · noisy group
+#       path:
+#       - global
+#       - false_positive_by_group
+#       - noisy
+#       format: number
+#     - label: Group-specific threshold · noisy group
+#       path:
+#       - conditional
+#       - false_positive_by_group
+#       - noisy
+#       format: number
+#     definition: Fraction of legitimate records incorrectly flagged as anomalies in the named group. Lower means
+#       fewer false alarms.
+#     direction: Lower error is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Lower false alarms alone do not establish useful detection. Recall, ranking, and expected precision at 1%
+#     anomaly prevalence remain separate measurements.
+# evidence-plot:
+#   target: answer
+#   focus: Does a global anomaly threshold unfairly flag noisy but valid contexts?
+#   comparison: Compare global and conditional residual scoring, including false alarms within each noise group.
+#   limit: All operating thresholds are chosen from validation data; group false alarms are not replaced by a pooled
+#     average.
+#   renderer: plot
 # ---
 #
 # The same-sized prediction error can be extraordinary in a quiet group and ordinary in a noisy one. A
@@ -39,10 +73,7 @@
 # Predict an expected response in quiet and noisy groups, then compare global and group-specific residual
 # thresholds. The example is illustrative; its answer is hidden during scoring.
 #
-# ```{typst}
-# //| label: fig-evidence-p096
-# //| fig-cap: "Visible fields supply evidence; prediction targets are hidden."
-# //| fig-alt: "Predict an expected response in quiet and noisy groups, then compare global and group-specific residual thresholds."
+# ```typst
 # #tree(node("record",kind:"root",children:(node("group",type:"Enum"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
 # ```
 #
@@ -54,20 +85,11 @@
 #
 # ## Result
 #
-# {{< evidence P096 status >}}
-#
 # No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
 # established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
 # each evaluation condition remain separate.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P096 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P096 script >}}
+# ## Method
 #
 # ### Process, splits, and interpretation
 #
@@ -81,11 +103,10 @@
 # recall without useful precision is not sufficient, and heterogeneous Gaussian noise does not cover
 # arbitrary uncertainty or new unseen groups.
 #
-# ### Complete experiment code
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -265,8 +286,64 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, axes_pair, dots, roc
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.7)
+    groups = list(m["global"]["false_positive_by_group"])
+    dots(
+        axes[0],
+        groups,
+        {
+            human(arm): [m[arm]["false_positive_by_group"][group] for group in groups]
+            for arm in ["global", "conditional", "marginal"]
+        },
+        xlabel="Normal false-alarm rate within each group",
+        percent=True,
+    )
+    axes[0].set_xlim(
+        0,
+        max(
+            0.12,
+            max(
+                (
+                    value
+                    for arm in ["global", "conditional", "marginal"]
+                    for value in m[arm]["false_positive_by_group"].values()
+                )
+            )
+            * 1.1,
+        ),
+    )
+    frames = [frame for frame in bundle.frames if frame["function"] == "operating"]
+    for index, (frame, arm) in enumerate(zip(frames, ["global", "conditional", "marginal"], strict=True)):
+        normal, anomalous = bundle.values(frame, "normal", "anomalous")
+        fpr, tpr = roc(normal, anomalous)
+        np.testing.assert_allclose(np.trapezoid(tpr, fpr), m[arm]["auc"], atol=1e-12)
+        axes[1].plot(fpr, tpr, color=COLORS[index], lw=1.8, label=f"{human(arm)} (AUC {m[arm]['auc']:.3f})")
+        axes[1].scatter(m[arm]["false_positive_rate"], m[arm]["recall"], color=COLORS[index], s=35, zorder=5)
+    axes[1].set(
+        xlabel="Normal false-alarm rate",
+        ylabel="Anomaly recall",
+        title="Ranking with validation-chosen thresholds",
+        xlim=(0, 1),
+        ylim=(0, 1),
+    )
+    axes[1].xaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].legend(fontsize=8, loc="lower right")
+    return (
+        fig,
+        "Group false alarms use fixed held-out memberships. Curves use retained scores and their areas match the proof. Dots use thresholds chosen only from clean validation residuals; conditional thresholds adjust for each group's normal noise level.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

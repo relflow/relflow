@@ -4,11 +4,6 @@
 # categories:
 # - Learning from context
 # description: Each record supplies four examples of a fresh straight-line rule and asks for the answer at a new input.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Familiar rules
 #   metric:
@@ -30,6 +25,45 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Composition
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with task, examples, x, y, query, answer. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow infer a new rule from examples in the record?
+#   modeling: Each record supplies four noisy input–output examples from a newly generated straight line, plus a new
+#     query x. Hide the query’s answer and the line parameters. Test rules with a positive slope and intercept together,
+#     a combination excluded from training, and compare with a query-only model.
+#   comparison:
+#     metric: RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Query only · withheld rule family
+#       path:
+#       - query_only
+#       - withheld
+#       - rmse
+#       format: number
+#     - label: Visible examples · withheld rule family
+#       path:
+#       - context
+#       - withheld
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: No weights are updated for a test record. Query values lie between the supplied examples; this tests a new
+#     combination of rules, not extrapolation beyond their x range.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Can context examples specify a previously unseen function?
+#   comparison: Compare valid examples, swapped examples, query-only training, and least squares on familiar and withheld
+#     families.
+#   limit: The explicit least-squares reference has a different inductive bias and is labeled as an evaluator baseline.
+# evidence-cost:
+#   baseline: 79
+#   candidate: 80
 # ---
 #
 # Each record describes a fresh small prediction problem. Four visible examples come from one
@@ -51,10 +85,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-context-examples
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with task, examples, x, y, query, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("task", kind: "root", children: (
 #   node("examples", kind: "branch", repeated: true, children: (
 #     node("x", type: "Number"), node("y", type: "Number"),
@@ -81,8 +112,6 @@
 #
 # ## Result
 #
-# {{< evidence P072 status >}}
-#
 # Use the familiar and withheld-region scores to distinguish learning from examples from transfer to a rule combination excluded during fitting. The selected criteria above report whether each requirement is met.
 #
 # The familiar and withheld-region errors answer different generalization questions, and the selected
@@ -90,14 +119,7 @@
 # examples are read. That is adaptation through context after meta-training on many rules, not
 # learning without prior training or extrapolating beyond the observed query range.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P072 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P072 script >}}
+# ## Method
 #
 # ### Rules, observations, and splits
 #
@@ -140,8 +162,6 @@
 # afterward. This checks the limited no-weight-update claim, alongside finite
 # outputs. It does not describe a training-free system: meta-training on many
 # affine tasks is what may produce this behavior.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -318,6 +338,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

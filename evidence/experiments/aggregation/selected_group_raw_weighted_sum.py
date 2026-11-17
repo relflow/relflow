@@ -4,11 +4,6 @@
 # categories:
 # - Grouped weighted aggregation
 # description: Ask for a group’s total after multiplying each of its values by its own weight.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct data
 #   metric:
@@ -26,6 +21,41 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with request, selected_group, items, group, value, weight, answer. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow total weighted values for one group?
+#   modeling: Give each item a group, value, and weight. A visible request selects one of three groups; the hidden
+#     answer is that group’s sum of value × weight. Compare normal test records with copies that swap weights within
+#     groups while preserving the original answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Swapped weights
+#       path:
+#       - pairing
+#       - rmse
+#       format: number
+#     - label: Correct data
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Changing group labels is a second control. Neither control supplies precomputed products to the model.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Does the answer depend on the requested group and the correct value-weight pairing?
+#   comparison: Compare intact records, rotated group labels, swapped weights, and complete-record permutations.
+#   limit: Each corruption retains the original target so its effect measures a broken dependency.
+# evidence-cost:
+#   baseline: 150
+#   candidate: 153
 # ---
 #
 # The request names one group, while a mixed list contains two items from each of A, B, and C. The
@@ -53,10 +83,7 @@
 # contributions would instead total 0.8; preserving the same values and weights separately would not
 # preserve the answer.
 #
-# ```{typst}
-# //| label: fig-evidence-selected-group-raw-weighted-sum
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with request, selected_group, items, group, value, weight, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("request", kind: "root", width: 120pt, children: (
 #   node("selected_group", type: "Category"),
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
@@ -81,25 +108,15 @@
 #
 # ## Result
 #
-# {{< evidence P010 status >}}
-#
 # The model uses both membership and value–weight pairing. The groups are familiar and equally
 # sized; unfamiliar or missing groups are not tested.
-#
 #
 # All three error percentages share the original constant-guess baseline. Increased error after
 # either corruption indicates dependence on the damaged relationship, while low intact error is
 # still required. The result concerns familiar group labels and exactly two items per group; it does
 # not establish behavior for absent groups or independently varying group sizes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P010 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P010 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -124,8 +141,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -334,6 +349,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

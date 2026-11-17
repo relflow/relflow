@@ -4,11 +4,6 @@
 # categories:
 # - Category-conditioned reduction
 # description: Ask for the average of one named group within a mixed list.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Group A, correct labels
 #   metric:
@@ -19,6 +14,38 @@
 #   - corrupted/A/nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow average only the requested group?
+#   modeling: Mix values from three named groups in one list. Supply a group request and hide that group’s average.
+#     Compare normal records with copies that rotate item group labels without changing values or expected answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Group A, changed labels
+#       path:
+#       - corrupted/A/rmse
+#       format: number
+#     - label: Group A, correct labels
+#       path:
+#       - intact/A/rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The chart highlights group A. The full checks require the relationship separately for groups A, B, and C.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Does the model average only the requested group's values?
+#   comparison: Compare held-out groups with intact and corrupted group labels.
+#   limit: Each group is scored separately to expose selective aggregation failures.
+# evidence-cost:
+#   baseline: 121
+#   candidate: 123
 # ---
 #
 # The request names one group in a list containing A, B, and C values. The hidden answer averages
@@ -50,10 +77,7 @@
 # list would instead give 1.1, and requesting C would give 0.6. Averaging all six values would
 # ignore the instruction and produce a different answer.
 #
-# ```{typst}
-# //| label: fig-evidence-filtered-mean
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("request", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -78,25 +102,15 @@
 #
 # ## Result
 #
-# {{< evidence P026 status >}}
-#
 # The model uses membership to choose the relevant values. Empty groups and unfamiliar group names
 # are not tested.
-#
 #
 # Errors are compared with a separate constant training-mean guess for each requested group. The
 # overview shows A as a compact readout, but checks require accuracy and corruption sensitivity for
 # A, B, and C. All groups are familiar and always have two members, so empty selections, new group
 # names, and variable group sizes remain outside this experiment.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P026 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P026 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -112,8 +126,6 @@
 # absent groups, and variable group sizes. The next rung
 # [combines group selection with four operations](group-operation-composition.html).
 # For an exact business calculation, compute the filtered mean in preprocessing.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -278,6 +290,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

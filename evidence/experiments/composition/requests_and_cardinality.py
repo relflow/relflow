@@ -4,11 +4,6 @@
 # categories:
 # - Composition
 # description: A request selects a group and operation from a mixed list, with a hidden numeric answer.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: New requests and lengths
 #   metric:
@@ -25,6 +20,43 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Composition
+# evidence-diagram:
+#   caption: Visible inputs and the hidden prediction target for this controlled task.
+#   alt: A request selects a group and operation from a mixed list, with a hidden numeric answer.
+# evidence-review:
+#   question: Can new requests work on unfamiliar group sizes?
+#   modeling: Generate group-specific mean, minimum, and maximum requests. Train with three group–operation combinations
+#     withheld and group sizes of one to three. Test those requests on groups of four to six and compare with a model
+#     trained on every request combination.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Request combination withheld
+#       path:
+#       - restricted_training
+#       - unseen_lengths
+#       - unseen_requests
+#       - normalized_rmse
+#       format: number
+#     - label: All request combinations trained
+#       path:
+#       - complete_training
+#       - unseen_lengths
+#       - unseen_requests
+#       - normalized_rmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The highlighted condition changes both request combinations and group sizes. The full checks cross those
+#     shifts separately; familiar performance does not establish the combined case.
+# evidence-plot:
+#   mode: composition
+#   target: answer
+#   focus: Do operation requests transfer when collection length changes?
+#   comparison: Separate requested operations, held-out request combinations, and declared cardinality conditions.
+#   limit: Each operation-length cell remains visible; success at familiar lengths does not establish all lengths.
 # ---
 #
 # The model receives an unsorted mixed list and a request naming one group and one operation. In the
@@ -43,10 +75,7 @@
 # answer: 0.7
 # ```
 #
-# ```{typst}
-# //| label: fig-evidence-p094
-# //| fig-cap: "Visible inputs and the hidden prediction target for this controlled task."
-# //| fig-alt: "A request selects a group and operation from a mixed list, with a hidden numeric answer."
+# ```typst
 # #tree(node("request", kind: "root", children: (node("selected_group", type: "Enum"), node("operation", type: "Enum"), node("items", kind: "branch", children: (node("group", type: "Enum"), node("value", type: "Number"))), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
@@ -60,21 +89,12 @@
 #
 # ## Result
 #
-# {{< evidence P094 status >}}
-#
 # These checks define a new experiment. A full recorded run is required before claiming that the model
 # meets them. Lower normalized error is better; a value of one matches the stated constant reference. The
 # numerical gates are provisional and must be calibrated on separate validation seeds rather than adjusted
 # after seeing acceptance-test outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P094 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P094 script >}}
+# ## Method
 #
 # ### Process, controls, and held-out evaluation
 #
@@ -89,7 +109,6 @@
 # The stronger combined shift remains a provisional capability requirement, not an assumption inherited
 # from separate length and composition proofs.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
@@ -297,6 +316,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

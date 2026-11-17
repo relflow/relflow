@@ -4,11 +4,6 @@
 # categories:
 # - Weighted aggregation
 # description: Predict a weighted total from values and weights stored together on each item.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct pairs
 #   metric:
@@ -21,6 +16,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, value, weight, weighted_sum. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Does each value keep its own weight?
+#   modeling: Generate six items, each with its own independently sampled value and positive weight. Hide the sum
+#     of their value × weight products. Compare correctly paired items with a copy that swaps weights between items
+#     while keeping the original total.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Swapped weights
+#       path:
+#       - corrupted
+#       - rmse
+#       format: number
+#     - label: Correct pairs
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: 'Reordering whole items and scaling every weight are additional checks. Swapping weights tests a different
+#     property: retaining each value’s own partner.'
+# evidence-plot:
+#   mode: regression
+#   target: weighted_sum
+#   focus: Are values combined with their own weights?
+#   comparison: Compare intact and mispaired weights, complete-item permutations, and uniformly scaled weights.
+#   limit: Scaling should change the weighted sum; it is not an invariance control.
+# evidence-cost:
+#   baseline: 48
+#   candidate: 48
 # ---
 #
 # A weight changes how much its own value contributes to a total. The model receives both fields on
@@ -47,10 +78,7 @@
 # different result. A negative value still contributes negatively because all generated weights are
 # positive.
 #
-# ```{typst}
-# //| label: fig-evidence-raw-value-weight-sum
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, value, weight, weighted_sum. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -73,25 +101,15 @@
 #
 # ## Result
 #
-# {{< evidence P014 status >}}
-#
 # The model uses the pairing: swapping weights worsens accuracy. This is approximate learned
 # arithmetic on fixed-length lists.
-#
 #
 # The intact and swapped-weight percentages use the same original-target baseline. A rise after
 # swapping supports sensitivity to pairing, and separate drift checks assess order and scaling
 # behavior. The learned result is approximate and covers six-item lists with positive weights in the
 # sampled range; zero or negative weights and arbitrary lengths are separate questions.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P014 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P014 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -115,8 +133,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -316,6 +332,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

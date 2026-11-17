@@ -19,6 +19,9 @@ permissions:
   contents: read
   actions: read
 
+env:
+  EVIDENCE_EXECUTOR: 'ec525d4e4a25818e98b4e60c27e8e7d364f23d8f'
+
 jobs:
   prepare:
     name: Prepare immutable full-suite inputs
@@ -39,7 +42,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
+          ref: '${{ env.EVIDENCE_EXECUTOR }}'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -116,7 +119,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/evidence-build-cache
-          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-de18256bbbe034c7ab9c05640fb10fec167da4eb-${{ hashFiles('inputs/requirements.txt') }}
+          key: evidence-runtime-${{ runner.os }}-${{ runner.arch }}-${{ env.EVIDENCE_EXECUTOR }}-${{ hashFiles('inputs/requirements.txt') }}
       - name: Build the shared CPU dependency image
         id: runtime
         run: |
@@ -205,7 +208,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
+          ref: '${{ env.EVIDENCE_EXECUTOR }}'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -276,7 +279,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
+          ref: '${{ env.EVIDENCE_EXECUTOR }}'
           path: executor
           fetch-depth: 0
           persist-credentials: false
@@ -337,7 +340,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: 'de18256bbbe034c7ab9c05640fb10fec167da4eb'
+          ref: '${{ env.EVIDENCE_EXECUTOR }}'
           path: executor
           fetch-depth: 0
           persist-credentials: false

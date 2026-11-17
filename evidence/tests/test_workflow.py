@@ -220,14 +220,27 @@ def test_every_job_checks_out_the_same_immutable_executor(job):
         if step.get("uses") == "actions/checkout@v4" and step["with"]["path"] == "executor"
     ]
     assert len(checkouts) == 1
-    assert re.fullmatch(r"[0-9a-f]{40}", checkouts[0]["ref"])
+    assert checkouts[0]["ref"] == "${{ env.EVIDENCE_EXECUTOR }}"
+    assert re.fullmatch(r"[0-9a-f]{40}", CONFIG["env"]["EVIDENCE_EXECUTOR"])
     assert checkouts[0]["persist-credentials"] is False
-    assert checkouts[0]["ref"] == next(
+    assert CONFIG["env"]["EVIDENCE_EXECUTOR"] == publication.EXECUTOR
+
+
+def test_consumer_resolves_inputs_with_the_same_immutable_helper_it_executes():
+    consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
+    helper = consumer["jobs"]["evidence"]["uses"].rsplit("@", 1)[1]
+    resolver = next(
         step["with"]["ref"]
-        for step in STEPS
-        if step.get("uses") == "actions/checkout@v4" and step["with"]["path"] == "executor"
+        for step in consumer["jobs"]["wheels"]["steps"]
+        if step.get("with", {}).get("path") == "executor"
     )
-    assert checkouts[0]["ref"] == publication.EXECUTOR
+    assert resolver == helper
+    pinned = yaml.safe_load(
+        subprocess.check_output(
+            ["git", "show", helper + ":.github/workflows/evidence-hosted.yml"], cwd=WORKFLOW.parents[2], text=True
+        )
+    )
+    assert pinned["env"]["EVIDENCE_EXECUTOR"] == publication.EXECUTOR
 
 
 def test_wheel_preparation_records_the_supported_baseline_before_building(history, monkeypatch):
@@ -249,7 +262,7 @@ def test_wheel_preparation_records_the_supported_baseline_before_building(histor
     consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
     steps = consumer["jobs"]["wheels"]["steps"]
     resolver = next(step["with"]["ref"] for step in steps if step.get("with", {}).get("path") == "executor")
-    assert resolver == publication.EXECUTOR
+    assert resolver == consumer["jobs"]["evidence"]["uses"].rsplit("@", 1)[1]
     build = next(step["run"] for step in steps if step.get("id") == "inputs")
     assert build.index("comparison(") < build.index("worktree add") < build.index("uv build")
     assert build.index("scripts/release.py licensing") < build.index("uv build")

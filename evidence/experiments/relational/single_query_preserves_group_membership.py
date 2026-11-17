@@ -4,11 +4,6 @@
 # categories:
 # - Peer-relative inference
 # description: Compress a list into one summary, then predict each item’s difference from its group average.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct groups
 #   metric:
@@ -19,6 +14,40 @@
 #   - corrupted_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can one summary support comparisons within groups?
+#   modeling: Give each item a group and value, compress the collection into one learned summary, and hide each item’s
+#     difference from its group mean. Compare correct labels with rotated labels while retaining all values and original
+#     answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Changed groups
+#       path:
+#       - corrupted_rmse
+#       format: number
+#     - label: Correct groups
+#       path:
+#       - intact_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Each output can still see its own item’s visible fields. The test asks whether the shared summary retains
+#     the peer context it also needs.
+# evidence-plot:
+#   mode: regression
+#   target: items/deviation
+#   focus: Does a single query still require the correct peer membership?
+#   comparison: Compare intact and corrupted groups with the evaluator's implied-deviation reference.
+#   limit: The corruption oracle distinguishes an information change from a model-only failure.
+# evidence-cost:
+#   baseline: 185
+#   candidate: 184
 # ---
 #
 # ## Example
@@ -41,10 +70,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-single-query-preserves-group-membership
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("collection", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -72,18 +98,9 @@
 # measurements concern six items and three two-member groups. They neither establish lossless compression
 # nor measure a speed or memory advantage of the summary.
 #
-# {{< evidence P033 status >}}
-#
 # The summary and local item information together support the task. This does not show that one summary preserves every detail of an arbitrary list.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P033 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P033 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -100,8 +117,6 @@
 # controls to this compressed case. Sweep group sizes, simultaneous targets,
 # and summary width before generalizing its capacity. A smaller representation
 # alone does not establish a speed or memory improvement.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -272,6 +287,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

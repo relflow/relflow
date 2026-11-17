@@ -4,11 +4,6 @@
 # categories:
 # - Temporal
 # description: An event branch retains four recent amounts from an over-cap history and predicts their total.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Tail model
 #   metric:
@@ -23,6 +18,41 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Temporal
+# evidence-diagram:
+#   caption: Visible inputs and the hidden prediction target for this controlled task.
+#   alt: An event branch retains four recent amounts from an over-cap history and predicts their total.
+# evidence-review:
+#   question: Does recent history survive a real collection cap?
+#   modeling: Generate histories of at least eight independent amounts and hide the total of the last four. Train
+#     matched models that retain either the first four events or the last four under a collection cap. Compare their
+#     error on the same full test histories.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Retain the first four events
+#       path:
+#       - head
+#       - familiar
+#       - normalized_rmse
+#       format: number
+#     - label: Retain the last four events
+#       path:
+#       - tail
+#       - familiar
+#       - normalized_rmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: First and last windows are disjoint. The head model cannot see any target-defining amount; prefix-invariance
+#     checks confirm that discarded records cannot affect the tail model.
+# evidence-plot:
+#   target: answer
+#   focus: Which retained events determine a recent-history prediction?
+#   comparison: Compare crop policies and interventions inside or outside the retained history.
+#   limit: An event outside the retained window supplies no model input, even when present in the source record.
+#   renderer: plot
 # ---
 #
 # The event list is ordered from oldest to newest. Only the last four amounts determine the hidden outcome.
@@ -45,10 +75,7 @@
 # answer: 1.0
 # ```
 #
-# ```{typst}
-# //| label: fig-evidence-p084
-# //| fig-cap: "Visible inputs and the hidden prediction target for this controlled task."
-# //| fig-alt: "An event branch retains four recent amounts from an over-cap history and predicts their total."
+# ```typst
 # #tree(node("history", kind: "root", children: (node("events", kind: "branch", detail: "Retain last four", children: (node("amount", type: "Number"),)), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
@@ -61,21 +88,12 @@
 #
 # ## Result
 #
-# {{< evidence P084 status >}}
-#
 # These checks define a new experiment. A full recorded run is required before claiming that the model
 # meets them. Lower normalized error is better; a value of one matches the stated constant reference. The
 # numerical gates are provisional and must be calibrated on separate validation seeds rather than adjusted
 # after seeing acceptance-test outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P084 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P084 script >}}
+# ## Method
 #
 # ### Process, controls, and held-out evaluation
 #
@@ -88,12 +106,11 @@
 # amounts and recomputes the target. Tests report quality and structural invariants separately. This is a
 # tail-retention experiment; random-window augmentation requires a different, window-observable label.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -277,8 +294,60 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    populations = ["familiar", "longer_source"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    dots(
+        axes[0],
+        ["Familiar source lengths", "Longer source lengths"],
+        {
+            "Keep recent tail": [m["tail"][p]["normalized_rmse"] for p in populations],
+            "Keep oldest head": [m["head"][p]["normalized_rmse"] for p in populations],
+            "Tail after retained values change": [m["tail"][p]["retained"]["normalized_rmse"] for p in populations],
+        },
+        xlabel="Test RMSE / constant-guess RMSE",
+        reference=(1, "Constant-guess error"),
+    )
+    labels = [
+        ("Familiar source" if p == "familiar" else "Longer source") + " · " + human(mode)
+        for p in populations
+        for mode in ["trim", "discarded", "retained"]
+    ]
+    dots(
+        axes[1],
+        labels,
+        {
+            "Paired output drift": [
+                m["tail"][p][mode]["maximum_prediction_drift"]
+                for p in populations
+                for mode in ["trim", "discarded", "retained"]
+            ]
+        },
+        xlabel="Maximum absolute prediction change",
+        reference=(1e-05, "Declared invariance tolerance"),
+    )
+    axes[1].set_xscale("symlog", linthresh=1e-06)
+    maximum = max(
+        (
+            m["tail"][p][mode]["maximum_prediction_drift"]
+            for p in populations
+            for mode in ["trim", "discarded", "retained"]
+        )
+    )
+    axes[1].set_xlim(-2.5e-07, maximum * 3)
+    axes[1].set_xticks([0, 1e-05, 0.001, 0.1, 1], labels=["0", "10⁻⁵", "10⁻³", "0.1", "1"])
+    axes[1].minorticks_off()
+    return (
+        fig,
+        "Tail and head policies use the same fixed training budget and independent test populations. Trim removes discarded events; discarded changes only events outside the retained tail. Retained changes the tail and recomputes its answer. The drift axis is linear around zero and logarithmic beyond 0.000001; exact zero is retained.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

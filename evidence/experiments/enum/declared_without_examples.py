@@ -4,11 +4,6 @@
 # categories:
 # - Enum
 # description: Declare all four classes, but leave one out of initial training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Withheld class, before examples
 #   metric:
@@ -26,6 +21,45 @@
 #   - accuracy
 #   format: percent
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Does declaring a class teach its meaning?
+#   modeling: Declare four output classes, but initially train on examples from only three. Each class occupies a
+#     distinct noisy numeric region. Compare accuracy on the withheld class before and after continued fitting that
+#     includes its examples and rehearses the old classes.
+#   comparison:
+#     kind: Before and after
+#     metric: Accuracy
+#     conditions:
+#     - label: Withheld class, before examples
+#       path:
+#       - initial_withheld
+#       - accuracy
+#       format: percent
+#     - label: Withheld class, after examples
+#       path:
+#       - final_withheld
+#       - accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: A declared class can be named before it is learned. Separate checks retain old-class accuracy and freeze
+#     class IDs and exposure counts during evaluation.
+# evidence-plot:
+#   target: label
+#   focus: What happens to a declared class that has no training examples?
+#   comparison: Follow withheld and seen classes through cold, initial, and continued-training stages and an all-class
+#     control.
+#   limit: The withheld class is available in the output schema but initially lacks supervised examples.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 22
+#   candidate: 22
 # ---
 #
 # A declared Enum class is available as an answer before the model has seen an example of what that
@@ -42,10 +76,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-enum-declared-without-examples
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", body: [Four separated numerical regions]),
 #   node("label", kind: "target", type: "Enum", body: [Four fixed classes; one initially withheld]),
@@ -69,8 +100,6 @@
 #
 # ## Result
 #
-# {{< evidence P070 status >}}
-#
 # A declared output slot alone supplies no reliable understanding. Examples teach the withheld class;
 # the old classes are retained with rehearsal.
 #
@@ -80,14 +109,7 @@
 # available; later success must accompany actual training exposure and retained performance on old
 # classes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P070 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P070 script >}}
+# ## Method
 #
 # ### Data and observability
 #
@@ -124,13 +146,11 @@
 # continuation must make it positive. Head size, count-buffer size, and declaration
 # order remain fixed. Pre-continuation withheld accuracy has no acceptance gate.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -341,8 +361,40 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    labels = ["Cold model", "After seen-class training", "After mixed continuation", "All-class training control"]
+    dots(
+        axes[0],
+        labels,
+        {
+            "Withheld-class accuracy": [
+                m[key]["accuracy"]
+                for key in ["cold_withheld", "initial_withheld", "final_withheld", "control_withheld"]
+            ]
+        },
+        xlabel="Accuracy on the initially withheld class",
+        percent=True,
+    )
+    dots(
+        axes[1],
+        ["After initial training", "After continuation", "All-class control"],
+        {"Seen-class accuracy": [m[key]["accuracy"] for key in ["initial_seen", "final_seen", "control_seen"]]},
+        xlabel="Accuracy on the initially seen classes",
+        percent=True,
+    )
+    for ax in axes:
+        ax.set_xlim(-0.02, 1.02)
+    return (
+        fig,
+        "The stages are discrete measured states. Admission is separated from training, and previously learned classes have their own retention panel. Phase budgets and cumulative training remain distinct in the run record.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

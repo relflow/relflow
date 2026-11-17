@@ -3,13 +3,8 @@
 # title: Can an average reveal how many items there were?
 # categories:
 # - Weighted aggregation
-# description: Use a Mean branch, with item attention disabled, to predict both an average and a total; the
-#   branch's count lane carries the multiplicity a plain average erases.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Use a Mean branch, with item attention disabled, to predict both an average and a total; the branch's
+#   count lane carries the multiplicity a plain average erases.
 # evidence-readout:
 # - label: Average prediction
 #   metric:
@@ -27,6 +22,45 @@
 #   - 1
 #   format: number
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, contribution, mean_contribution, weighted_sum. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow predict the total of repeated values?
+#   modeling: Repeat the same contribution one to six times. Ask a Mean branch, with item attention disabled, to predict
+#     both the average and total. Its averaged content is identical across repetition counts, but its additional count
+#     signal can distinguish them. The primary comparison measures total error against a constant predictor.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - sum_score
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - sum_score
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: This implementation’s Mean summary carries count information. Passing does not show that a plain arithmetic
+#     average alone retains multiplicity.
+#   description: Predict a total from a Mean summary that retains both averaged content and item count.
+# evidence-plot:
+#   mode: regression
+#   target: weighted_sum
+#   focus: Does the representation retain how many contributions were pooled?
+#   comparison: Inspect total and mean readouts and the matched equal-contribution probes.
+#   limit: Different targets require different cardinality information.
+#   additional_targets:
+#   - mean_contribution
+# evidence-cost:
+#   baseline: 12
+#   candidate: 12
 # ---
 #
 # An ordinary average cannot reveal how many identical numbers were averaged. This experiment asks
@@ -54,10 +88,7 @@
 # the same average but a total of 0.75. These matched cases separate knowing the shared contribution
 # from knowing how many times it should be counted.
 #
-# ```{typst}
-# //| label: fig-evidence-mean-keeps-contribution-count
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, contribution, mean_contribution, weighted_sum. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("contribution", type: "Number"),
@@ -80,25 +111,15 @@
 #
 # ## Result
 #
-# {{< evidence P013 status >}}
-#
 # The model learns both the average and a total that scales with the count. Mean's count lane
 # preserves the multiplicity its plain average would erase.
-#
 #
 # The two error percentages use separate constant-guess baselines for the average and total. The
 # paired-total checks also require correctly separated predictions near 0.75 and 4.5. Success
 # demonstrates usable count information for repeated equal contributions within the trained range;
 # it does not establish unseen-length extrapolation or summation of arbitrary mixed contributions.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P013 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P013 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -123,8 +144,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -271,6 +290,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

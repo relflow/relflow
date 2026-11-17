@@ -8,19 +8,17 @@ readouts without random draws; its overhead makes these runs unsuitable as
 performance benchmarks. Spawned trials retain their returned metrics but do not
 inherit monitoring.
 
-Each proof has an authored visual brief in `views.json`: the question to make
+Each experiment owns its `evidence-plot` frontmatter: the question to make
 visible, comparison and interpretation limits. The plots use the candidate
-role of the paired run. Optional research pages retain generator illustrations
-until their declared resources and learning records are available. Unmet checks
-remain visible; figures never turn an illustration into a measured outcome.
+role of the paired run. A missing learning record remains missing. Unmet checks
+remain visible; figures never turn a generator illustration into a measured outcome.
 
-P099 and P100 accept measured views when a matching Duration/Ordinal wheel has
-been explicitly provisioned. P099 compares elapsed-time predictions, error
+P099 compares elapsed-time predictions, error
 distributions and a shuffled-training control. P100 separates familiar and
 withheld ranks with per-rank accuracy heatmaps. The same captured executions
-supply their example viewers. Without those records, keep the generator
-illustrations. These studies remain in research while the paired baseline
-predates the datatypes.
+supply their example viewers. Without those records, measured views remain
+unavailable. Both studies belong to the same required catalog as every other
+experiment.
 
 Twelve CPU shards execute both exact wheels and retain separate, checksum-bound
 observation archives. The collector validates the complete paired catalog. A
@@ -69,3 +67,9 @@ Review populations, units, matched scales, control labels and both light/dark
 layouts when changing visual briefs or renderers. Keep projections fitted to
 training/reference data and state their scope. A figure renders only beside its
 identical candidate record, with exact downloads and the original CI link.
+
+Experiments select a reusable plotting mode or define an isolated `(bundle, spec)`
+renderer in their own file. Custom renderers own their imports and helpers; the
+plot container extracts only the named function from the captured, checksum-bound
+source. It never imports the training module. Named supplement figures follow
+the same contract. Removing an experiment removes its custom diagnostic code.

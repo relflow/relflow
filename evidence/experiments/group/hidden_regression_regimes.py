@@ -3,20 +3,69 @@
 # title: Can Group recover nonlinear identity regimes?
 # categories:
 # - Group
-# description: Recover five nonlinear response regimes for repeated identities and compare held-out predictions with controls.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Recover five nonlinear response regimes for repeated identities and compare held-out predictions with
+#   controls.
 # evidence-readout:
 # - label: Stable-group assignment agreement
-#   metric: [group_counts, "5", stable, adjusted_rand]
+#   metric:
+#   - group_counts
+#   - '5'
+#   - stable
+#   - adjusted_rand
 #   format: number
 # - label: Held-out normalized error
-#   metric: [group_counts, "5", stable, normalized_rmse]
+#   metric:
+#   - group_counts
+#   - '5'
+#   - stable
+#   - normalized_rmse
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Visible identity and context predict a hidden numerical response.
+#   alt: A Group identity and Number context predict a hidden Number.
+# evidence-review:
+#   question: Can Group recover nonlinear identity regimes?
+#   modeling: Assign 100 recurring identities to five hidden nonlinear response curves. Give identity and x, hide
+#     y, and learn Group assignments through prediction. Compare final assignment agreement for stable identities
+#     with a control whose identities are shuffled across rules.
+#   comparison:
+#     metric: Adjusted Rand index
+#     kind: Controlled comparison
+#     conditions:
+#     - label: No persistent identity–rule link
+#       path:
+#       - group_counts
+#       - '5'
+#       - no_regime
+#       - adjusted_rand
+#       format: number
+#     - label: Stable hidden rules
+#       path:
+#       - group_counts
+#       - '5'
+#       - stable
+#       - adjusted_rand
+#       format: number
+#     definition: Agreement with the true groups, ignoring group names. One is exact agreement; independent groupings
+#       average around zero and can score below zero.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The five Group slots are fixed in advance. Evaluation uses fresh observations of known identities, not unseen
+#     identities or discovery of the number of groups.
+# evidence-plot:
+#   mode: group-learning
+#   target: y
+#   focus: Can fixed Group slots recover nonlinear identity regimes?
+#   comparison: Follow assignment agreement and validation error alongside the shuffled-identity control.
+#   limit: The evaluation uses new observations of known identities, not unseen identities.
+#   supplements:
+#     groups:
+#       mode: group-composition
+#     predictions:
+#       mode: group-predictions
 # ---
 #
 # Five hidden nonlinear response regimes are shared by 100 repeated identities.
@@ -33,10 +82,7 @@
 #
 # The answer is illustrative and hidden during prediction.
 #
-# ```{typst}
-# //| label: fig-proof-group-hidden-regression-regimes
-# //| fig-cap: "Visible identity and context predict a hidden numerical response."
-# //| fig-alt: "A Group identity and Number context predict a hidden Number."
+# ```typst
 # #tree(node("event", kind: "root", children: (node("entity", type: "Group"), node("x", type: "Number"), node("y", kind: "target", type: "Number"))))
 # ```
 #
@@ -47,18 +93,9 @@
 #
 # ## Result
 #
-# {{< evidence P108 status >}}
-#
 # New Group measurements do not replace the historical Cluster proof.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P108 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P108 script >}}
+# ## Method
 #
 # ### Method and predeclared checks
 #
@@ -73,8 +110,6 @@
 # assignments during evaluation. The default seed 10801 and confirmations
 # 10802 and 10803 are declared before execution. Unseen identities are outside
 # this question.
-#
-# ### Complete experiment code
 #
 # %%
 # /// script
@@ -338,6 +373,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

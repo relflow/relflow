@@ -91,7 +91,7 @@ def test_jitter_stress_changes_only_observations_and_keeps_pristine_targets():
 
 
 def test_duration_generator_matches_fixed_elapsed_arithmetic_and_static_endpoint():
-    proof = load("research/datatypes/duration_equivalence.py")
+    proof = load("experiments/temporal/duration_equivalence.py")
     pair = list(proof.records(rows=128, seed=51))
     static = list(proof.records(rows=128, seed=51, static=True))
     assert all(row["started_at"] == proof.ANCHOR for row in static)
@@ -108,7 +108,7 @@ def test_duration_generator_matches_fixed_elapsed_arithmetic_and_static_endpoint
 
 
 def test_ordinal_protocol_withholds_ranks_without_extrapolating_the_range():
-    proof = load("research/datatypes/ordinal_generalization.py")
+    proof = load("experiments/representation/ordinal_generalization.py")
     for domain in ("integer", "labels"):
         for arm in ("ordinal", "number", "category"):
             seen = list(proof.records(rows=1024, seed=61, domain=domain, novel=False, arm=arm))

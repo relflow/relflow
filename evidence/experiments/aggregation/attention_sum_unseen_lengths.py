@@ -4,11 +4,6 @@
 # categories:
 # - Cardinality generalization
 # description: Train on short lists, then ask for totals of longer lists.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Familiar lengths
 #   metric:
@@ -21,6 +16,48 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections
+#     keep their fields together.
+# evidence-review:
+#   question: Can relflow add longer lists than relflow saw in training?
+#   modeling: Train on lists containing one to six signed amounts, with their total hidden. Test on new lists containing
+#     seven to ten amounts. The model receives the individual amounts without a separate count field. Compare its
+#     error on familiar and longer lengths.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: RMSE
+#     conditions:
+#     - label: Familiar lengths
+#       path:
+#       - in_range_score
+#       - rmse
+#       format: number
+#     - label: Longer lists
+#       path:
+#       - unseen_score
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The branch can hold these lists; this tests learned generalization to lengths seven through ten, not arbitrary-length
+#     arithmetic.
+# evidence-plot:
+#   mode: regression
+#   target: total
+#   focus: Does a learned sum continue to work on longer bags?
+#   comparison: Separate training-range bags, unseen lengths, duplicated bags, and equal-value probes.
+#   limit: Only the recorded lengths are tested; neural sums are approximate.
+#   labels:
+#     in_range: 'Familiar lengths: 1–6 items'
+#     unseen: 'Unseen lengths: 7–10 items'
+#     short: Short bags before duplication
+#     duplicate(short): The same short bags duplicated
+#     probes: Equal-value count probes
+# evidence-cost:
+#   baseline: 58
+#   candidate: 57
 # ---
 #
 # The question is whether a learned summation rule continues to work when there are more terms to
@@ -49,10 +86,7 @@
 # duplicating that complete four-item list must double the answer without changing the individual
 # values.
 #
-# ```{typst}
-# //| label: fig-evidence-attention-sum-unseen-lengths
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("amount", type: "Number"),
@@ -73,25 +107,15 @@
 #
 # ## Result
 #
-# {{< evidence P002 status >}}
-#
 # The learned total extends to the tested longer lists. This does not establish exact addition or
 # unlimited length.
-#
 #
 # The error percentages compare each test set with a constant training-mean guess. The duplication
 # check asks a different question: does doubling the input approximately double the prediction?
 # Passing both supports the tested extension in length; all lists still fit a capacity of twelve,
 # and no claim is made about unlimited lengths or exact arithmetic.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P002 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P002 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -114,8 +138,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -302,6 +324,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

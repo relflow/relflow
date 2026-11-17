@@ -5,11 +5,6 @@
 # - Enum
 # description: Declare the allowed input and output classes with Enum, then learn which output belongs to each visible
 #   combination.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Informative training
 #   metric:
@@ -22,6 +17,45 @@
 #   - shuffled_test_accuracy
 #   format: percent
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, route, channel, label. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can relflow learn classes declared in advance?
+#   modeling: Declare four allowed input and output labels, then generate balanced route–channel combinations that
+#     determine a hidden class. Compare informative training with a matched model whose visible contexts are shuffled
+#     independently of the answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Accuracy
+#     conditions:
+#     - label: Shuffled training and test
+#       path:
+#       - shuffled_control
+#       - shuffled_test_accuracy
+#       format: percent
+#     - label: Informative training
+#       path:
+#       - informative
+#       - accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: All combinations occur during training. This tests learning a declared finite relationship, not zero-shot
+#     meaning or unseen-combination generalization.
+# evidence-plot:
+#   mode: classification
+#   target: label
+#   focus: Can a declared class vocabulary support fixed-class prediction?
+#   comparison: Compare informative and shuffled training on independent test examples, with restoration checks separate.
+#   limit: Declaring output classes does not itself teach which class fits an input.
+# evidence-cost:
+#   baseline: 19
+#   candidate: 18
 # ---
 #
 # Enum declares a fixed set of possible names, while training must still learn which answer goes with
@@ -39,10 +73,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-enum-fixed-class-learning
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, route, channel, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("route", type: "Enum", body: [Eight declared routes]),
 #   node("channel", type: "Enum", body: [Two declared channels]),
@@ -66,8 +97,6 @@
 #
 # ## Result
 #
-# {{< evidence P069 status >}}
-#
 # The declared classes support reliable learning in this small task. This covers new records of familiar combinations, rather than new identities or meanings inferred from label names.
 #
 # Accuracy counts exact label matches, with a balanced four-class constant baseline of 25%. Every
@@ -76,14 +105,7 @@
 # checkpoint consistency are separate mechanical requirements; passing them alone would not establish
 # that the predictive relationship was learned.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P069 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P069 script >}}
+# ## Method
 #
 # ### Data and observability
 #
@@ -116,8 +138,6 @@
 # Declaration order, allocated rows, and evaluation-frozen exposure counts are
 # separate mechanical gates. A checkpoint must preserve those invariants and
 # held-out probabilities.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -289,6 +309,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

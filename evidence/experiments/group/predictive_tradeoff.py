@@ -3,13 +3,8 @@
 # title: When does grouping identities help prediction?
 # categories:
 # - Representation
-# description: Compare Group, Category, and a true-group reference across dense, sparse,
-#   and skewed known-identity populations.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity
+#   populations.
 # evidence-readout:
 # - label: Dense Group error
 #   metric:
@@ -28,6 +23,45 @@
 #   - nrmse
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Visible fields supply evidence; prediction targets are hidden.
+#   alt: Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity populations.
+# evidence-review:
+#   question: When does grouping identities help prediction?
+#   modeling: Generate known identities belonging to four hidden response groups. Train Group and Category models
+#     on matched dense, sparse, and skewed identity populations, then score all identities equally. The primary comparison
+#     uses the dense condition and the same model width and update budget.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Category · dense identities
+#       path:
+#       - conditions
+#       - dense
+#       - arms
+#       - category
+#       - nrmse
+#       format: number
+#     - label: Group · dense identities
+#       path:
+#       - conditions
+#       - dense
+#       - arms
+#       - group
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The true-group reference receives information hidden from the other models. Sparse and rare-identity gains
+#     are diagnostics; checks met does not imply Group always beats Category.
+# evidence-plot:
+#   target: answer
+#   focus: When does grouping identities help or hurt prediction?
+#   comparison: Compare Group and Category across declared exposure regimes, with per-identity error and group agreement.
+#   limit: Parameter counts and tail identities stay visible; compactness and predictive quality are different outcomes.
+#   renderer: plot
 # ---
 #
 # Several occupied groups do not establish a useful modeling tradeoff. Here grouping must be judged
@@ -45,10 +79,7 @@
 # Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity
 # populations. The example is illustrative; its answer is hidden during scoring.
 #
-# ```{typst}
-# //| label: fig-evidence-p112
-# //| fig-cap: "Visible fields supply evidence; prediction targets are hidden."
-# //| fig-alt: "Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity populations."
+# ```typst
 # #tree(node("record",kind:"root",children:(node("entity",type:"Group or Category"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
 # ```
 #
@@ -60,20 +91,11 @@
 #
 # ## Result
 #
-# {{< evidence P112 status >}}
-#
 # No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
 # established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
 # each evaluation condition remain separate.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P112 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P112 script >}}
+# ## Method
 #
 # ### Process, splits, and interpretation
 #
@@ -87,11 +109,10 @@
 # Sparse/rare-identity and comparative scores remain visible even when broad capability gates pass.
 # Arbitrary unseen identities are outside this task.
 #
-# ### Complete experiment code
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -291,8 +312,37 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    conditions = list(m["conditions"])
+    fig, axes = axes_pair(width=10, height=4.8)
+    arms = ["group", "category", "oracle", "shuffled"]
+    dots(
+        axes[0],
+        [human(c) for c in conditions],
+        {human(arm): [m["conditions"][condition]["arms"][arm]["nrmse"] for condition in conditions] for arm in arms},
+        xlabel="Held-out normalized RMSE",
+        reference=(1, "Constant-guess scale"),
+    )
+    dots(
+        axes[1],
+        [human(c) for c in conditions],
+        {
+            human(arm): [m["conditions"][condition]["arms"][arm]["rare_identity_nrmse"] for condition in conditions]
+            for arm in arms
+        },
+        xlabel="Mean nRMSE for eight least-exposed identities",
+    )
+    return (
+        fig,
+        "Dense, sparse, and skewed training populations are separate fits. The right panel fixes the eight least-exposed identities using training counts; the true-group oracle is a separately informed reference.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

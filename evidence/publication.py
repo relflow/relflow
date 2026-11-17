@@ -13,6 +13,7 @@ import tempfile
 import tomllib
 from pathlib import Path
 
+import yaml
 from evidence_ci import task_key
 from experiments.source import describe, fingerprint, frontmatter, metadata
 from record import select, validate
@@ -21,7 +22,11 @@ from reuse import SHA, archive, artifact_name, attempt, helper_sha, trusted, ver
 from reuse import artifact as verified_artifact
 
 REPOSITORY = "relflow/relflow"
-EXECUTOR = "de18256bbbe034c7ab9c05640fb10fec167da4eb"
+EXECUTOR = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/evidence-hosted.yml").read_text())[
+    "env"
+]["EVIDENCE_EXECUTOR"]
+if not isinstance(EXECUTOR, str) or not SHA.fullmatch(EXECUTOR):
+    raise ValueError("The hosted Evidence workflow must declare one immutable EVIDENCE_EXECUTOR SHA")
 RESULTS = {"evidence-result", "evidence-report"}
 MARKERS = ("<!-- evidence-results:start -->", "<!-- evidence-results:end -->")
 

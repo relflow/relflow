@@ -4,11 +4,6 @@
 # categories:
 # - Vocabulary
 # description: Predict whether a set is nonempty, including sets whose member names were absent from training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Unknown-input error, fallback trained
 #   metric:
@@ -19,6 +14,40 @@
 #   - control_unknown
 #   format: number
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, tags, nonempty. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: Can relflow distinguish an unknown set from an empty set?
+#   modeling: Predict whether a set is nonempty. Train one model with input members sometimes made unavailable and
+#     another without that augmentation. Evaluate both on empty sets and sets containing only names absent from training,
+#     using the same hidden answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Unknown-input error, fallback untrained
+#       path:
+#       - control_unknown
+#       format: number
+#     - label: Unknown-input error, fallback trained
+#       path:
+#       - augmented_unknown
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The primary comparison is RMSE on unseen-member inputs. The task is nonemptiness, not recovering the identities
+#     of unseen members.
+# evidence-plot:
+#   target: nonempty
+#   focus: Can training exposure teach a useful unavailable-set fallback?
+#   comparison: Compare exposed and unexposed fallback arms on known and unknown members.
+#   limit: Identity and duplicate-member interventions are checked separately from fallback prediction error.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 25
+#   candidate: 25
 # ---
 #
 # The prediction target is deliberately simple: does the input contain at least one member? Individual
@@ -35,10 +64,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-set-unavailable-fallback
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, tags, nonempty. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("tags", type: "Set", detail: "Known or unavailable membership"),
 #   node("nonempty", kind: "target", type: "Number"),
@@ -61,8 +87,6 @@
 #
 # ## Result
 #
-# {{< evidence P064 status >}}
-#
 # The trained fallback distinguishes unknown nonempty input from empty input. It preserves the presence of members, rather than learning their individual meanings.
 #
 # RMSE is measured directly on the zero/one target. The constant 0.5 forecast has error 0.5, giving a
@@ -71,14 +95,7 @@
 # Frozen-vocabulary checks ensure that the unknown-name test is not converted into another training
 # phase.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P064 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P064 script >}}
+# ## Method
 #
 # ### Training and controls
 #
@@ -89,13 +106,11 @@
 # gain over the untrained-fallback control must exceed 0.40 RMSE. Duplicate
 # and unknown-spelling changes must leave predictions unchanged.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -207,8 +222,40 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    labels = ["Fallback exposed during training", "Fallback unexposed"]
+    dots(
+        axes[0],
+        labels,
+        {
+            "Known members": [m["augmented_known"], m["control_known"]],
+            "Unknown members": [m["augmented_unknown"], m["control_unknown"]],
+        },
+        xlabel="RMSE against the generator's answer",
+        reference=(m["constant_rmse"], "Constant-guess RMSE"),
+    )
+    dots(
+        axes[1],
+        labels,
+        {
+            "Duplicate/identity drift": [
+                m["augmented_duplicate_and_identity_drift"],
+                m["control_duplicate_and_identity_drift"],
+            ]
+        },
+        xlabel="Maximum output change under the declared invariant",
+    )
+    return (
+        fig,
+        "Prediction error tests whether fallback behavior is useful. The separate drift panel tests whether renaming unknown members or duplicating them changes that behavior.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

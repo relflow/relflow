@@ -35,8 +35,8 @@ const inspect = `
   const { selection, evidenceEntries } = await import(${JSON.stringify(adapter)});
   process.stdout.write(JSON.stringify({
     selection,
-    entries: evidenceEntries.map(({ id, tags, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived }) => ({
-      id, tags, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived,
+    entries: evidenceEntries.map(({ id, tags, requirements, diagram, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived }) => ({
+      id, tags, requirements, diagram, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived,
     })),
   }));
 `;
@@ -129,6 +129,18 @@ test('without a publication every current declaration remains pending', () => {
   assert.ok(actual.entries.length);
   assert.ok(actual.entries.every((entry) => entry.result === null && !entry.archived));
   assert.deepEqual(JSON.parse(actual.selection.raw).results, {});
+});
+
+test('every current source belongs to one catalog and preserves plain Markdown presentation', () => {
+  const actual = loaded();
+  for (const entry of actual.entries) {
+    assert.match(entry.sourcePath, /^evidence\/experiments\/[^/]+\/[^/]+\.py$/);
+    assert.equal('lane' in entry, false);
+    assert.ok(entry.diagram.caption.trim(), `${entry.id}: keep the figure caption`);
+    assert.ok(entry.diagram.alt.trim(), `${entry.id}: keep alternative text`);
+    assert.ok(entry.sections.method.trim(), `${entry.id}: retain the scientific method`);
+    assert.doesNotMatch(entry.sections.result, /## Method|\{\{</);
+  }
 });
 
 test('an explicit publication changes its check, outcome, and authored readout together', (t) => {
@@ -390,23 +402,13 @@ test('an execution error remains a complete selected record with its original de
   assert.deepEqual(actual.entries.find((entry) => entry.id === id).result, document.results[id]);
 });
 
-test('an unknown result ID fails instead of silently hiding a recorded failure', (t) => {
+test('results outside the active catalog remain in the raw publication without creating pages', (t) => {
   const document = structuredClone(snapshot);
-  document.results.P999 = {
-    ...document.results[Object.keys(document.results)[0]],
-    outcome: 'error',
-    error: 'A recorded execution failure.',
-  };
+  document.results.P999 = { ...record(), outcome: 'error', error: 'A retained execution failure.' };
   const input = fixture(t, document);
-  const child = readAdapter(input.path);
-  assert.ifError(child.error);
-  assert.notEqual(child.status, 0);
-  assert.ok(
-    child.stderr.includes('P999') && child.stderr.includes('no experiment declaration'),
-    child.stderr,
-  );
-  assert.ok(child.stderr.includes(input.path), child.stderr);
-  assert.equal(child.stdout, '');
+  const actual = loaded(input.path);
+  assert.ok(actual.entries.every((entry) => entry.id !== 'P999'));
+  assert.deepEqual(JSON.parse(actual.selection.raw).results.P999, document.results.P999);
 });
 
 function sourceFixture(t) {
@@ -422,6 +424,19 @@ function sourceFixture(t) {
 # title: Exact source fixture
 # description: A static source-binding fixture.
 # evidence-group: Fixtures
+# evidence-review:
+#   question: Can this fixture select its own presentation?
+#   modeling: The fixture declares a numeric score without running any model.
+#   note: This is a static test fixture.
+#   comparison:
+#     kind: Recorded measurement
+#     metric: RMSE
+#     definition: A numeric score for this fixture.
+#     direction: Lower is better
+#     conditions:
+#     - label: Score
+#       path: [score]
+#       format: number
 # evidence-readout:
 #   - label: Score
 #     metric: [score]
@@ -509,33 +524,15 @@ function archivedFixture(t) {
   return { ...input, sha256, retained, write };
 }
 
-test('a selected retired proof retains its CI source path, digest, and original record', (t) => {
+test('deleting an experiment removes it independently of retained results and sources', (t) => {
   const input = archivedFixture(t);
-  const entry = input.read();
-  assert.equal(entry.archived, true);
-  assert.equal(entry.sourceMatches, true);
-  assert.equal(entry.sourcePath, input.sourcePath);
-  assert.equal(entry.sourceSha256, input.sha256);
-  assert.equal(entry.source, input.source);
-  assert.deepEqual(entry.result, input.record);
-  assert.equal(entry.readouts[0].value, input.record.metrics.score);
-});
-
-test('retired proofs reject missing, changed, or foreign CI source bytes', (t) => {
-  for (const change of ['digest', 'bytes', 'id', 'missing']) {
-    const input = archivedFixture(t);
-    if (change === 'digest') input.record.provenance.script_sha256 = 'b'.repeat(64);
-    if (change === 'bytes') writeFileSync(input.retained, input.source + '\n# Changed bytes\n');
-    if (change === 'id') writeFileSync(input.retained, input.source.replace('P001', 'P002'));
-    if (change === 'missing') rmSync(input.retained);
-    input.write();
-    const child = readAdapter(join(input.workspace, 'publication.json'), input.workspace);
-    assert.notEqual(child.status, 0);
-    assert.ok(
-      child.stderr.includes('P001') && child.stderr.includes('exact retained CI source'),
-      child.stderr,
-    );
-  }
+  const path = join(input.workspace, 'publication.json');
+  let actual = loaded(path, input.workspace);
+  assert.deepEqual(actual.entries, []);
+  assert.deepEqual(JSON.parse(actual.selection.raw).results.P001, input.record);
+  rmSync(input.retained);
+  actual = loaded(path, input.workspace);
+  assert.deepEqual(actual.entries, []);
 });
 
 test('pending selections include current declarations without resurfacing archived-only proofs', (t) => {
@@ -552,7 +549,6 @@ test('new Group declarations stay unmeasured beside the selected historical reco
   for (const id of ['P108', 'P109', 'P110', 'P111', 'P112']) {
     const entry = entries.find((entry) => entry.id === id);
     assert.ok(entry, `${id}: retain its current declaration`);
-    assert.equal(entry.archived, false);
     assert.equal(entry.result, null);
     assert.ok(entry.readouts.every((readout) => readout.value === null));
   }

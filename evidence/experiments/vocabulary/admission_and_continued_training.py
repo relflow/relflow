@@ -4,11 +4,6 @@
 # categories:
 # - Vocabulary
 # description: Introduce new output labels to a model trained on an earlier pair of classes.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: New labels, just admitted
 #   metric:
@@ -23,6 +18,43 @@
 #   - final_old_accuracy
 #   format: percent
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Does admitting a label teach relflow to predict that label?
+#   modeling: Train a Category output on two numeric regions and their labels. Admit labels for two new regions without
+#     an optimizer update, then continue fitting with both old and new examples. Compare new-class accuracy immediately
+#     after admission and after learning.
+#   comparison:
+#     kind: Before and after
+#     metric: Accuracy
+#     conditions:
+#     - label: New labels, just admitted
+#       path:
+#       - new_accuracy_immediately_after_admission
+#       format: percent
+#     - label: New labels, after fitting
+#       path:
+#       - final_new_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Adding a name to the vocabulary is not learning its meaning. Retention of old classes and evaluation-time
+#     vocabulary freezing are separate checks.
+# evidence-plot:
+#   target: label
+#   focus: Does admitting a new class teach its answer?
+#   comparison: Separate before admission, immediately after admission, and after continued training; retain old-class
+#     accuracy.
+#   limit: Admission creates availability. Subsequent training supplies the learning signal.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 23
+#   candidate: 24
 # ---
 #
 # The model initially knows two answer names and a simple numeric distinction. Later, two additional
@@ -39,10 +71,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-vocabulary-admission-training
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", body: [Four separated numerical regions]),
 #   node("label", kind: "target", type: "Category", body: [Two labels, growing to four]),
@@ -65,8 +94,6 @@
 #
 # ## Result
 #
-# {{< evidence P059 status >}}
-#
 # Admission creates storage; further training teaches the new distinctions. Old-label retention here depends on continued examples of the old classes.
 #
 # The key learning requirements apply after continued fitting: both old and new held-out classes must
@@ -74,14 +101,7 @@
 # treated as proof that allocation taught a class. Retention includes rehearsal of the original
 # classes, so it does not establish resistance to forgetting when old examples are absent.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P059 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P059 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -105,13 +125,11 @@
 # Save/load must preserve labels, counts, and predictions in both phases.
 # Immediate accuracy after admission is diagnostic, not an acceptance gate.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -297,8 +315,31 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    labels = ["Before admission", "Immediately after admission", "After continued training"]
+    new = [m["new_accuracy_before_admission"], m["new_accuracy_immediately_after_admission"], m["final_new_accuracy"]]
+    old = [m["initial_accuracy"], m["initial_accuracy"], m["final_old_accuracy"]]
+    dots(axes[0], labels, {"New-class accuracy": new}, xlabel="Correct answers for new classes", percent=True)
+    dots(
+        axes[1],
+        ["Before continuation", "After continuation"],
+        {"Old-class accuracy": [old[0], old[-1]]},
+        xlabel="Correct answers for previously learned classes",
+        percent=True,
+    )
+    for ax in axes:
+        ax.set_xlim(-0.02, 1.02)
+    return (
+        fig,
+        "The stages are discrete measured states. Admission is separated from training, and previously learned classes have their own retention panel. Phase budgets and cumulative training remain distinct in the run record.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

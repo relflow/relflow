@@ -4,11 +4,6 @@
 # categories:
 # - Distribution statistics
 # description: Supply the centered products used to calculate covariance, then ask for their average.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Average prediction
 #   metric:
@@ -16,6 +11,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, cross_deviation, covariance. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow average prepared contributions to covariance?
+#   modeling: 'Calculate each item’s contribution to covariance upstream: (x − mean(x)) × (y − mean(y)). Give those
+#     eight prepared contributions to a Mean branch and hide their average. Compare the learned prediction with a
+#     constant predictor on fresh records.'
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Centering and multiplication are already supplied. This diagnostic tests averaging and decoding, not learning
+#     covariance from raw pairs.
+# evidence-plot:
+#   mode: regression
+#   target: covariance
+#   focus: Can pooling combine supplied cross-deviations?
+#   comparison: Compare predicted covariance with targets computed from the supplied sufficient features.
+#   limit: The cross-deviations are prepared inputs; this does not demonstrate discovering them from raw pairs.
+# evidence-cost:
+#   baseline: 23
+#   candidate: 23
 # ---
 #
 # This diagnostic removes two steps from covariance calculation before data reaches the model. Each
@@ -43,10 +74,7 @@
 # by eight gives the hidden covariance, 0.8. Positive and negative contributions are possible in the
 # generator, so the learned average must retain their signs rather than average absolute magnitudes.
 #
-# ```{typst}
-# //| label: fig-evidence-supplied-cross-deviations
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, cross_deviation, covariance. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("cross_deviation", type: "Number"),
@@ -67,25 +95,15 @@
 #
 # ## Result
 #
-# {{< evidence P008 status >}}
-#
 # The final averaging step works here. Centering and multiplication were already done by the data
 # generator, so they were not learned in this test.
-#
 #
 # The error percentage compares the predicted covariance with a constant guess based on training
 # targets. Lower is better; 100% means no improvement over that guess. These are learned numerical
 # readouts from a Mean branch, not an explicit arithmetic average wired into the prediction output.
 # Eight-item performance does not establish arbitrary-length covariance calculation.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P008 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P008 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -107,8 +125,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -262,6 +278,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

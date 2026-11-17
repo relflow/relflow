@@ -4,11 +4,6 @@
 # categories:
 # - Masking
 # description: Use an item’s selected flag to hide its value and predict it from x.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct visible x
 #   metric:
@@ -19,6 +14,41 @@
 #   - corrupted_context_nrmse
 #   format: error
 # evidence-group: Masking
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. selected chooses which item values are hidden.
+#   alt: Model tree with record, items, x, value. Selector notes identify hidden values. selected chooses which item
+#     values are hidden.
+# evidence-review:
+#   question: Can each item choose which value to hide?
+#   modeling: Generate bags of items with x and value = 2x + 0.3. An item-level Boolean selector hides some values
+#     and requests their reconstruction. Score only selected real items, comparing their original x values with independently
+#     shuffled context.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Normalized RMSE
+#     conditions:
+#     - label: Shuffled visible x
+#       path:
+#       - corrupted_context_nrmse
+#       format: number
+#     - label: Correct visible x
+#       path:
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: Selectors must also match training objectives and output flags exactly, including unselected and padded
+#     positions.
+# evidence-plot:
+#   target: items/value
+#   focus: Does query masking hide exactly the selected target coordinates?
+#   comparison: Compare selected coordinates with context corruption and hidden-value poisoning.
+#   limit: The inferred flags and coordinate positions remain part of the evidence.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 24
+#   candidate: 23
 # ---
 #
 # ## Example
@@ -36,10 +66,7 @@
 #
 # value is hidden and scored only where selected is true; the other item remains visible.
 #
-# ```{typst}
-# //| label: fig-evidence-query-reconstruction
-# //| fig-cap: "Selector notes identify hidden values. selected chooses which item values are hidden."
-# //| fig-alt: "Model tree with record, items, x, value. Selector notes identify hidden values. selected chooses which item values are hidden."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("items", kind: "branch", repeated: true, children: (
 #     node("x", type: "Number"),
@@ -66,18 +93,9 @@
 # A good result supports aligned reconstruction from local context. It does not show that the model can find
 # the relevant value in an unrelated collection or infer the selection policy itself.
 #
-# {{< evidence P052 status >}}
-#
 # The selected run reconstructs the chosen real items and excludes absent positions from selection. This tests aligned local reconstruction, rather than retrieval across unrelated lists.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P052 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P052 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -99,13 +117,11 @@
 # 1e-5. Encoded training masks and output `inferred` flags must exactly match
 # the selectors, including unselected and padded positions.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -259,8 +275,32 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.5)
+    dots(
+        axes[0],
+        ["Visible context intact", "Visible context corrupted"],
+        {"Normalized RMSE": [m["nrmse"], m["corrupted_context_nrmse"]]},
+        xlabel="Error on the selected hidden coordinates",
+        reference=(1, "Constant-guess error"),
+    )
+    dots(
+        axes[1],
+        ["Hidden values poisoned"],
+        {"Maximum output drift": [m["hidden_value_drift"]]},
+        xlabel="Largest change to a selected prediction",
+    )
+    axes[1].set_title(f"{m['selected_coordinates']:,} selected coordinates")
+    return (
+        fig,
+        "Only the query-selected coordinates are evaluated. Corrupting visible context removes information; changing hidden values tests exclusion from input. Neither control is combined with unselected coordinates.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

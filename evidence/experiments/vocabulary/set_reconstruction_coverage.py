@@ -4,11 +4,6 @@
 # categories:
 # - Vocabulary
 # description: With no useful context, red appears in 90% of answer sets and blue in 20%. Predict each member’s probability.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Predicted red membership
 #   metric:
@@ -23,6 +18,51 @@
 #   - blue
 #   format: percent
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, x, labels. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Can relflow learn separate probabilities for Set members?
+#   modeling: Generate answer sets where red appears 90% of the time and blue 20%, independently of useful context.
+#     Hide the membership answer and train a Set decoder. Compare its predicted membership probability for each member
+#     with the stated generating frequencies.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Probability
+#     conditions:
+#     - label: Predicted red membership
+#       path:
+#       - capacity_2
+#       - probabilities
+#       - red
+#       format: percent
+#     - label: Predicted blue membership
+#       path:
+#       - capacity_2
+#       - probabilities
+#       - blue
+#       format: percent
+#     definition: Predicted probability of the named outcome or membership. The task determines the appropriate value;
+#       higher is not always better.
+#     direction: Task-specific interpretation
+#     domain:
+#     - 0
+#     - 1
+#   note: Memberships are independent probabilities and need not add to one. Separate checks cover unknown members,
+#     coverage, and loss aggregation.
+#   criteria:
+#     prefixes:
+#       '2': Two-row output allocation
+#       '512': 512-row output allocation
+# evidence-plot:
+#   target: labels
+#   focus: Does set-target coverage change when spare capacity is added?
+#   comparison: Separate member probabilities, target coverage, and the corresponding oracle proper loss.
+#   limit: Unused capacity does not supply examples of unavailable members.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 25
+#   candidate: 25
 # ---
 #
 # A Set prediction gives a separate probability for each possible member. Red and blue can both
@@ -39,10 +79,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-set-reconstruction-coverage
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, x, labels. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", detail: "Constant"),
 #   node("labels", kind: "target", type: "Set", detail: "Independent memberships"),
@@ -66,8 +103,6 @@
 #
 # ## Result
 #
-# {{< evidence P063 status >}}
-#
 # The member probabilities recover their population rates. Unknown members still reduce coverage and
 # cannot be emitted; annotations here are complete sets, not partially supplied labels.
 #
@@ -77,14 +112,7 @@
 # marks blue absent. This experiment does not treat omitted names as unspecified or partially
 # annotated targets.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P063 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P063 script >}}
+# ## Method
 #
 # ### Training and controls
 #
@@ -96,13 +124,11 @@
 # exactly 256 known and 256 unknown positive memberships. Unused capacity
 # must not change the meaning of the reported membership loss.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -248,8 +274,85 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots, finite
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    keys = sorted(
+        [key for key in m if key.startswith("known_") and key.split("_")[-1].isdigit()],
+        key=lambda key: -int(key.split("_")[1]),
+    )
+    if keys:
+        x = finite([m[key]["coverage.content"] for key in keys])
+        for index, (key, label) in enumerate(
+            [("accuracy.content", "Accuracy on known answers"), ("accuracy.all", "Accuracy on all answers")]
+        ):
+            values = [m[k].get(key) for k in keys]
+            present = [i for i, value in enumerate(values) if value is not None]
+            axes[0].plot(
+                x[present], [values[i] for i in present], marker=MARKERS[index], color=COLORS[index], label=label
+            )
+        axes[0].plot(x, x, ls=":", color="gray", label="Coverage ceiling for perfect known answers")
+        axes[0].set(
+            title="Coverage and conditional accuracy differ",
+            xlabel="Fraction of targets in the vocabulary",
+            ylabel="Observed accuracy",
+            xlim=(-0.03, 1.03),
+            ylim=(-0.03, 1.03),
+        )
+        axes[0].xaxis.set_major_formatter(PercentFormatter(1))
+        axes[0].yaxis.set_major_formatter(PercentFormatter(1))
+        axes[0].legend(fontsize=8)
+        known = finite([m[key]["targets.known"] for key in keys])
+        unknown = finite([m[key]["targets.unavailable"] for key in keys])
+        axes[1].barh(range(len(keys)), known, color=COLORS[0], label="Known answers")
+        axes[1].barh(range(len(keys)), unknown, left=known, color=COLORS[1], label="Unavailable answers")
+        axes[1].set(
+            yticks=range(len(keys)),
+            yticklabels=[f"{value:.0%} coverage" for value in x],
+            xlabel="Selected target count",
+            title="Which answers contribute to each score?",
+        )
+        axes[1].invert_yaxis()
+        axes[1].legend(fontsize=8)
+        return (
+            fig,
+            "Undefined conditional accuracy at zero coverage is omitted, rather than replaced by zero. Counts come from the proof's selected-target measurements.",
+            {},
+        )
+    dots(
+        axes[0],
+        ["Red member", "Blue member"],
+        {
+            "Capacity 2": [m["capacity_2"]["probabilities"][name] for name in ["red", "blue"]],
+            "Capacity 512": [m["capacity_512"]["probabilities"][name] for name in ["red", "blue"]],
+            "Generating member probability": [0.9, 0.2],
+        },
+        xlabel="Predicted inclusion probability",
+    )
+    axes[0].set_xlim(0, 1.02)
+    known = [m[f"coverage_{size}"]["targets.known"] for size in [2, 512]]
+    unavailable = [m[f"coverage_{size}"]["targets.unavailable"] for size in [2, 512]]
+    axes[1].barh([0, 1], known, color=COLORS[0], label="Known target members")
+    axes[1].barh([0, 1], unavailable, left=known, color=COLORS[1], label="Unavailable target members")
+    axes[1].set(
+        yticks=[0, 1],
+        yticklabels=["Capacity 2", "Capacity 512"],
+        xlabel="Selected target-member count",
+        title="Extra capacity does not supply unseen members",
+    )
+    axes[1].invert_yaxis()
+    axes[1].legend(fontsize=8)
+    return (
+        fig,
+        "The generator independently includes red with probability 0.9 and blue with probability 0.2. The right panel uses the separate mixed-availability evaluation; spare decoder capacity does not create a learned target label.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

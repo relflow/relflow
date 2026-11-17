@@ -5,11 +5,6 @@
 # - Vocabulary
 # description: Predict a yes/no outcome using a numeric signal and an identity-specific effect. New identities remove
 #   only the latter information.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Weak signal, new identity, 20% training rate
 #   metric:
@@ -24,6 +19,52 @@
 #   - decisive_confidence
 #   format: percent
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. The numeric signal remains available for unfamiliar identities.
+#   alt: Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The numeric signal remains
+#     available for unfamiliar identities.
+# evidence-review:
+#   question: How confident should relflow be about a new identity?
+#   modeling: Generate outcomes from a numeric signal plus an identity-specific effect. New identities remove only
+#     the second source of information. Train with some input identities made unavailable, then compare confidence
+#     on unseen IDs when the remaining numeric evidence is weak or decisive.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Probability
+#     conditions:
+#     - label: Weak signal, new identity, 20% training rate
+#       path:
+#       - '0.2'
+#       - novel
+#       - ambiguous_confidence
+#       format: percent
+#     - label: Strong signal, new identity, 20% training rate
+#       path:
+#       - '0.2'
+#       - novel
+#       - decisive_confidence
+#       format: percent
+#     definition: Predicted probability of the named outcome or membership. The task determines the appropriate value;
+#       higher is not always better.
+#     direction: Task-specific interpretation
+#     domain:
+#     - 0
+#     - 1
+#   note: These conditions should have different confidence levels; higher confidence is not always better. Both bars
+#     use the 20% input-unavailability training condition.
+#   criteria:
+#     prefixes:
+#       '0.01': 1% input unavailability
+#       '0.2': 20% input unavailability
+# evidence-plot:
+#   target: target
+#   focus: What confidence is justified for an unseen identity?
+#   comparison: Compare known and unavailable cohorts under each declared prior condition.
+#   limit: Probability error, proper loss, and classification accuracy answer different questions.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 49
+#   candidate: 49
 # ---
 #
 # A new identity removes one source of information, but the numeric input can still be informative.
@@ -41,10 +82,7 @@
 #
 # The outcome is hidden and randomly sampled. Scores compare predicted probabilities with the generator’s known probabilities.
 #
-# ```{typst}
-# //| label: fig-evidence-cold-start-confidence
-# //| fig-cap: "Amber cards are hidden prediction targets. The numeric signal remains available for unfamiliar identities."
-# //| fig-alt: "Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The numeric signal remains available for unfamiliar identities."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", detail: "Generalizable evidence"),
 #   node("entity", type: "Category", detail: "Persistent identity"),
@@ -68,8 +106,6 @@
 #
 # ## Result
 #
-# {{< evidence P061 status >}}
-#
 # A new identity does not always imply a 50% prediction: strong remaining context can still justify confidence. Neither unavailability rate is claimed to be best for every dataset.
 #
 # The confidence readouts use the probability of the more likely answer, so confident no and confident
@@ -77,14 +113,7 @@
 # also compared with an evaluator-only oracle. These checks concern this mixture of identity effects
 # and signals; they do not imply that stronger unavailability augmentation is universally better.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P061 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P061 script >}}
+# ## Method
 #
 # ### Training and controls
 #
@@ -99,13 +128,11 @@
 # A final admission-only probe measures the prediction change without learning;
 # this is a diagnostic limitation, not a promise that admission is safe.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -253,8 +280,66 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from evidence.diagnostics.plots import axes_pair, caption, dots, finite, summary
+
+    fig, axes = axes_pair()
+    candidates = []
+    for frame in bundle.frames:
+        if frame["function"] != "score":
+            continue
+        values = frame["values"]
+        p = bundle.value(values.get("p", values.get("predicted")))
+        oracle = bundle.value(values.get("oracle", values.get("expected")))
+        if p is None or oracle is None or isinstance(p, dict) or isinstance(oracle, dict):
+            continue
+        p, oracle = (np.asarray(p), np.asarray(oracle))
+        if p.shape == oracle.shape and p.ndim == 1 and (len(p) > 1):
+            candidates.append((frame, finite(p), finite(oracle)))
+    if not candidates:
+        plt.close(fig)
+        return summary(bundle, spec)
+    frame, p, oracle = candidates[0]
+    density = axes[0].hexbin(
+        oracle, p, gridsize=25, extent=(0, 1, 0, 1), mincnt=1, bins="log", cmap="viridis", rasterized=True
+    )
+    fig.colorbar(density, ax=axes[0], fraction=0.035, label="Records (log count)")
+    axes[0].plot([0, 1], [0, 1], ls="--", color="gray")
+    axes[0].set(
+        title=caption(bundle.label(frame)),
+        xlabel="Generator's conditional probability",
+        ylabel="Model positive probability",
+        xlim=(0, 1),
+        ylim=(0, 1),
+    )
+    axes[0].set_aspect("equal")
+    selected = candidates[:6]
+    labels = [bundle.label(frame) for frame, _, _ in selected]
+    if len(selected) != 4:
+        raise ValueError("Cold-start calibration requires both identity groups at both training rates")
+    labels = [
+        f"{rate:.0%} unavailable training inputs · {group} identities"
+        for rate in [0.01, 0.2]
+        for group in ["known", "unseen"]
+    ]
+    axes[0].set_title(caption(labels[0]))
+    errors = [float(np.sqrt(np.mean((p - oracle) ** 2))) for _, p, oracle in selected]
+    dots(axes[1], labels, {"Probability RMSE": errors}, xlabel="RMSE against the known conditional probability")
+    for frame, p, oracle in selected:
+        result = bundle.value(frame["result"])
+        key = "oracle_rmse" if "oracle_rmse" in result else "probability_rmse"
+        if key in result:
+            np.testing.assert_allclose(np.sqrt(np.mean((p - oracle) ** 2)), result[key], rtol=1e-10, atol=1e-12)
+    return (
+        fig,
+        "The diagonal compares probabilities with an evaluator oracle, not with a single random label. Probability RMSE is recomputed from captured arrays and checked against the proof's own score.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

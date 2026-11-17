@@ -4,11 +4,6 @@
 # categories:
 # - Value state
 # description: Predict a label from whether a number is missing, even though every present number is zero.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Nulls preserved
 #   metric:
@@ -19,6 +14,60 @@
 #   - prefilled_accuracy
 #   format: percent
 # evidence-group: State
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with state, measurement, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can relflow distinguish missing values from zero?
+#   modeling: Generate records in which a measurement is either null or the number zero, and hide the Boolean answer
+#     identifying which case occurred. Compare preserving these states with replacing nulls by zero. Filling nulls
+#     removes the information needed to distinguish the two cases; the test measures whether the model uses the preserved
+#     distinction.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Accuracy
+#     conditions:
+#     - label: Nulls filled with zero
+#       path:
+#       - prefilled_accuracy
+#       format: percent
+#     - label: Nulls preserved
+#       path:
+#       - state_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: ''
+# evidence-plot:
+#   target: target
+#   focus: Does the model distinguish a missing value from a real zero?
+#   comparison: Compare preserved state, nulls filled with zero, and an independent control.
+#   limit: Filling null with zero removes information before the model sees the record.
+#   renderer: plot
+# evidence-highlight:
+#   order: 3
+#   title: Distinguish nulls from zero
+#   result:
+#     metric:
+#     - state_accuracy
+#     text: '**{value:.4g}% accuracy** with value states preserved'
+#     scale: 100
+#     minimum: 0
+#     maximum: 1
+#   control:
+#     metric:
+#     - prefilled_accuracy
+#     text: '{value:.4g}% after filling nulls with zero'
+#     scale: 100
+#     minimum: 0
+#     maximum: 1
+# evidence-cost:
+#   baseline: 11
+#   candidate: 11
 # ---
 #
 # ## Example
@@ -35,10 +84,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-state-null-versus-zero
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with state, measurement, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("state", kind: "root", children: (
 #   node("measurement", type: "Number", width: 150pt,),
 #   node("target", kind: "target", type: "Boolean",),
@@ -63,18 +109,9 @@
 # generator. The result does not imply that absent values are informative in every application, or that a
 # model should prefer them to correctly measured data.
 #
-# {{< evidence P038 status >}}
-#
 # The model can use the difference between missing and zero. Filling nulls with zeros erases that signal; whether missingness helps in real data depends on the application.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P038 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P038 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -98,13 +135,11 @@
 #
 # For the representation contract, see [data types](/concepts/data-types/).
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
@@ -238,8 +273,36 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    labels = ["Null state preserved", "Null filled with zero", "Independent labels"]
+    dots(
+        axes[0],
+        labels,
+        {"Ranking AUC": [m["state_auc"], m["prefilled_auc"], m["independent_auc"]]},
+        xlabel="AUC (higher is better)",
+        reference=(0.5, "Chance ranking"),
+    )
+    dots(
+        axes[1],
+        labels,
+        {"Accuracy": [m["state_accuracy"], m["prefilled_accuracy"], m["independent_accuracy"]]},
+        xlabel="Accuracy at the declared decision rule",
+        reference=(0.5, "Balanced chance"),
+        percent=True,
+    )
+    for ax in axes:
+        ax.set_xlim(-0.02, 1.03)
+    return (
+        fig,
+        "The same three information conditions are shown on separate ranking and accuracy axes. Filling missing values with zero removes the state distinction before learning.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

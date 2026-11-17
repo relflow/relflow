@@ -59,3 +59,10 @@ The wordmark uses Libertinus Serif Semibold (weight 600), which is
 The renderer disables system font discovery, so no extra font installation is
 needed for branding exports. The docs font and its license are stored in
 [`docs/assets/fonts`](../fonts/README.md).
+
+## Website assets
+
+The website uses its selected soft-canopy mark and outlined header, prepared in
+`docs/starlight/src/assets/branding/`. Its authoring source and regeneration
+instructions live in [site/README.md](site/README.md). Both renderers belong to
+this branding subtree; normal documentation builds consume prepared assets.

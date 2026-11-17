@@ -4,11 +4,6 @@
 # categories:
 # - Vocabulary
 # description: Ask a Category output to predict a mix of familiar and unfamiliar target labels.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Known-label accuracy
 #   metric:
@@ -23,6 +18,43 @@
 #   - coverage
 #   format: percent
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, x, hint, label. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: Can perfect accuracy hide answers relflow cannot name?
+#   modeling: Train a Category output to name two classes from numeric evidence. In half the test rows, replace the
+#     expected name with an unseen target label while keeping the evidence unchanged. Compare accuracy on known answers
+#     with accuracy across every test row.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Accuracy
+#     conditions:
+#     - label: Known-label accuracy
+#       path:
+#       - known_accuracy
+#       format: percent
+#     - label: All-row accuracy
+#       path:
+#       - all_row_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: These scores have different denominators. Perfect known-answer accuracy can coexist with zero ability to
+#     emit the missing target names.
+# evidence-plot:
+#   target: label
+#   focus: How does an unavailable target change total accuracy?
+#   comparison: Separate known-target accuracy, all-row accuracy, unavailable-target behavior, and shuffled hints.
+#   limit: Conditional accuracy omits unavailable answers; all-row accuracy includes them.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 16
+#   candidate: 16
 # ---
 #
 # A classifier can be good at choosing among its available answers while lacking the correct answer
@@ -40,10 +72,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-unknown-target-coverage
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, x, hint, label. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number"),
 #   node("hint", type: "Category", body: [All four strings; independent]),
@@ -67,8 +96,6 @@
 #
 # ## Result
 #
-# {{< evidence P056 status >}}
-#
 # Known-only accuracy can look perfect while half the answers are impossible to emit. Report coverage and all-row accuracy alongside it; confidence need not warn about the missing labels.
 #
 # Confidence is normalized across the two populated output labels. It can therefore be high even when
@@ -76,14 +103,7 @@
 # not add it to the output vocabulary. These measurements concern answer coverage, rather than
 # recognizing that a prediction should be rejected.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P056 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P056 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -106,13 +126,11 @@
 # Call the actual test loop to compare its content metric with external scoring.
 # Vocabularies, counts, and numerical normalization must stay frozen throughout.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -266,8 +284,78 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots, finite
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    keys = sorted(
+        [key for key in m if key.startswith("known_") and key.split("_")[-1].isdigit()],
+        key=lambda key: -int(key.split("_")[1]),
+    )
+    if keys:
+        x = finite([m[key]["coverage.content"] for key in keys])
+        for index, (key, label) in enumerate(
+            [("accuracy.content", "Accuracy on known answers"), ("accuracy.all", "Accuracy on all answers")]
+        ):
+            values = [m[k].get(key) for k in keys]
+            present = [i for i, value in enumerate(values) if value is not None]
+            axes[0].plot(
+                x[present], [values[i] for i in present], marker=MARKERS[index], color=COLORS[index], label=label
+            )
+        axes[0].plot(x, x, ls=":", color="gray", label="Coverage ceiling for perfect known answers")
+        axes[0].set(
+            title="Coverage and conditional accuracy differ",
+            xlabel="Fraction of targets in the vocabulary",
+            ylabel="Observed accuracy",
+            xlim=(-0.03, 1.03),
+            ylim=(-0.03, 1.03),
+        )
+        axes[0].xaxis.set_major_formatter(PercentFormatter(1))
+        axes[0].yaxis.set_major_formatter(PercentFormatter(1))
+        axes[0].legend(fontsize=8)
+        known = finite([m[key]["targets.known"] for key in keys])
+        unknown = finite([m[key]["targets.unavailable"] for key in keys])
+        axes[1].barh(range(len(keys)), known, color=COLORS[0], label="Known answers")
+        axes[1].barh(range(len(keys)), unknown, left=known, color=COLORS[1], label="Unavailable answers")
+        axes[1].set(
+            yticks=range(len(keys)),
+            yticklabels=[f"{value:.0%} coverage" for value in x],
+            xlabel="Selected target count",
+            title="Which answers contribute to each score?",
+        )
+        axes[1].invert_yaxis()
+        axes[1].legend(fontsize=8)
+        return (
+            fig,
+            "Undefined conditional accuracy at zero coverage is omitted, rather than replaced by zero. Counts come from the proof's selected-target measurements.",
+            {},
+        )
+    labels = ["Known targets", "All targets", "Unavailable targets", "Known targets, shuffled hints"]
+    values = [m["known_accuracy"], m["all_row_accuracy"], m["unknown_accuracy"], m["shuffled_known_accuracy"]]
+    dots(axes[0], labels, {"Accuracy": values}, xlabel="Fraction correctly predicted", percent=True)
+    axes[0].set_xlim(-0.02, 1.02)
+    run = next((frame for frame in reversed(bundle.frames) if frame["function"] == "run"))
+    probability, known = bundle.values(run, "probability", "known")
+    for mask, label, color in [(known, "Known answers", COLORS[0]), (~known, "Unavailable answers", COLORS[1])]:
+        axes[1].hist(probability[mask], bins=np.linspace(0, 1, 26), histtype="step", lw=1.8, color=color, label=label)
+    axes[1].set(
+        title="Confidence does not establish availability",
+        xlabel="Top-answer confidence",
+        ylabel="Record count",
+        xlim=(0, 1),
+    )
+    axes[1].legend(fontsize=8)
+    return (
+        fig,
+        "Accuracy conditions and confidence populations stay separate. An unavailable true label cannot be recovered merely by assigning high probability to an available label.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

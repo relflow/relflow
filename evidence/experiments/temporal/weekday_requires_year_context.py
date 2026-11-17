@@ -5,11 +5,6 @@
 # - Calendar reasoning
 # description: Predict weekday from the day number while deliberately balancing different years across all seven weekday
 #   answers.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Day number only
 #   metric:
@@ -20,6 +15,48 @@
 #   - with_weekday_accuracy
 #   format: percent
 # evidence-group: Temporal
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can day-of-year identify weekday without the missing calendar information?
+#   modeling: Balance all seven weekdays for every sampled day-of-year, so the visible day number alone cannot identify
+#     the answer. Compare a model given only day-of-year with one also given the weekday coordinate itself.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Accuracy
+#     conditions:
+#     - label: Day number only
+#       path:
+#       - day_only_accuracy
+#       format: percent
+#     - label: Weekday supplied
+#       path:
+#       - with_weekday_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The control supplies the answer-bearing calendar part directly. It does not test calculating weekday from
+#     a year.
+# evidence-plot:
+#   mode: temporal
+#   target: target
+#   focus: Can day-of-year alone identify a weekday across years?
+#   comparison: Compare the ambiguous representation with explicitly supplied weekday context.
+#   limit: Additional visible context changes identifiability; it does not demonstrate exact calendar reasoning by
+#     weights.
+#   conditions:
+#   - label: Day of year only
+#     metric: day_only_accuracy
+#   - label: Weekday context supplied
+#     metric: with_weekday_accuracy
+# evidence-cost:
+#   baseline: 11
+#   candidate: 11
 # ---
 #
 # ## Example
@@ -37,10 +74,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-temporal-weekday-requires-year-context
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("calendar", kind: "root", children: (
 #   node("observed_at", type: "DateParts", width: 150pt,),
 #   node("target", kind: "target", type: "Category", detail: "weekday",),
@@ -65,18 +99,9 @@
 # original record does not make all of its information available after encoding. The choice of coordinates
 # determines which distinctions the downstream model can learn.
 #
-# {{< evidence P045 status >}}
-#
 # The day-only model stays near one-in-seven chance. A source timestamp only helps through the coordinates exposed to the model.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P045 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P045 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -98,8 +123,6 @@
 # Repeat the positive and ambiguity gates over three core seeds and at least
 # ten calibration seeds. Broaden the family's coordinate-composition targets
 # while keeping balanced collisions that make information loss observable.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -257,6 +280,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

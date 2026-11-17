@@ -4,11 +4,6 @@
 # categories:
 # - Grouped weighted aggregation
 # description: Supply already calculated contributions and ask for the total belonging to one group.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct groups
 #   metric:
@@ -21,6 +16,41 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with request, selected_group, items, group, contribution, answer. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow total prepared contributions for one group?
+#   modeling: Give each item a group and an already calculated value × weight contribution. Ask for one group’s total
+#     and hide that answer. Compare normal records with copies whose group labels are rotated while contributions
+#     and expected totals stay fixed.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Changed groups
+#       path:
+#       - corrupted
+#       - rmse
+#       format: number
+#     - label: Correct groups
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Products are supplied upstream. This isolates group selection and summation from learning multiplication.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Can the model select and sum prepared contributions for the requested group?
+#   comparison: Compare intact group membership with rotated labels and reordered complete items.
+#   limit: Contributions are supplied; the task isolates selection and aggregation.
+# evidence-cost:
+#   baseline: 86
+#   candidate: 85
 # ---
 #
 # The model is asked to add contributions for one named group from a mixed list. A contribution is
@@ -47,10 +77,7 @@
 # same list and a B request, the answer would instead be 0.4 + 0.3 = 0.7. The request therefore
 # changes what must be selected without changing the underlying list.
 #
-# ```{typst}
-# //| label: fig-evidence-selected-group-supplied-contribution-sum
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with request, selected_group, items, group, contribution, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("request", kind: "root", width: 120pt, children: (
 #   node("selected_group", type: "Category"),
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
@@ -74,11 +101,8 @@
 #
 # ## Result
 #
-# {{< evidence P011 status >}}
-#
 # The model uses group membership to select contributions. Because the products are supplied, this
 # does not test learned multiplication.
-#
 #
 # The error percentages compare both versions with the same constant training-mean guess. Low intact
 # error plus worse error after rotating labels supports request-based selection; worse corrupted
@@ -86,14 +110,7 @@
 # value-times-weight multiplication, because that operation has already been performed by the
 # generator.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P011 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P011 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -117,8 +134,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -305,6 +320,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

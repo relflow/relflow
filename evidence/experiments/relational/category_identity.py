@@ -5,11 +5,6 @@
 # - Sibling entity transfer
 # description: Use matching category IDs to transfer changing values from a source list to a separately ordered target
 #   list.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Compressed route
 #   metric:
@@ -24,6 +19,41 @@
 #   - preserved_broken_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with association, source, entity_id, value, target, entity_id, value. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can familiar IDs connect two lists?
+#   modeling: Give a source list of category IDs and changing values, then a separately ordered query list using familiar
+#     IDs. Hide each requested source value. Compare correct query IDs with rotated IDs that retain their original
+#     targets.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Query IDs changed
+#       path:
+#       - preserved_broken_nrmse
+#       format: number
+#     - label: Matching familiar IDs
+#       path:
+#       - preserved_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: This comparison uses the route that retains source items. Compressed-route results remain below; it does
+#     not test unseen Category labels.
+# evidence-plot:
+#   mode: regression
+#   target: target/value
+#   focus: Does compressing a Category route lose observation-local associations?
+#   comparison: Compare compressed and preserved routes, each with intact and broken identities.
+#   limit: The persistent Category vocabulary is small; numeric associations still vary by observation.
+# evidence-cost:
+#   baseline: 174
+#   candidate: 174
 # ---
 #
 # ## Example
@@ -44,10 +74,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-category-identity
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with association, source, entity_id, value, target, entity_id, value. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("association", kind: "root", width: 120pt, children: (
 #   node("source", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("entity_id", type: "Category"),
@@ -78,18 +105,9 @@
 # side. The result does not test unfamiliar vocabulary, absent matches, duplicate keys, or the correctness
 # guarantees of a database join.
 #
-# {{< evidence P036 status >}}
-#
 # The selected run compares both routes with two familiar IDs. New IDs and larger vocabularies are separate tasks.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P036 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P036 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -105,8 +123,6 @@
 # vocabulary result does not establish compressed retrieval for fresh IDs; the
 # [Hash case](hash-identity.html) tests that distinction. Use an exact join in
 # preprocessing when exact value transfer is required.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -242,6 +258,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

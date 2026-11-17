@@ -4,11 +4,6 @@
 # categories:
 # - Quantile
 # description: Train a Quantile relationship within a bounded amount range, then supply much smaller and larger amounts.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: In-range error, original units
 #   metric:
@@ -25,6 +20,49 @@
 #   - rmse
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: What happens beyond the learned percentile range?
+#   modeling: Train Quantile inputs and targets on amounts between 10 and 30, with cost = 100 + 4 × amount plus small
+#     noise. Test within that interval and in matched intervals below and above it. Compare RMSE in the original cost
+#     units.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: RMSE
+#     conditions:
+#     - label: In-range error, original units
+#       path:
+#       - in_range_rmse
+#       format: number
+#     - label: Below-range error, original units
+#       path:
+#       - below
+#       - rmse
+#       format: number
+#     - label: Above-range error, original units
+#       path:
+#       - above
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The checks deliberately measure tail saturation and bounded target support. Checks met does not mean the
+#     model extrapolated the relationship.
+# evidence-plot:
+#   target: cost
+#   focus: What happens beyond the output representation's observed range?
+#   comparison: Separate in-range, below-range, and above-range targets on common source-unit axes.
+#   limit: Clipped output endpoints impose a representational limit that extra input evidence cannot remove.
+#   labels:
+#     rows: In-range held-out records
+#     shifted: Shifted outer range
+#   renderer: plot
+# evidence-cost:
+#   baseline: 14
+#   candidate: 14
 # ---
 #
 # This experiment asks what a percentile representation cannot distinguish. Training amounts lie
@@ -41,10 +79,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-quantile-clipped-extrapolation
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("order", kind: "root", children: (
 #   node("amount", type: "Quantile", detail: "In-range or shifted input"),
 #   node("cost", kind: "target", type: "Quantile", detail: "Bounded learned support"),
@@ -68,8 +103,6 @@
 #
 # ## Result
 #
-# {{< evidence P068 status >}}
-#
 # Outside the learned support, percentile inputs and outputs hit their boundaries. Tail predictions
 # become constant; accepting a number does not guarantee extrapolation.
 #
@@ -79,14 +112,7 @@
 # finite bounded outputs, rather than successful extrapolation or an automatic warning about
 # unfamiliar input.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P068 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P068 script >}}
+# ## Method
 #
 # ### Synthetic process and paired observations
 #
@@ -121,13 +147,11 @@
 # extrapolation ability of Number or models with additional informative fields.
 # Accepting an out-of-support value gives no OOD warning or calibrated uncertainty.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -299,8 +323,50 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import textwrap
+
+    import numpy as np
+
+    from evidence.diagnostics.plots import COLORS, axes_pair
+
+    pairs = [
+        pair
+        for pair in bundle.pairs(spec["target"])
+        if pair["population"] == "test" and "permutation" not in pair["call"]
+    ]
+    if not pairs:
+        raise ValueError("Extrapolation requires retained source-unit predictions")
+    fig, axes = axes_pair(width=10, height=4.8)
+    selected = pairs[:3]
+    for index, pair in enumerate(selected):
+        axes[0].scatter(
+            pair["actual"], pair["predicted"], s=5, alpha=0.2, color=COLORS[index], label=pair["label"], rasterized=True
+        )
+    values = np.concatenate([pair["actual"] for pair in selected])
+    lower, upper = (float(values.min()), float(values.max()))
+    axes[0].plot([lower, upper], [lower, upper], ls="--", color="gray")
+    axes[0].set(
+        xlabel="Actual source-unit answer",
+        ylabel="Model source-unit prediction",
+        title="Does the prediction reach the requested range?",
+    )
+    axes[0].legend(fontsize=8)
+    axes[1].boxplot(
+        [np.abs(pair["actual"] - pair["predicted"]) for pair in selected],
+        orientation="horizontal",
+        tick_labels=[textwrap.fill(pair["label"], 22) for pair in selected],
+        showfliers=False,
+        medianprops={"color": COLORS[1]},
+    )
+    axes[1].set(xlabel="Absolute source-unit error", title="Error remains separate for each range")
+    return (
+        fig,
+        "Every scatter point is a captured prediction. The diagonal denotes exact answers; clipping appears as a plateau. Error boxes show medians, quartiles, and 1.5-IQR whiskers with outliers omitted from that display.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

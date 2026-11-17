@@ -67,21 +67,41 @@ evaluation, and numerical criteria. A scaffold is not a recorded experiment.
 Once created under `experiments/`, it joins the catalog and must be completed
 before authoring and full paired checks can pass.
 
+## Self-contained experiment files
+
+One file owns each experiment, including its declaration, uv environment,
+learning protocol, and presentation. Adding or removing a script updates discovery,
+planning, documentation, and optional publication highlights automatically. No
+shared table may assign metadata or rendering behavior by experiment ID.
+
+YAML frontmatter declares `evidence-review`, `evidence-plot`, optional
+`evidence-highlight`, and optional `evidence-cost` estimates. Classification
+continues to use the script's PEP 723 `[tool.relflow.evidence]` table. Shared
+schemas and vocabulary validate these fields without listing experiment IDs.
+
+A plot selects one built-in `mode` or one script-owned `renderer`. Renderer
+functions have signature `(bundle, spec)`, with imports and helpers inside the
+function. Return `(figure, caption, interactive)`, where `figure` is a Matplotlib
+figure, `caption` is text, and `interactive` is a portable data mapping (or `{}`).
+The plot container loads only that component from the exact captured
+source; it does not import the experiment module or rerun training. Supplements
+select components in the same way. Static documentation never executes them.
+The centralized review/view/timing formats are removed, without compatibility
+fallbacks for authoring them.
+
 ## Execution
 
-The required hosted catalog is the **core** lane under `experiments/<category>/`.
-It always includes every core declaration. Studies requiring additional model
-artifacts, optional solvers, or an unreleased datatype wheel live separately in
-`research/<category>/` and declare an `evidence-requires` list in frontmatter.
-Their stable IDs share the same namespace. Directory placement owns the lane;
-frontmatter cannot reclassify a required core experiment. Both lanes use the same
-standalone protocol, immutable records, and static documentation renderer.
+Every current study lives under `experiments/<category>/` and is part of the
+required hosted catalog. There are no lanes or optional experiment exclusions.
+The runner defaults to all declarations; passing IDs selects an explicit local
+run, and `--list` lists the same catalog. Dependency environments remain owned
+by each script. Missing execution or failed checks remain visible failures.
 
-The local runner defaults to core. Select research explicitly with
-`--lane research`; `--lane all --list` lists both. Documentation lists both lanes
-and marks research pages, including their provisioning requirements under
-Reproduce. A missing research result remains Missing; excluding optional
-resources from hosted core execution never creates a passing result.
+Current scripts use plain Markdown Example, Comparison, Result, and Method
+sections. Use standard `typst` fences for model-tree source and keep its caption
+and alternative text in YAML `evidence-diagram`. The website supplies measured
+results, disclosures, and reproduction commands. Do not embed Quarto options or
+shortcodes in current sources. Retained sources remain immutable and readable.
 
 Each script exposes a decorated `run(seed, steps, accelerator)` and calls
 `report(run)` under a main guard. Registration attaches immutable metadata and
@@ -98,7 +118,6 @@ Run these commands from the repository root with the intended wheel:
 
 ```sh
 uv run evidence/experiments/run.py --list
-uv run evidence/experiments/run.py --lane all --list
 uv run evidence/experiments/run.py --wheel /path/to/matching-relflow.whl P001 --steps 2
 uv run evidence/experiments/run.py --wheel /path/to/matching-relflow.whl P001
 uv run --project docs --with /path/to/matching-relflow.whl pytest -c docs/pyproject.toml evidence/tests/runtime
@@ -173,11 +192,11 @@ The collector requires the exact planned union, unchanged task identities,
 matching within-pair execution policy, and a complete passing comparison.
 Duplicate, missing, unexpected, or altered shards fail closed.
 
-Scheduling uses the per-role costs in `timings.json`, with a reference to their
-verified source report. Freeze their file digest and resolved costs in the plan.
-Balance pairs by summed role cost; missing timings must have a positive fallback.
-These forecasts affect placement and ordering only. They cannot change the task
-catalog, seeds, training steps, checks, or measurement provenance.
+Scheduling reads optional per-role `evidence-cost` estimates from each script's
+frontmatter and freezes the resolved costs in the plan. Source checksums bind the
+estimates. Balance pairs by summed role cost and use positive fallbacks when an
+estimate is absent. Forecasts affect placement and ordering only; they cannot
+change the catalog, seeds, training steps, checks, or measurement provenance.
 
 Workers have no network, a read-only root, and no host home or Docker socket
 mount. Install runtime packages in the image, never on the host. Keep credentials

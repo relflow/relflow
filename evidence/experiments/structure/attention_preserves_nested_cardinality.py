@@ -4,11 +4,6 @@
 # categories:
 # - Hierarchical statistics
 # description: Predict the largest session total when the same six amounts are divided into different sessions.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Model error
 #   metric:
@@ -19,6 +14,40 @@
 #   - flat_oracle_rmse
 #   format: number
 # evidence-group: Structure
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, sessions, transactions, amount, largest_session_total. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Does the grouping of values matter?
+#   modeling: Pair records containing the same six amounts, arranged in sessions of two, two, and two versus one,
+#     four, and one. Hide the largest session total. Compare the nested model with the best possible squared-error
+#     prediction available after flattening away session membership.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Best flattened-data reference
+#       path:
+#       - flat_oracle_rmse
+#       format: number
+#     - label: Model with nested sessions
+#       path:
+#       - test_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The flattened-data reference is an information limit, not a competing trained model. This tests sensitivity
+#     to these session partitions.
+# evidence-plot:
+#   mode: regression
+#   target: largest_session_total
+#   focus: Does nesting preserve information that a flat bag loses?
+#   comparison: Compare predictions for matched nested records and the flat-bag oracle.
+#   limit: The important comparison is the paired answer change caused by the hierarchy.
+# evidence-cost:
+#   baseline: 7
+#   candidate: 6
 # ---
 #
 # ## Example
@@ -45,10 +74,7 @@
 #
 # largest_session_total is hidden. global_total is an explanatory value, not a model input.
 #
-# ```{typst}
-# //| label: fig-evidence-structure-attention-preserves-nested-cardinality
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, sessions, transactions, amount, largest_session_total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("sessions", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
@@ -77,18 +103,9 @@
 # arrangements from a compromise prediction. All six amounts are equal within a record, and only the `(2, 2,
 # 2)` and `(1, 4, 1)` layouts are tested.
 #
-# {{< evidence P040 status >}}
-#
 # The model retains useful information about the hierarchy. Only two arrangements of equal amounts are tested; general nested arithmetic remains a larger task.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P040 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P040 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -112,8 +129,6 @@
 # sessions, test more partitions, and vary Attention output counts and nested
 # capacities. Repeat the nested gates over three paired core seeds and at least
 # ten calibration seeds without weakening either threshold.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -251,6 +266,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

@@ -5,11 +5,6 @@
 # - Vocabulary
 # description: Compare familiar labels, new labels, and missing values in a task where identity and numeric context
 #   both matter.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Error on paired new identities
 #   metric:
@@ -22,6 +17,42 @@
 #   - information_limit_rmse
 #   format: number
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, x, code, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Is an unfamiliar category the same as a null?
+#   modeling: Generate numeric context x and a category-specific effect, then hide 2x + effect. At test time, introduce
+#     two unseen categories with opposite effects. Both map to unknown content, so the model can use x but cannot
+#     distinguish those effects. Compare its error with that unavoidable information limit.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Unavoidable error without identity
+#       path:
+#       - unknown
+#       - information_limit_rmse
+#       format: number
+#     - label: Error on paired new identities
+#       path:
+#       - unknown
+#       - paired_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Unknown category content remains different from a null. The reference is a mathematical information limit,
+#     not another trained model.
+# evidence-plot:
+#   target: target
+#   focus: What prediction is available for an unseen input label?
+#   comparison: Compare known labels, unknown-label renaming, and null inputs against the fixed baseline.
+#   limit: An unknown label can use shared context but has no learned persistent identity row.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 22
+#   candidate: 22
 # ---
 #
 # The question is what remains predictable when a categorical identity is unfamiliar. Each row
@@ -39,10 +70,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-unknown-input-fallback
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, x, code, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number"),
 #   node("code", type: "Category", body: [30% unavailable content in training]),
@@ -66,8 +94,6 @@
 #
 # ## Result
 #
-# {{< evidence P055 status >}}
-#
 # Different new labels share unavailable identity content, while null remains distinct. Other context can support a fallback, but the model cannot infer the new label’s individual effect.
 #
 # RMSE measures error in target units. The 1.5 unknown-identity limit is the error left even by the
@@ -75,14 +101,7 @@
 # appropriate goal. Evaluation also checks that looking at new labels does not silently teach them to
 # the vocabulary.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P055 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P055 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -103,13 +122,11 @@
 # an unknown code cannot change predictions; replacing it with null must.
 # All evaluation uses frozen vocabularies and normalization statistics.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -256,8 +273,35 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.plots import numeric
+
+    pairs = bundle.pairs("target")
+    chosen = []
+    labels = {
+        "novel": "Unseen label: conditional mean",
+        "renamed": "Unseen spelling changed",
+        "nulls": "Null input: its own conditional mean",
+        "test": "Known and null inputs: observed answers",
+    }
+    for argument in ["novel", "renamed", "nulls", "test"]:
+        pair = next((item for item in pairs if item["call"] == f"prediction(model, {argument})"))
+        pair = dict(pair, label=labels[argument])
+        if argument != "test":
+            pair["actual"] = 2 * np.asarray([row["x"] for row in pair["rows"]]) - (3 if argument == "nulls" else 0)
+        chosen.append(pair)
+    run = next((frame for frame in bundle.frames if frame["function"] == "run"))
+    baseline = bundle.value(run["values"]["baseline"])
+    measured = np.sqrt(np.mean((chosen[0]["actual"] - chosen[0]["predicted"]) ** 2)) / baseline
+    if not np.isclose(measured, bundle.record["metrics"]["unknown"]["fallback_nrmse"]):
+        raise ValueError("Unknown fallback plot disagrees with the proof's conditional-mean score")
+    fig, note, interactive = numeric(bundle, spec, pairs=chosen)
+    note += " For unseen labels the reference is the generator's conditional mean 2 × x; for null it is 2 × x − 3. Copied historical target labels are not the oracle for these changed inputs."
+    return (fig, note, interactive)
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

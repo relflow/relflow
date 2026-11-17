@@ -4,11 +4,6 @@
 # categories:
 # - Order statistics
 # description: Ask for the smallest, largest, middle, or quarter-position value without sorting the input first.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: All requests
 #   metric:
@@ -21,6 +16,45 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with request, rank, items, value, answer. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow find a requested value in an unsorted list?
+#   modeling: Give the model an unsorted list of nine numbers and a request for the minimum, lower quarter, median,
+#     upper quarter, or maximum. Hide the requested value. Compare correct requests with changed requests scored against
+#     the original answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Changed requests
+#       path:
+#       - cycled
+#       - rmse
+#       format: number
+#     - label: All requests
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: All five ranks are checked separately. With nine values, the quarter positions are observed items, so interpolated
+#     quantiles are not tested.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Can a visible request select the correct ranked value?
+#   comparison: Separate endpoint and interior ranks, bag shapes, hidden requests, and cycled requests.
+#   limit: Interior order statistics are evaluated separately so endpoint performance cannot conceal their failures.
+#   labels:
+#     test: Rank request visible
+#     cycle_rank(test): Requested rank changed
+# evidence-cost:
+#   baseline: 128
+#   candidate: 126
 # ---
 #
 # The list is deliberately unsorted, and a visible rank request tells the model which value to
@@ -51,10 +85,7 @@
 # These are actual observed values. With nine items, this experiment does not need a convention for
 # interpolating between neighboring values.
 #
-# ```{typst}
-# //| label: fig-evidence-requested-rank-values
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with request, rank, items, value, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("request", kind: "root", width: 120pt, children: (
 #   node("rank", type: "Category"),
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
@@ -77,25 +108,15 @@
 #
 # ## Result
 #
-# {{< evidence P012 status >}}
-#
 # The model learns all five tested requests. These lists have an odd length; other lengths and rules
 # for interpolating between values need separate tests.
-#
 #
 # Error is compared with a training-mean guess for the requested rank, so simply learning that
 # maxima tend to be larger than minima is not enough. Separate checks cover interior ranks,
 # endpoints, and different list shapes, including duplicates. The result is limited to these five
 # familiar requests and nine-item lists; it is not evidence of a general sorting algorithm.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P012 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P012 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -121,8 +142,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -398,6 +417,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

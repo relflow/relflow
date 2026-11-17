@@ -5,11 +5,6 @@
 # - Associative recall
 # description: Mix source values and questions in different positions. Use unfamiliar IDs to connect each question
 #   to its source, and judge the result over a panel of three seeds.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Matching IDs, median of three seeds
 #   metric:
@@ -27,6 +22,58 @@
 #   - intact_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. Source values are visible; query values are hidden.
+#   alt: Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values.
+#     Source values are visible; query values are hidden.
+# evidence-review:
+#   question: Can relflow look up a value using a new ID?
+#   modeling: Put IDs and values in a source list, and ask for those values in an independently shuffled query list.
+#     Use unfamiliar IDs at evaluation so position and memorized names cannot supply the answer. Compare matching
+#     IDs with rotated query IDs, retaining the original targets.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Normalized RMSE
+#     conditions:
+#     - label: Changed IDs, median of three seeds
+#       path:
+#       - median
+#       - broken_nrmse
+#       format: number
+#     - label: Matching IDs, median of three seeds
+#       path:
+#       - median
+#       - intact_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The chart shows median errors across the three recorded seeds. Every seed and the worst-seed result remain
+#     available below.
+# evidence-plot:
+#   target: memory/value
+#   focus: Does keyed recall survive independent source and query ordering?
+#   comparison: Keep all three declared seeds visible and pair each intact result with its broken-key control.
+#   limit: A median must not hide a failing seed or a weak corruption gap.
+#   renderer: plot
+# evidence-highlight:
+#   order: 2
+#   title: Recall a value by an unfamiliar ID
+#   result:
+#     metric:
+#     - median
+#     - intact_nrmse
+#     text: '**{value:.3f} normalized RMSE**, median of three seeds'
+#     minimum: 0
+#   control:
+#     metric:
+#     - median
+#     - broken_nrmse
+#     text: '{value:.3f} after corrupting the lookup IDs'
+#     minimum: 0
+# evidence-cost:
+#   baseline: 315
+#   candidate: 315
 # ---
 #
 # Each record supplies two temporary ID-to-value associations and two questions about them. The
@@ -51,10 +98,7 @@
 # names. Actual train, validation, and test namespaces differ, so test associations must be read
 # from the current record rather than recalled from a training vocabulary.
 #
-# ```{typst}
-# //| label: fig-evidence-hash-recall
-# //| fig-cap: "Selector notes identify hidden values. Source values are visible; query values are hidden."
-# //| fig-alt: "Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values. Source values are visible; query values are hidden."
+# ```typst
 # #tree(node("association", kind: "root", width: 120pt, children: (
 #   node("memory", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("entity_id", type: "Hash"),
@@ -77,12 +121,9 @@
 #
 # ## Result
 #
-# {{< evidence P025 status >}}
-#
 # Three paired seeds train and score the same task. Median gates summarize their performance, while
 # separate checks require every seed to beat the constant baseline and respond to changed IDs.
 # Missing IDs and larger memories need separate checks.
-#
 #
 # Error is measured relative to always predicting zero at query positions. Low intact error plus a
 # large corruption gap supports using the temporary associations, while the aligned-position control
@@ -90,14 +131,7 @@
 # present, and the protocol does not define missing keys, duplicate keys, exact lookup, or larger
 # memory capacity.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P025 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P025 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -124,13 +158,11 @@
 # memories, absent or duplicate keys, padding, and Hash collisions. Use an
 # explicit application lookup when the mapping must be exact.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -292,8 +324,35 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots
+
+    trials = bundle.record["metrics"]["trials"]
+    fig, axes = axes_pair()
+    for index, trial in enumerate(trials):
+        values = [trial["intact_nrmse"], trial["broken_nrmse"]]
+        axes[0].plot([0, 1], values, marker=MARKERS[index], color=COLORS[index], lw=1.8, label=f"Seed {trial['seed']}")
+    axes[0].axhline(1, color="gray", ls=":")
+    axes[0].set(
+        xticks=[0, 1],
+        xticklabels=["Intact keys", "Broken keys"],
+        ylabel="Normalized RMSE",
+        title="Every declared seed stays visible",
+    )
+    axes[0].legend(fontsize=8)
+    dots(
+        axes[1],
+        [f"Seed {trial['seed']}" for trial in trials],
+        {"Broken minus intact": [trial["corruption_gap"] for trial in trials]},
+        xlabel="Increase in normalized RMSE when keys break",
+    )
+    return (
+        fig,
+        "Lines join the two measured conditions for one seed. These are three paired trials, not confidence intervals or points along a training trajectory.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

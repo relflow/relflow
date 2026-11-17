@@ -6,7 +6,7 @@ import shutil
 import pytest
 from evidence_ci import ROOT, plan, task_key, write_json
 from experiments.source import fingerprint, frontmatter, registry
-from record import readme, select, validate
+from record import readme, readme_content, select, validate
 
 
 @pytest.fixture
@@ -202,6 +202,12 @@ def readme_target(tmp_path):
         b"<!-- evidence-results:start -->\n\nOld table\n\n<!-- evidence-results:end -->\r\n\r\nKeep the footer.\r\n"
     )
     return target
+
+
+def test_removing_the_last_highlight_does_not_require_another_catalog_edit(readme_target):
+    result = readme_content({}, readme_target.read_text())
+    assert "No publication highlights are declared" in result
+    assert "Keep the footer." in result
 
 
 def test_selection_refreshes_readme_from_candidate_metrics_with_exact_boundaries(reports, publication, readme_target):

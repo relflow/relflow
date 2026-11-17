@@ -4,11 +4,6 @@
 # categories:
 # - Cardinality generalization
 # description: Every item has the same amount. Give the model the item count as an extra input and ask for the total.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Total prediction
 #   metric:
@@ -16,6 +11,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can a visible count help recover a total?
+#   modeling: Repeat one randomly chosen amount between one and six times. Give the model both the repeated items
+#     and their count, and hide the total. A Mean branch supplies the item representation; the visible count supplies
+#     the multiplier. Compare held-out total error with a constant predictor.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: This is a supplied-count control. It does not show that the model inferred the count without an explicit
+#     input.
+# evidence-plot:
+#   mode: regression
+#   target: total
+#   focus: Can an explicit count support a learned total?
+#   comparison: Compare predictions with the actual sums, including fixed-value count probes.
+#   limit: The count is supplied as an input in this proof.
+# evidence-cost:
+#   baseline: 30
+#   candidate: 30
 # ---
 #
 # Every item in a record repeats one randomly chosen amount. The model must combine that amount with
@@ -42,10 +73,7 @@
 # total is 6 × 0.7 = 4.2. One copy of the same amount would total 0.7. Looking only at the average
 # amount would not distinguish those answers.
 #
-# ```{typst}
-# //| label: fig-evidence-visible-count-sum
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("item_count", type: "Number"),
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
@@ -67,25 +95,15 @@
 #
 # ## Result
 #
-# {{< evidence P004 status >}}
-#
 # The configured model meets the held-out and matched-count checks. This test supplies an explicit
 # count and uses repeated equal amounts, rather than arbitrary mixed lists.
-#
 #
 # The error percentage compares held-out totals with a constant training-mean prediction. The probe
 # checks additionally require predictions near 0.7 and 4.2, with a substantial gap between them. A
 # successful result shows that this configured model can use the available information on
 # equal-valued bags; it does not establish mixed-value summation or unseen-count generalization.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P004 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P004 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -109,8 +127,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -271,6 +287,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

@@ -4,11 +4,6 @@
 # categories:
 # - Sibling entity transfer
 # description: Transfer values between separately ordered lists using IDs that were absent from training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Items retained
 #   metric:
@@ -23,6 +18,41 @@
 #   - preserved_broken_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with association, source, entity_id, value, target, entity_id, value. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can new IDs connect two lists?
+#   modeling: Give source IDs and values, and a separately shuffled list of queries. Use Hash IDs absent from training
+#     and hide each requested value. Compare correct IDs with rotated query IDs while retaining the same source records
+#     and expected answers.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Query IDs changed
+#       path:
+#       - preserved_broken_nrmse
+#       format: number
+#     - label: Matching unseen Hash IDs
+#       path:
+#       - preserved_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The primary comparison retains source items. The additional compression comparison measures what information
+#     is lost when those items are summarized.
+# evidence-plot:
+#   mode: regression
+#   target: target/value
+#   focus: Does preserving Hash tokens help fresh-key retrieval?
+#   comparison: Compare compressed and preserved routes on intact and broken identity links.
+#   limit: Fresh keys prevent memorizing a persistent identity-to-value mapping.
+# evidence-cost:
+#   baseline: 97
+#   candidate: 97
 # ---
 #
 # ## Example
@@ -43,10 +73,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-hash-identity
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with association, source, entity_id, value, target, entity_id, value. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("association", kind: "root", width: 120pt, children: (
 #   node("source", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("entity_id", type: "Hash"),
@@ -77,18 +104,9 @@
 # configuration. It provides evidence about learned lookup under those conditions; it does not define
 # missing-match behavior or guarantee exact equality resolution at arbitrary scale.
 #
-# {{< evidence P037 status >}}
-#
 # Keeping items works better here, and changed IDs break the lookup. This small learned example does not guarantee an exact join or define missing and duplicate-ID behavior.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P037 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P037 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -105,8 +123,6 @@
 # keys, padding, and Hash collisions. The [Category control](category-identity.html)
 # uses recurring identities and succeeds under the tested compression. Exact
 # production retrieval can use a preprocessing join.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -242,6 +258,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

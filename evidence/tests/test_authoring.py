@@ -85,31 +85,6 @@ def test_empty_catalog_starts_at_one_and_accepts_optional_python_suffix(root):
     assert metadata(path.read_text())["evidence-group"] == "New Family"
 
 
-def test_research_scaffolding_allocates_globally_and_requires_opt_in(root):
-    existing(root, "family/core.py", "P009")
-    first = authoring.create(root, "family/optional", lane="research")
-    assert declaration(first.read_text()) == Experiment("P010", 0)
-    assert first.parent.parent == root / "research"
-    assert metadata(first.read_text())["evidence-requires"]
-    assert "P010" not in registry(root, measurements=False)
-    assert "P010" in registry(root, measurements=False, lane="research")
-    second = authoring.create(root, "family/next")
-    assert declaration(second.read_text()) == Experiment("P011", 0)
-
-
-def test_research_execution_is_selected_explicitly(root, monkeypatch, capsys):
-    existing(root, "family/core.py", "P001")
-    path = authoring.create(root, "family/optional", lane="research")
-    monkeypatch.setattr(authoring, "ROOT", root)
-    monkeypatch.setattr(sys, "argv", ["run.py", "--lane", "research", "--list"])
-    authoring.main()
-    assert capsys.readouterr().out.strip() == f"P002  {path.relative_to(root)}"
-    monkeypatch.setattr(sys, "argv", ["run.py", "P002", "--list"])
-    with pytest.raises(SystemExit) as error:
-        authoring.main()
-    assert error.value.code == 2
-
-
 def test_next_identifier_uses_numeric_order(root):
     existing(root, "family/nine.py", "P9")
     existing(root, "family/ten.py", "P010")
@@ -313,9 +288,8 @@ def test_dependency_free_historical_scripts_remain_listable_but_cannot_run_witho
     assert error.value.code == 2
 
 
-@pytest.mark.parametrize("lane", ["core", "research"])
 @pytest.mark.parametrize("supplied", [False, True])
-def test_uv_executes_in_isolation_from_an_unrelated_directory(root, monkeypatch, tmp_path, lane, supplied):
+def test_uv_executes_in_isolation_from_an_unrelated_directory(root, monkeypatch, tmp_path, supplied):
     if shutil.which("uv") is None:
         pytest.skip("uv is required to exercise isolated script execution")
     wheel = tmp_path / "relflow-0.5.0-py3-none-any.whl"
@@ -330,14 +304,16 @@ def test_uv_executes_in_isolation_from_an_unrelated_directory(root, monkeypatch,
             "Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
         )
         archive.writestr("relflow-0.5.0.dist-info/RECORD", "")
-    script = authoring.create(root, "family/probe", lane=lane)
+    script = authoring.create(root, "family/probe")
     # This probe has no model dependency: exercise the same uv launch with a tiny
     # wheel and a sibling import, without training or reaching a package index.
     source = script.read_text()
     header = source.split("# %%\n")[0]
     script.write_text(
         header + '# %%\n# /// script\n# requires-python = ">=3.12"\n'
-        '# dependencies = ["relflow[torchjd]"]\n# ///\n'
+        '# dependencies = ["relflow[torchjd]"]\n'
+        '# [tool.relflow.evidence]\n# capability = "representation"\n# types = []\n'
+        '# conditions = ["noise"]\n# ///\n'
         "import json, os, sys\nfrom pathlib import Path\n"
         'sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))\n'
         "import relflow, shared_fixture\n"
@@ -362,7 +338,7 @@ def test_uv_executes_in_isolation_from_an_unrelated_directory(root, monkeypatch,
         monkeypatch.setenv("UV_FIND_LINKS", str(tmp_path))
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(authoring, "ROOT", root)
-    arguments = ["run.py", "--lane", lane, "P001", "--steps", "1"]
+    arguments = ["run.py", "P001", "--steps", "1"]
     if supplied:
         arguments.extend(["--wheel", str(wheel)])
     monkeypatch.setattr(sys, "argv", arguments)

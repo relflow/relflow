@@ -5,11 +5,6 @@
 # - Sibling entity transfer
 # description: Retrieve a source value by ID with increasing numbers of distractors, then add an intermediate ID link
 #   for a two-step lookup.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Direct lookup, four sources
 #   metric:
@@ -28,6 +23,49 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. The links collection is used only for the two-step lookup.
+#   alt: Model tree with lookup, source, entity_id, value, links, entity_id, source_id, target, entity_id, value.
+#     Amber cards are hidden prediction targets. The links collection is used only for the two-step lookup.
+# evidence-review:
+#   question: Can relflow follow IDs through larger lists and a second lookup?
+#   modeling: Create an ID-keyed source list and ask for a payload through either a direct match or an intermediate
+#     link list. IDs and list orders are fresh and independent. In the primary two-hop, four-source test, rotate link
+#     IDs while keeping original answers and compare RMSE.
+#   comparison:
+#     metric: RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Two-hop lookup · links changed
+#       path:
+#       - hops_2
+#       - ladder
+#       - '4'
+#       - broken
+#       - rmse
+#       format: number
+#     - label: Two-hop lookup · correct links
+#       path:
+#       - hops_2
+#       - ladder
+#       - '4'
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: This is one slice of the lookup-size ladder. Every recorded size, direct lookup, and reordering condition
+#     has its own gates; the primary slice cannot establish them all.
+# evidence-plot:
+#   target: target/value
+#   focus: Where do distractor count and an extra relation break retrieval?
+#   comparison: Separate one-hop and two-hop conditions, capacities, intact links, broken links, and record permutations.
+#   limit: Capacity failures and seed failures remain separate; a successful small condition cannot stand in for the
+#     grid.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 168
+#   candidate: 169
 # ---
 #
 # Each observation supplies a small lookup table of fresh identities and numeric payloads, then
@@ -51,10 +89,7 @@
 # Target values are hidden. This example shows a direct lookup; the two-step arm adds a separate links
 # collection.
 #
-# ```{typst}
-# //| label: fig-evidence-retrieval-capacity
-# //| fig-cap: "Amber cards are hidden prediction targets. The links collection is used only for the two-step lookup."
-# //| fig-alt: "Model tree with lookup, source, entity_id, value, links, entity_id, source_id, target, entity_id, value. Amber cards are hidden prediction targets. The links collection is used only for the two-step lookup."
+# ```typst
 # #tree(node("lookup", kind: "root", children: (
 #   node("source", kind: "branch", repeated: true, children: (
 #     node("entity_id", type: "Hash"),
@@ -89,8 +124,6 @@
 #
 # ## Result
 #
-# {{< evidence P075 status >}}
-#
 # The selected run misses the declared intact-retrieval gates for both direct and two-step requests.
 # Capability failures remain reported, rather than being redefined as successful evidence of an
 # expected limitation.
@@ -100,14 +133,7 @@
 # during fitting, so the ladder tests learned capacity rather than extrapolation to longer lists. Even
 # a successful condition would not establish an exact join or behavior for missing and duplicate keys.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P075 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P075 script >}}
+# ## Method
 #
 # ### Process and split unit
 #
@@ -153,13 +179,11 @@
 # lengths, missing-key behavior, duplicate aggregation, or collision immunity.
 # Source-unit errors and every condition failure remain in the evidence.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -359,8 +383,54 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.6)
+    for ax, hops in zip(axes, [1, 2], strict=True):
+        values = m[f"hops_{hops}"]["ladder"]
+        capacities = sorted((int(key) for key in values))
+        for index, (condition, label) in enumerate(
+            [("intact", "Intact keys"), ("broken", "Broken keys"), ("permuted", "Complete records reordered")]
+        ):
+            y = []
+            for capacity in capacities:
+                item = values[str(capacity)]
+                measured = item.get(condition, item.get("reordered") if condition == "permuted" else None)
+                y.append(None if measured is None else measured["normalized_rmse"])
+            present = [i for i, value in enumerate(y) if value is not None]
+            if present:
+                ax.plot(
+                    [capacities[i] for i in present],
+                    [y[i] for i in present],
+                    marker=MARKERS[index],
+                    color=COLORS[index],
+                    lw=1.8,
+                    label=label,
+                )
+        source = [
+            values[str(c)]["intact"]["source_mean_rmse"] / values[str(c)]["intact"]["baseline_rmse"] for c in capacities
+        ]
+        ax.plot(capacities, source, ls=":", color="gray", label="Source-mean shortcut")
+        ax.axhline(0.5, ls="--", color=COLORS[3], label="Intact learning gate")
+        ax.set(
+            xlabel="Source collection capacity",
+            ylabel="Test RMSE / baseline RMSE",
+            title=f"{hops}-hop retrieval",
+            xscale="log",
+        )
+        ax.set_xticks(capacities, labels=capacities)
+        ax.minorticks_off()
+        ax.grid(alpha=0.18)
+        ax.legend(fontsize=8)
+    return (
+        fig,
+        "Every capacity is an evaluated condition. One-hop and two-hop models have separate panels. A broken-key gap and the learning gate are both required; the source-mean shortcut is an explicit baseline, not the correct retrieval answer.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

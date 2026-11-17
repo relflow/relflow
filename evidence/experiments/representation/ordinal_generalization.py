@@ -1,26 +1,88 @@
 # %% [markdown]
 # ---
-# title: "Can ordered outputs fill ranks never shown during training?"
-# categories: ["Representation"]
-# description: "Compare Ordinal, rounded Number, and Category targets when integer ranks or declared intermediate labels are withheld from training."
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# title: Can ordered outputs fill ranks never shown during training?
+# categories:
+# - Representation
+# description: Compare Ordinal, rounded Number, and Category targets when integer ranks or declared intermediate labels
+#   are withheld from training.
 # evidence-readout:
-# - label: "Unseen integer accuracy"
-#   metric: ["domains", "integer", "ordinal", "unseen", "exact_accuracy"]
+# - label: Unseen integer accuracy
+#   metric:
+#   - domains
+#   - integer
+#   - ordinal
+#   - unseen
+#   - exact_accuracy
 #   format: percent
-# - label: "Unseen ordered-label accuracy"
-#   metric: ["domains", "labels", "ordinal", "unseen", "exact_accuracy"]
+# - label: Unseen ordered-label accuracy
+#   metric:
+#   - domains
+#   - labels
+#   - ordinal
+#   - unseen
+#   - exact_accuracy
 #   format: percent
-# - label: "Number integer accuracy"
-#   metric: ["domains", "integer", "number", "unseen", "exact_accuracy"]
+# - label: Number integer accuracy
+#   metric:
+#   - domains
+#   - integer
+#   - number
+#   - unseen
+#   - exact_accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-requires:
-# - "relflow >=0.5.0 wheel"
+# evidence-diagram:
+#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
+#     condition.
+#   alt: Can ordered outputs fill ranks never shown during training? Visible inputs lead to one hidden prediction
+#     target.
+# evidence-review:
+#   question: Can ordered outputs fill ranks never shown during training?
+#   modeling: Give a noisy numeric clue to an ordered answer and withhold intermediate target ranks during training.
+#     Compare Ordinal, rounded Number, and Category on the same unseen integer ranks. All test ranks lie within the
+#     observed numeric range.
+#   comparison:
+#     metric: Accuracy
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Category · unseen integer ranks
+#       path:
+#       - domains
+#       - integer
+#       - category
+#       - unseen
+#       - exact_accuracy
+#       format: percent
+#     - label: Rounded Number · unseen integer ranks
+#       path:
+#       - domains
+#       - integer
+#       - number
+#       - unseen
+#       - exact_accuracy
+#       format: percent
+#     - label: Ordinal · unseen integer ranks
+#       path:
+#       - domains
+#       - integer
+#       - ordinal
+#       - unseen
+#       - exact_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: This is interpolation. Declared ordered labels are a separate condition, and Category cannot emit labels
+#     absent from its learned output vocabulary.
+# evidence-plot:
+#   target: rank
+#   focus: Can an ordered decoder fill ranks absent from training?
+#   comparison: Separate familiar and withheld ranks for Ordinal, rounded Number, and Category outputs.
+#   limit: Withheld ranks lie inside the observed range. One seed does not establish arbitrary extrapolation; Category
+#     has no output classes for the withheld answers.
+#   renderer: plot
 # ---
 #
 # Compare Ordinal, rounded Number, and Category targets when integer ranks or declared intermediate
@@ -37,14 +99,10 @@
 # permit the even rank 2. It is not an unknown vocabulary label for an implicit Ordinal.
 #
 # The second task declares five ordered labels but trains only on positions zero, two, and four.
-# Positions one and three are held out. This study remains in research pending full paired validation
-# under the 0.5 protocol. Merely declaring an order does not guarantee
+# Positions one and three are held out. Merely declaring an order does not guarantee
 # the model will learn to interpolate it.
 #
-# ```{typst}
-# //| label: fig-evidence-p100
-# //| fig-cap: "The target is hidden. The diagram shows the informative representation; controls change only the declared condition."
-# //| fig-alt: "Can ordered outputs fill ranks never shown during training? Visible inputs lead to one hidden prediction target."
+# ```typst
 # #tree(node("record", kind: "root", children: (node("signal", type: "Number"), node("rank", kind: "target", type: "Ordinal"),)))
 # ```
 #
@@ -56,19 +114,10 @@
 #
 # ## Result
 #
-# {{< evidence P100 status >}}
-#
 # The numerical checks below are provisional, predeclared hypotheses, not measured successes. No full
 # learning result is claimed until a matching run is recorded. Smoke runs establish execution only.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P100 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P100 script >}}
+# ## Method
 #
 # ### Population, controls, and scoring
 #
@@ -80,12 +129,11 @@
 # accuracy and rank error. These gates are provisional and do not establish that order is appropriate
 # for every categorical domain.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "pyarrow",
@@ -255,8 +303,91 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import dots
+
+    "Show familiar and withheld rank accuracy without averaging away individual gaps."
+    measured = bundle.record["metrics"]["domains"]
+    arms = ("ordinal", "number", "category")
+    labels = ("Ordinal", "Rounded Number", "Category")
+    fig, axes = plt.subplots(2, 2, figsize=(11, 7.5), layout="constrained", width_ratios=(1, 1.5))
+    for row, domain in enumerate(("integer", "labels")):
+        scores = measured[domain]
+        dots(
+            axes[row, 0],
+            ("Familiar ranks", "Withheld ranks"),
+            {
+                label: [scores[arm][condition]["exact_accuracy"] for condition in ("seen", "unseen")]
+                for arm, label in zip(arms, labels, strict=True)
+            },
+            xlabel="Exact rank accuracy",
+            percent=True,
+        )
+        axes[row, 0].set(
+            title="Integer ranks" if domain == "integer" else "Declared ordered labels", xlim=(-0.03, 1.03)
+        )
+        ranks = sorted(
+            {int(rank) for condition in ("seen", "unseen") for rank in scores["ordinal"][condition]["ranks"]}
+        )
+        withheld = {int(rank) for rank in scores["ordinal"]["unseen"]["ranks"]}
+        matrix = np.array(
+            [
+                [
+                    scores[arm]["unseen" if rank in withheld else "seen"]["ranks"][str(rank)]["exact_accuracy"]
+                    for rank in ranks
+                ]
+                for arm in arms
+            ]
+        )
+        image = axes[row, 1].imshow(matrix, vmin=0, vmax=1, cmap="viridis", aspect="auto")
+        axes[row, 1].set(
+            yticks=range(3),
+            yticklabels=labels,
+            xticks=range(len(ranks)),
+            xticklabels=[str(rank) + ("*" if rank in withheld else "") for rank in ranks],
+            xlabel="Actual rank (* withheld from training)",
+            title="Where does interpolation succeed?",
+        )
+        axes[row, 1].tick_params(axis="x", labelsize=8)
+        fig.colorbar(
+            image, ax=axes[row, 1], fraction=0.035, format=PercentFormatter(1), label="Exact accuracy within rank"
+        )
+    examples = []
+    for frame in bundle.frames:
+        if frame["function"] != "evaluate":
+            continue
+        context = {
+            **bundle.context(frame),
+            **{key: bundle.value(frame["values"].get(key)) for key in ("domain", "arm")},
+        }
+        predicted, expected, rows = bundle.values(frame, "predicted", "expected", "rows")
+        if predicted is None or expected is None or rows is None:
+            raise ValueError(
+                f"{bundle.manifest['id']}: evaluated ranks must retain predictions, expected ranks and source rows"
+            )
+        examples.append(
+            {
+                "label": f"{human(context['domain'])} · {human(context['arm'])} · {human(context['condition'])}",
+                "field": "rank",
+                "population": "test",
+                "n": len(expected),
+                "records": [
+                    {"coordinate": [i], "input": rows[i], "actual": int(expected[i]), "predicted": int(predicted[i])}
+                    for i in range(min(16, len(expected)))
+                ],
+            }
+        )
+    if len(examples) != 12:
+        raise ValueError(f"{bundle.manifest['id']}: expected all twelve held-out rank populations, got {len(examples)}")
+    note = "Each decoder receives the same signal and 400 updates. Each familiar/withheld test population has 2,048 rows; heatmap cells score every row at that rank. Asterisks mark answers excluded from training. Category cannot emit those absent target classes. Rank positions 0–4 map to the five declared labels. This tests interpolation within the training range, with one seed and no uncertainty interval."
+    return (fig, note, {"kind": "numeric", "conditions": examples})
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

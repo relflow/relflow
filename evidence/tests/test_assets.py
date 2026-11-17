@@ -236,7 +236,7 @@ def test_released_plots_bind_to_frozen_source_instead_of_newer_checkout(tmp_path
     record = {"provenance": {"script_sha256": hashlib.sha256(source.encode()).hexdigest()}, "metrics": {"score": 0.8}}
     (directory / "P001-proof.py").write_text(source if not corrupt else source + "value = 2\n")
     (directory / "P001.json").write_text(json.dumps({"record": record}))
-    (directory / "P091.json").write_text(json.dumps({"record": None}))
+    (directory / "P999.json").write_text(json.dumps({"record": None}))
     review = {
         "ci": {"run_id": "gh-123-1"},
         "entries": {
@@ -245,7 +245,7 @@ def test_released_plots_bind_to_frozen_source_instead_of_newer_checkout(tmp_path
                 "assets": {"P001-proof.py": record["provenance"]["script_sha256"]},
                 "code_sha256": fingerprint(source),
             },
-            "P091": {"data": "P091.json", "assets": {}, "code_sha256": "unmeasured illustration"},
+            "P999": {"data": "P999.json", "assets": {}, "code_sha256": "unmeasured illustration"},
         },
     }
     name = filenames("0.5.0")["plots"]
@@ -311,6 +311,33 @@ def test_report_sources_reject_unbound_changed_and_unsafe_material(released, fau
         assets.sources(selected, release, destination)
     assert not (destination / "source").exists()
     assert not (destination / "outside.py").exists()
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_frozen_sources_keep_historical_paths_and_reject_duplicate_ids(released, duplicate):
+    root, responses, selected, release, _, _ = released
+    source = (root / "evidence/experiments/example/signal.py").read_bytes()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for collection in ["research", "experiments"] if duplicate else ["research"]:
+            member = tarfile.TarInfo(f"source/{collection}/example/signal.py")
+            member.size = len(source)
+            archive.addfile(member, io.BytesIO(source))
+    content = buffer.getvalue()
+    asset = release["assets"][1]
+    responses[asset["browser_download_url"]] = content
+    digest = hashlib.sha256(content).hexdigest()
+    asset.update(digest="sha256:" + digest, size=len(content))
+    selected["report"]["reports_sha256"] = digest
+    destination = root / "cache"
+    destination.mkdir()
+    if duplicate:
+        with pytest.raises(ValueError, match="Duplicate publication source identifier"):
+            assets.sources(selected, release, destination)
+        assert not (destination / "source").exists()
+    else:
+        assets.sources(selected, release, destination)
+        assert (destination / "source/research/example/signal.py").read_bytes() == source
 
 
 def test_cached_source_tampering_is_repaired_from_the_verified_ci_report(released):

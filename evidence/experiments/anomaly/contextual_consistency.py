@@ -5,11 +5,6 @@
 # - Anomaly detection
 # description: Learn to reconstruct a numeric answer from its context. Use a large reconstruction error as a warning
 #   that the value does not fit.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Learned context
 #   metric:
@@ -27,6 +22,50 @@
 #   - normal_false_positive_rate
 #   format: percent
 # evidence-group: Anomaly
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, group, x, y. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: Can relflow spot an ordinary value in the wrong context?
+#   modeling: Generate ordinary numeric answers from a visible group and x, then train the model to reconstruct those
+#     answers. Anomalies swap answers between test records, preserving the overall value distribution but breaking
+#     context. Compare anomaly AUC with a model trained on shuffled answers.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: AUC
+#     conditions:
+#     - label: Shuffled training
+#       path:
+#       - shuffled_training
+#       - anomaly_auc
+#       format: auc
+#     - label: Learned context
+#       path:
+#       - informative
+#       - anomaly_auc
+#       format: auc
+#     definition: 'Ranking score: 0.5 is chance and 1 is perfect separation. This is not the percentage of correct
+#       predictions.'
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Anomaly scores are reconstruction errors. Detection thresholds come from clean validation data; normal and
+#     valid-tail false alarms remain separate checks.
+# evidence-plot:
+#   target: y
+#   focus: Can the score identify an ordinary value in the wrong context?
+#   comparison: Compare normal, shuffled-answer, and rare-valid residuals, actual ROC curves, and the validation-selected
+#     threshold.
+#   limit: Exploring a threshold on this test set does not change the proof's preselected operating point.
+#   supplements:
+#     context:
+#       renderer: plot_context
+#   renderer: plot
+# evidence-cost:
+#   baseline: 32
+#   candidate: 32
 # ---
 #
 # A value can be common overall but inconsistent with the rest of its record. It scores disagreement
@@ -43,10 +82,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-contextual-consistency
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, group, x, y. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("group", type: "Enum", detail: "Selects a relationship"),
 #   node("x", type: "Number", detail: "Visible measurement"),
@@ -71,8 +107,6 @@
 #
 # ## Result
 #
-# {{< evidence P076 status >}}
-#
 # The selected run meets the declared checks for this constructed inconsistency. Its warning score is
 # not a calibrated anomaly probability, and rare valid values need their own false-alarm check.
 #
@@ -81,14 +115,7 @@
 # clean validation residuals. The selected checks concern this constructed inconsistency and noise
 # model, rather than every possible anomaly or a calibrated deployment threshold.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P076 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P076 script >}}
+# ## Method
 #
 # ### Process, examples, and observability
 #
@@ -114,13 +141,11 @@
 # training must leave AUROC at most 0.65. A univariate y-deviation baseline
 # scores exactly 0.5 AUROC because its two score distributions are identical.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -282,8 +307,158 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import Bundle, human
+    from evidence.diagnostics.plots import COLORS, axes_pair, finite, roc
+
+    def anomaly_data(bundle: Bundle) -> dict:
+        frames = [frame for frame in bundle.frames if frame["function"] == "predict"]
+        if len(frames) != 6:
+            raise ValueError(
+                f"{bundle.manifest['id']} requires validation, test, and rare-valid predictions for both arms"
+            )
+        run = next((frame for frame in reversed(bundle.frames) if frame["function"] == "run"))
+        broken = finite(bundle.value(run["values"]["broken"]))
+        result = {}
+        for index, frame in enumerate(frames):
+            arm = "informative" if index < 3 else "shuffled_training"
+            split = ["validation", "test", "tail"][index % 3]
+            rows = bundle.value(frame["values"]["rows"])
+            prediction = finite(bundle.value(frame["result"]))
+            target = finite([row["y"] for row in rows])
+            d = {"rows": rows, "prediction": prediction, "target": target, "score": np.abs(prediction - target)}
+            if split == "test":
+                d.update(anomalous_target=broken, anomalous_score=np.abs(prediction - broken))
+            result.setdefault(arm, {})[split] = d
+        for arm, d in result.items():
+            m = bundle.record["metrics"][arm]
+            threshold = np.quantile(d["validation"]["score"], 0.95)
+            np.testing.assert_allclose(threshold, m["validation_threshold"], rtol=1e-12)
+            for key, score in [
+                ("normal_false_positive_rate", d["test"]["score"]),
+                ("detection_recall", d["test"]["anomalous_score"]),
+                ("tail_false_positive_rate", d["tail"]["score"]),
+            ]:
+                np.testing.assert_allclose(np.mean(score > threshold), m[key], rtol=1e-12)
+        return result
+
+    data = anomaly_data(bundle)
+    fig, axes = axes_pair(width=10, height=4.8)
+    d = data["informative"]
+    threshold = bundle.record["metrics"]["informative"]["validation_threshold"]
+    scores = {"normal": d["test"]["score"], "anomalous": d["test"]["anomalous_score"], "tail": d["tail"]["score"]}
+    bins = np.linspace(0, max(np.quantile(scores["anomalous"], 0.995), 1), 65)
+    for index, (key, label) in enumerate(
+        [("normal", "Normal test"), ("anomalous", "Shuffled-answer test"), ("tail", "Rare but valid test")]
+    ):
+        axes[0].hist(scores[key], bins=bins, density=True, histtype="step", lw=1.7, color=COLORS[index], label=label)
+    axes[0].axvline(threshold, color=COLORS[3], ls="--", label="Validation 95th percentile")
+    axes[0].set(
+        title="Inconsistency and rarity have different scores",
+        xlabel="Absolute reconstruction residual",
+        ylabel="Density",
+        yscale="symlog",
+        xlim=(0, bins[-1]),
+    )
+    axes[0].legend(fontsize=8)
+    for index, (arm, values) in enumerate(data.items()):
+        fpr, tpr = roc(values["test"]["score"], values["test"]["anomalous_score"])
+        measured = bundle.record["metrics"][arm]["anomaly_auc"]
+        np.testing.assert_allclose(np.trapezoid(tpr, fpr), measured, atol=1e-12)
+        axes[1].plot(fpr, tpr, color=COLORS[index], lw=1.8, label=f"{human(arm)} (AUC {measured:.3f})")
+    m = bundle.record["metrics"]["informative"]
+    axes[1].plot([0, 1], [0, 1], ls=":", color="gray", label="Target-only baseline (AUC 0.500)")
+    axes[1].scatter(
+        m["normal_false_positive_rate"],
+        m["detection_recall"],
+        color=COLORS[3],
+        s=45,
+        zorder=5,
+        label="Validation-selected threshold",
+    )
+    axes[1].set(
+        title="Ranking and the chosen operating point",
+        xlabel="Normal false-alarm rate",
+        ylabel="Anomaly recall",
+        xlim=(0, 1),
+        ylim=(0, 1),
+    )
+    axes[1].xaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].legend(fontsize=8, loc="lower right")
+    return (
+        fig,
+        "Each test population has 2,048 observations. Histogram display ends at the anomaly-score 99.5th percentile and uses a symlog density axis; ROC curves use every score. Threshold rates and ROC areas are independently recomputed from the retained observations.",
+        {"kind": "anomaly", "threshold": threshold, **{key: values.tolist() for key, values in scores.items()}},
+    )
+
+
+def plot_context(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.data import Bundle
+    from evidence.diagnostics.plots import COLORS, axes_pair, finite
+
+    def anomaly_data(bundle: Bundle) -> dict:
+        frames = [frame for frame in bundle.frames if frame["function"] == "predict"]
+        if len(frames) != 6:
+            raise ValueError(
+                f"{bundle.manifest['id']} requires validation, test, and rare-valid predictions for both arms"
+            )
+        run = next((frame for frame in reversed(bundle.frames) if frame["function"] == "run"))
+        broken = finite(bundle.value(run["values"]["broken"]))
+        result = {}
+        for index, frame in enumerate(frames):
+            arm = "informative" if index < 3 else "shuffled_training"
+            split = ["validation", "test", "tail"][index % 3]
+            rows = bundle.value(frame["values"]["rows"])
+            prediction = finite(bundle.value(frame["result"]))
+            target = finite([row["y"] for row in rows])
+            d = {"rows": rows, "prediction": prediction, "target": target, "score": np.abs(prediction - target)}
+            if split == "test":
+                d.update(anomalous_target=broken, anomalous_score=np.abs(prediction - broken))
+            result.setdefault(arm, {})[split] = d
+        for arm, d in result.items():
+            m = bundle.record["metrics"][arm]
+            threshold = np.quantile(d["validation"]["score"], 0.95)
+            np.testing.assert_allclose(threshold, m["validation_threshold"], rtol=1e-12)
+            for key, score in [
+                ("normal_false_positive_rate", d["test"]["score"]),
+                ("detection_recall", d["test"]["anomalous_score"]),
+                ("tail_false_positive_rate", d["tail"]["score"]),
+            ]:
+                np.testing.assert_allclose(np.mean(score > threshold), m[key], rtol=1e-12)
+        return result
+
+    d = anomaly_data(bundle)["informative"]["test"]
+    fig, axes = axes_pair(width=10, height=4.4)
+    indices = [i for i, row in enumerate(d["rows"]) if row["group"] == "amber"][:256]
+    x = finite([d["rows"][i]["x"] for i in indices])
+    order = np.argsort(x)
+    for index, (ax, key, title) in enumerate(
+        zip(
+            axes,
+            ["target", "anomalous_target"],
+            ["Normal records follow context", "Shuffling breaks the relationship"],
+            strict=True,
+        )
+    ):
+        ax.scatter(x, d[key][indices], s=12, alpha=0.45, color=COLORS[index], label="Observed answer")
+        ax.plot(x[order], d["prediction"][indices][order], lw=1.8, color=COLORS[2], label="Actual model predictions")
+        ax.plot([-2, 2], [-1.9, 0.9], ls="--", color="gray", label="Amber generator mean")
+        ax.set(title=title, xlabel="Visible x", ylabel="Observed or predicted y", xlim=(-2.08, 2.08), ylim=(-3.5, 3.5))
+    axes[1].legend(fontsize=8, loc="lower right")
+    return (
+        fig,
+        "Both panels use the first 256 amber examples in their original execution order. Inputs and predictions stay paired; only the observed answer changes. The complete test population's target marginal is exactly preserved by shuffling.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

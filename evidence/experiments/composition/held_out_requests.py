@@ -5,11 +5,6 @@
 # - Compositional generalization
 # description: Train on group and operation requests, deliberately leaving out three combinations, such as coral’s
 #   maximum.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Withheld coral maximum, restricted training
 #   metric:
@@ -26,6 +21,46 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Composition
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with request, selected_group, operation, items, group, value, answer. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can familiar instructions work in new combinations?
+#   modeling: Generate lists containing three groups and ask for a group’s mean, minimum, or maximum. Leave three
+#     group–operation combinations out of training. Compare error on the withheld coral-maximum request with a model
+#     trained on all combinations.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Withheld coral maximum, restricted training
+#       path:
+#       - restricted
+#       - cells
+#       - coral/max
+#       - rmse
+#       format: number
+#     - label: Same request, complete training
+#       path:
+#       - complete
+#       - cells
+#       - coral/max
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Both runs have the same total rows and update budget, but different examples per combination. The chart
+#     highlights one withheld task; every cell is checked separately.
+# evidence-plot:
+#   target: answer
+#   focus: Which withheld group-operation combinations actually transfer?
+#   comparison: Use paired cell heatmaps for complete and restricted training, marking the omitted cells.
+#   limit: Both panels share a numerical scale; an overall average cannot hide a hard withheld cell.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 108
+#   candidate: 108
 # ---
 #
 # The request contains two instructions: which group to inspect and which operation to apply. Every
@@ -50,10 +85,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-held-out-requests
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with request, selected_group, operation, items, group, value, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("request", kind: "root", children: (
 #   node("selected_group", type: "Enum"),
 #   node("operation", type: "Enum"),
@@ -80,8 +112,6 @@
 #
 # ## Result
 #
-# {{< evidence P071 status >}}
-#
 # Read the selected cell scores separately: familiar requests, withheld combinations, and corrupted instructions answer different questions. The criteria above show which requirements this recorded run meets.
 #
 # Each cell has its own error score, so strong familiar-cell performance cannot conceal one failed
@@ -89,14 +119,7 @@
 # exchangeable groups without using withheld answers. Even success on these bounded two-item groups
 # would not establish exact arithmetic, unseen operations, or generalization to larger collections.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P071 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P071 script >}}
+# ## Method
 #
 # ### Synthetic process and split
 #
@@ -130,13 +153,11 @@
 # answers, so these controls measure reliance on the requests, not accuracy on
 # the altered instructions. Report their cell scores as well as aggregate gaps.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -317,8 +338,82 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import caption, metric_leaves
+
+    m = bundle.record["metrics"]
+    identifier = bundle.manifest["id"]
+    cells = []
+    for arm in ["complete", "restricted"]:
+        values = m[arm]
+        for path, value in metric_leaves(values):
+            if path[-1] not in {"normalized_rmse", "nrmse"}:
+                continue
+            tokens = "/".join(path[:-1]).replace("cells/", "").replace("_", "/").split("/")
+            group = next((token for token in tokens if token in {"amber", "blue", "coral"}), None)
+            operation = next((token for token in tokens if token in {"min", "mean", "max"}), None)
+            if group and operation:
+                cells.append(
+                    (
+                        human(arm) + " training",
+                        group,
+                        operation,
+                        value,
+                        (group, operation) in {("amber", "mean"), ("blue", "min"), ("coral", "max")},
+                    )
+                )
+    if not cells:
+        raise ValueError(f"{identifier}: no authored composition cells matched the captured record")
+    panels = list(dict.fromkeys((item[0] for item in cells)))
+    rows = list(dict.fromkeys((item[1] for item in cells)))
+    columns = list(dict.fromkeys((item[2] for item in cells)))
+    fig = plt.figure(figsize=(max(7.8, len(panels) * 4.5), 4.8), layout="constrained")
+    grid = fig.add_gridspec(1, len(panels) + 1, width_ratios=[*[1] * len(panels), 0.045])
+    maximum = max((value for _, _, _, value, _ in cells))
+    cmap = plt.get_cmap("YlOrRd").copy()
+    cmap.set_bad("#8a9691")
+    for index, panel in enumerate(panels):
+        ax = fig.add_subplot(grid[0, index])
+        matrix = np.full((len(rows), len(columns)), np.nan)
+        flags = {}
+        for p, row, column, value, flag in cells:
+            if p == panel:
+                matrix[rows.index(row), columns.index(column)] = value
+                flags[rows.index(row), columns.index(column)] = flag
+        image = ax.imshow(matrix, cmap=cmap, vmin=0, vmax=max(maximum, 0.1), aspect="auto")
+        ax.set(
+            xticks=range(len(columns)),
+            xticklabels=[human(c) for c in columns],
+            yticks=range(len(rows)),
+            yticklabels=[human(r) for r in rows],
+            title=caption(panel),
+        )
+        ax.tick_params(axis="x", labelsize=9, rotation=15)
+        for i, j in np.ndindex(matrix.shape):
+            value = matrix[i, j]
+            text = "unrecorded" if np.isnan(value) else f"{value:.3f}" + (" *" if flags.get((i, j)) else "")
+            ax.text(
+                j, i, text, ha="center", va="center", fontsize=9, color="white" if value > maximum * 0.65 else "#243b35"
+            )
+    fig.colorbar(image, cax=fig.add_subplot(grid[0, -1]), label="Normalized RMSE (lower is better)")
+    note = "All panels share the same error scale. Every displayed cell is a measured condition; gray cells are unrecorded, rather than zero."
+    note += " Asterisks identify combinations omitted from restricted training and included in complete training."
+    return (
+        fig,
+        note,
+        {
+            "metric_cells": [
+                {"panel": p, "row": r, "column": c, "normalized_rmse": value, "withheld": flag}
+                for p, r, c, value, flag in cells
+            ]
+        },
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

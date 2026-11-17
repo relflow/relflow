@@ -4,11 +4,6 @@
 # categories:
 # - Weighted aggregation
 # description: Supply each item’s contribution to a total, instead of its separate value and weight.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Total prediction
 #   metric:
@@ -16,6 +11,41 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, contribution, weighted_sum. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow total contributions already calculated?
+#   modeling: Compute value × weight for each of six items before loading the record. Give only these contributions
+#     to the model and hide their sum. Compare held-out total error with a constant predictor.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: This diagnostic supplies the multiplication step. P014 tests whether the model can learn it from separate
+#     values and weights.
+# evidence-plot:
+#   mode: regression
+#   target: weighted_sum
+#   focus: Can the model sum already prepared weighted contributions?
+#   comparison: Compare held-out weighted sums with the actual prepared-contribution totals.
+#   limit: This control supplies multiplication in the input and isolates the pooling problem.
+# evidence-cost:
+#   baseline: 19
+#   candidate: 19
 # ---
 #
 # Every input number is already an item's contribution to a weighted total. The separate value and
@@ -42,10 +72,7 @@
 # contribution could have come from many different value–weight pairs; those original pairs are not
 # needed once their product is known.
 #
-# ```{typst}
-# //| label: fig-evidence-supplied-contribution-sum
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, contribution, weighted_sum. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("contribution", type: "Number"),
@@ -66,11 +93,8 @@
 #
 # ## Result
 #
-# {{< evidence P015 status >}}
-#
 # The simpler summation task works. Fixed length means averaging and a fixed multiplier could also
 # solve it; varying lengths are not tested.
-#
 #
 # The error percentage compares held-out totals with a constant training-mean prediction. A low
 # score establishes useful fixed-length prediction, not a particular internal algorithm: multiplying
@@ -78,14 +102,7 @@
 # complete-list duplication would be needed to distinguish that shortcut from a rule that scales
 # across counts.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P015 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P015 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -106,8 +123,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -237,6 +252,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

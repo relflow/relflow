@@ -4,11 +4,6 @@
 # categories:
 # - Calendar reasoning
 # description: Learn month boundaries from day-of-year in non-leap years.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Original dates
 #   metric:
@@ -19,6 +14,47 @@
 #   - permuted_accuracy
 #   format: percent
 # evidence-group: Temporal
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can relflow learn the month from the day number?
+#   modeling: Give a date’s day-of-year and hide its month, using non-leap years only. Train on odd-numbered days
+#     and test on even-numbered days in unseen years. Compare the original test dates with timestamps shuffled between
+#     records while their month answers stay fixed.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Accuracy
+#     conditions:
+#     - label: Shuffled dates
+#       path:
+#       - permuted_accuracy
+#       format: percent
+#     - label: Original dates
+#       path:
+#       - periodic_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: This tests interpolation of non-leap month boundaries. Leap-year ambiguity is tested separately in P043.
+# evidence-plot:
+#   mode: temporal
+#   target: target
+#   focus: Does the calendar signal carry information beyond a shuffled date?
+#   comparison: Compare periodic-date accuracy with the matched date-permutation control.
+#   limit: The permutation retains the target labels while breaking their date relationship.
+#   conditions:
+#   - label: Actual periodic dates
+#     metric: periodic_accuracy
+#   - label: Dates permuted between records
+#     metric: permuted_accuracy
+# evidence-cost:
+#   baseline: 26
+#   candidate: 26
 # ---
 #
 # ## Example
@@ -35,10 +71,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-temporal-month-from-day-of-year
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("calendar", kind: "root", children: (
 #   node("observed_at", type: "DateParts", width: 150pt,),
 #   node("target", kind: "target", type: "Category", detail: "month",),
@@ -63,18 +96,9 @@
 # not establish leap-year handling, elapsed-time calculation, or behavior in a different calendar; exact
 # extraction remains an appropriate preprocessing option when that is the goal.
 #
-# {{< evidence P044 status >}}
-#
 # The model learns the restricted calendar relationship. Exact month extraction is simpler in preprocessing, and leap-year ambiguity needs additional information.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P044 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P044 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -93,8 +117,6 @@
 # Extend the family to week and multi-coordinate targets. Characterize timezone,
 # daylight-saving, and leap-day preprocessing policies separately rather than
 # assuming that DateParts adds those semantics.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -241,6 +263,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

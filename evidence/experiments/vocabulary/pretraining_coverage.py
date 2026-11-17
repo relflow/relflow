@@ -5,11 +5,6 @@
 # - Vocabulary
 # description: Hide a categorical answer and reconstruct it from numeric context, while varying how many test answers
 #   belong to the learned vocabulary.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Known-answer accuracy, low coverage
 #   metric:
@@ -27,6 +22,51 @@
 #   - accuracy.all
 #   format: percent
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. hide chooses which code answers are hidden.
+#   alt: Model tree with record, x, code. Selector notes identify hidden values. hide chooses which code answers are
+#     hidden.
+# evidence-review:
+#   question: Does reconstruction accuracy include unfamiliar answers?
+#   modeling: Learn to reconstruct a hidden Category answer from numeric context. At evaluation, replace some expected
+#     target names with unseen labels while keeping the exact same inputs and selected positions. Compare accuracy
+#     among representable answers with accuracy across every selected answer.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Accuracy
+#     conditions:
+#     - label: Known-answer accuracy, low coverage
+#       path:
+#       - known_102
+#       - accuracy.content
+#       format: percent
+#     - label: All-answer accuracy
+#       path:
+#       - known_102
+#       - accuracy.all
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The chart uses the approximately 10%-coverage condition. Known-answer scores exclude unavailable labels;
+#     coverage and all-answer accuracy expose that exclusion.
+#   criteria:
+#     prefixes:
+#       '0': No known targets
+#       '102': 102 known targets
+#       '512': 512 known targets
+#       '1024': 1,024 known targets
+# evidence-plot:
+#   mode: coverage
+#   target: code
+#   focus: Can high conditional accuracy conceal missing target coverage?
+#   comparison: Plot coverage, known-target accuracy, and all-target accuracy together as known targets are removed.
+#   limit: Conditional accuracy is undefined at zero coverage and remains visibly missing.
+# evidence-cost:
+#   baseline: 18
+#   candidate: 18
 # ---
 #
 # Reconstruction quality has two denominators: the answers the model can represent and all answers it
@@ -45,10 +85,7 @@
 # code is hidden wherever hide is true. Unknown code names cannot be emitted by the learned output
 # vocabulary.
 #
-# ```{typst}
-# //| label: fig-evidence-pretraining-coverage
-# //| fig-cap: "Selector notes identify hidden values. hide chooses which code answers are hidden."
-# //| fig-alt: "Model tree with record, x, code. Selector notes identify hidden values. hide chooses which code answers are hidden."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", detail: "Class coordinate"),
 #   node("code", type: "Category", detail: "Reconstruct where hide is true"),
@@ -72,8 +109,6 @@
 #
 # ## Result
 #
-# {{< evidence P062 status >}}
-#
 # Known-only accuracy stays high even as coverage falls. Excluding unfamiliar answers from the content
 # score does not mean they were recovered.
 #
@@ -82,14 +117,7 @@
 # conditional loss and accuracy are undefined and are recorded as missing values. A blank conditional
 # score must not be read as zero error or as successful recovery of unknown names.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P062 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P062 script >}}
+# ## Method
 #
 # ### Training and controls
 #
@@ -102,8 +130,6 @@
 # batches. Count-weighted epoch metrics must agree despite all-OOV batches.
 # Scores with no known targets must be undefined, not zero reconstruction
 # error. Naive accuracy over all selected valued targets counts OOV as wrong.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -254,6 +280,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

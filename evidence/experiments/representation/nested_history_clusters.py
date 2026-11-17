@@ -3,23 +3,91 @@
 # title: Do transaction histories form meaningful customer neighborhoods?
 # categories:
 # - Representation
-# description: Cluster frozen customer embeddings using only unlabeled training histories, then score independent customers with shorter or longer histories.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Cluster frozen customer embeddings using only unlabeled training histories, then score independent
+#   customers with shorter or longer histories.
 # evidence-readout:
 # - label: Eight transactions
-#   metric: [summary, reconstruction, length_8, ari_mean]
+#   metric:
+#   - summary
+#   - reconstruction
+#   - length_8
+#   - ari_mean
 #   format: number
 # - label: Twelve transactions
-#   metric: [summary, reconstruction, length_12, ari_mean]
+#   metric:
+#   - summary
+#   - reconstruction
+#   - length_12
+#   - ari_mean
 #   format: number
 # - label: Untrained encoder
-#   metric: [summary, untrained, length_8, ari_mean]
+#   metric:
+#   - summary
+#   - untrained
+#   - length_8
+#   - ari_mean
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Only visible transaction fields are reconstructed. The root exports one customer embedding.
+#   alt: Customer root exporting one embedding above a mean-reduced transaction branch capped at sixteen, with merchant,
+#     amount, interval days, and an irrelevant terminal.
+# evidence-review:
+#   question: Do transaction histories form meaningful customer neighborhoods?
+#   modeling: Generate independent customer histories whose transactions reflect four hidden styles, without customer
+#     IDs or style labels in training. Pretrain by reconstructing transaction fields, freeze customer embeddings,
+#     and fit four clusters on training histories. Compare held-out group agreement with untrained and mixed-history
+#     controls.
+#   comparison:
+#     metric: Adjusted Rand index
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Untrained encoder · eight transactions
+#       path:
+#       - summary
+#       - untrained
+#       - length_8
+#       - ari_mean
+#       format: number
+#     - label: Mixed-history pretraining · eight transactions
+#       path:
+#       - summary
+#       - mixed_histories
+#       - length_8
+#       - ari_mean
+#       format: number
+#     - label: Reconstruction pretraining · eight transactions
+#       path:
+#       - summary
+#       - reconstruction
+#       - length_8
+#       - ari_mean
+#       format: number
+#     definition: Agreement with the true groups, ignoring group names. One is exact agreement; independent groupings
+#       average around zero and can score below zero.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The primary chart uses eight transactions. Separate checks evaluate four and twelve, including the length
+#     absent from training; four clusters are supplied explicitly.
+# evidence-plot:
+#   target: class
+#   focus: Can nested histories preserve useful behavioral groups?
+#   comparison: Compare learned and control embeddings across the declared history interventions and seeds.
+#   limit: Representation views preserve observation identity and distinguish harmless order changes from information
+#     removal.
+#   trained: reconstruction
+#   geometry:
+#   - reconstruction
+#   - untrained
+#   supplements:
+#     geometry:
+#       mode: representation-geometry
+#   renderer: plot
+# evidence-cost:
+#   baseline: 348
+#   candidate: 339
 # ---
 #
 # One observation here is an entire customer's history, rather than a single
@@ -65,10 +133,7 @@
 # same new customer's first four, eight, or twelve transactions to the frozen
 # model, probing how much evidence it can use without changing the cluster fit.
 #
-# ```{typst}
-# //| label: fig-evidence-nested-history-clusters
-# //| fig-cap: "Only visible transaction fields are reconstructed. The root exports one customer embedding."
-# //| fig-alt: "Customer root exporting one embedding above a mean-reduced transaction branch capped at sixteen, with merchant, amount, interval days, and an irrelevant terminal."
+# ```typst
 # #tree(node("customer", kind: "root", body: [Export frozen embedding], children: (
 #   node("transactions", kind: "branch", detail: "Cap 16; mean reduction; no attention", children: (
 #     node("merchant", type: "Enum", body: [Sampled reconstruction]),
@@ -93,7 +158,6 @@
 # ARI measures agreement with the hidden customer styles, so a visually pleasing
 # cloud of vectors alone cannot establish meaningful neighborhoods.
 #
-#
 # Compare masked reconstruction with the same untrained encoder, reconstruction
 # after mixing transactions across customers, and raw field averages. Fit four
 # clusters on unlabeled training exports once, then reuse them for every test
@@ -101,22 +165,13 @@
 #
 # ## Result
 #
-# {{< evidence P082 status >}}
-#
 # The checks specify grouping quality for eight- and twelve-transaction histories,
 # plus unchanged export state and reversal stability. Gains over raw or untrained
 # features remain separate diagnostics. The test concerns fresh customers drawn
 # from four known synthetic styles, rather than discovery of new financial
 # concepts or a general claim that longer histories always help.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P082 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P082 script >}}
+# ## Method
 #
 # ### Population and controls
 #
@@ -158,13 +213,11 @@
 # mean shuffled-label ARI below 0.05 in absolute value, and reversal drift below
 # 0.00001. Checks may fail and are never lowered after measuring the panel.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -551,8 +604,49 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    trials = m["trials"]
+    trained = spec["trained"]
+    arms = list(trials[0]["arms"])
+    conditions = list(trials[0]["arms"][trained]["conditions"])
+    rows = [(arm, condition) for condition in conditions for arm in arms]
+    fig.set_size_inches(11, max(6, len(rows) * 0.58))
+    dots(
+        axes[0],
+        [human(condition) + "\n" + human(arm) for arm, condition in rows],
+        {
+            f"Seed {trial['seed']}": [trial["arms"][arm]["conditions"][condition]["ari"] for arm, condition in rows]
+            for trial in trials
+        },
+        xlabel="Original-space held-out ARI",
+        reference=(0, "Chance-adjusted zero"),
+    )
+    dots(
+        axes[1],
+        [human(condition) for condition in conditions],
+        {
+            f"Seed {trial['seed']}": [
+                trial["arms"][trained]["conditions"][condition]["ari"]
+                - trial["arms"]["raw"]["conditions"][condition]["ari"]
+                for condition in conditions
+            ]
+            for trial in trials
+        },
+        xlabel="Trained minus prepared-raw ARI",
+        reference=(0, "Equal grouping quality"),
+    )
+    return (
+        fig,
+        "Every declared seed, intervention, and representation arm remains visible. Paired gains compare the same seed and condition. Original-space ARI remains authoritative even when a projection looks separated.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

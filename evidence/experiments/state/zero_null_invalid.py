@@ -1,24 +1,84 @@
 # %% [markdown]
 # ---
-# title: "Can it tell a recorded zero from an absent or invalid reading?"
-# categories: ["State"]
-# description: "Predict three labels from a numeric zero, an Arrow null, or a valid floating-point NaN, preserving their distinct states."
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# title: Can it tell a recorded zero from an absent or invalid reading?
+# categories:
+# - State
+# description: Predict three labels from a numeric zero, an Arrow null, or a valid floating-point NaN, preserving
+#   their distinct states.
 # evidence-readout:
-# - label: "Intact accuracy"
-#   metric: ["arms", "intact", "balanced", "accuracy"]
+# - label: Intact accuracy
+#   metric:
+#   - arms
+#   - intact
+#   - balanced
+#   - accuracy
 #   format: percent
-# - label: "Coalesced accuracy"
-#   metric: ["arms", "coalesced", "balanced", "accuracy"]
+# - label: Coalesced accuracy
+#   metric:
+#   - arms
+#   - coalesced
+#   - balanced
+#   - accuracy
 #   format: percent
-# - label: "Filled accuracy"
-#   metric: ["arms", "filled", "balanced", "accuracy"]
+# - label: Filled accuracy
+#   metric:
+#   - arms
+#   - filled
+#   - balanced
+#   - accuracy
 #   format: percent
 # evidence-group: State
+# evidence-diagram:
+#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
+#     condition.
+#   alt: Can it tell a recorded zero from an absent or invalid reading? Visible inputs lead to one hidden prediction
+#     target.
+# evidence-review:
+#   question: Can relflow tell a recorded zero from an absent or invalid reading?
+#   modeling: Generate three balanced classes identified solely by a numeric zero, null, or valid NaN. Hide the class
+#     label. Compare an intact model with separately trained controls that merge NaN into null or replace every input
+#     with zero.
+#   comparison:
+#     metric: Accuracy
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Every input filled with zero
+#       path:
+#       - arms
+#       - filled
+#       - balanced
+#       - accuracy
+#       format: percent
+#     - label: NaN merged into null
+#       path:
+#       - arms
+#       - coalesced
+#       - balanced
+#       - accuracy
+#       format: percent
+#     - label: All three states preserved
+#       path:
+#       - arms
+#       - intact
+#       - balanced
+#       - accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The controls intentionally remove information. Separate recall checks repeat the intact test under changed
+#     class proportions so majority accuracy cannot hide a failed state.
+# evidence-plot:
+#   target: target
+#   focus: Are zero, null, and invalid numbers distinguishable?
+#   comparison: Use per-state recall and confusion matrices beside the input-normalization controls.
+#   limit: A macro score cannot hide the collapse of one state into another.
+#   labels:
+#     test: Balanced state population
+#     shifted: Shifted state frequencies
+#   mode: classification
 # ---
 #
 # Predict three labels from a numeric zero, an Arrow null, or a valid floating-point NaN, preserving
@@ -38,10 +98,7 @@
 # The typed Arrow construction explicitly retains NaN as a valid floating-point entry. A data adapter
 # that converts NaN into a null would erase the distinction before the model could learn it.
 #
-# ```{typst}
-# //| label: fig-evidence-p088
-# //| fig-cap: "The target is hidden. The diagram shows the informative representation; controls change only the declared condition."
-# //| fig-alt: "Can it tell a recorded zero from an absent or invalid reading? Visible inputs lead to one hidden prediction target."
+# ```typst
 # #tree(node("record", kind: "root", children: (node("measurement", type: "Number", body: [Zero, null, or NaN]), node("target", kind: "target", type: "Enum"),)))
 # ```
 #
@@ -53,19 +110,10 @@
 #
 # ## Result
 #
-# {{< evidence P088 status >}}
-#
 # The numerical checks below are provisional, predeclared hypotheses, not measured successes. No full
 # learning result is claimed until a matching run is recorded. Smoke runs establish execution only.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P088 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P088 script >}}
+# ## Method
 #
 # ### Population, controls, and scoring
 #
@@ -75,12 +123,11 @@
 # gates are provisional. Existing tensorization unit tests establish the codec contract; this experiment
 # asks whether end-to-end learning actually uses the distinction.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -228,6 +275,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

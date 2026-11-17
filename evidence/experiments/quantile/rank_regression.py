@@ -5,11 +5,6 @@
 # - Quantile
 # description: Represent amounts and costs by their positions in the training distribution, then convert predicted
 #   costs back to their original units.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Original amounts
 #   metric:
@@ -20,6 +15,40 @@
 #   - shuffled_normalized_rmse
 #   format: error
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: Can percentile-based predictions return useful original values?
+#   modeling: Generate skewed amounts and noisy costs following cost = 200 + 3 × amount. Represent both fields with
+#     Quantile and hide cost. Compare source-unit RMSE on fresh records with amounts shuffled between records while
+#     original costs stay fixed.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Shuffled amounts
+#       path:
+#       - shuffled_rmse
+#       format: number
+#     - label: Original amounts
+#       path:
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The predictions are scored after conversion back to original units. Evaluation must not update either learned
+#     distribution.
+# evidence-plot:
+#   target: cost
+#   focus: Can rank-based features predict in original source units?
+#   comparison: Compare intact and shuffled inputs, hidden-target tampering, and checkpoint restoration.
+#   limit: Target values remain hidden; source-unit error is distinct from percentile error.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 13
+#   candidate: 13
 # ---
 #
 # The model sees one amount and must predict a hidden cost. Amounts are heavily skewed, so this task
@@ -36,10 +65,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-quantile-rank-regression
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("order", kind: "root", children: (
 #   node("amount", type: "Quantile", detail: "Skewed numeric input"),
 #   node("cost", kind: "target", type: "Quantile", detail: "Original-unit prediction"),
@@ -62,8 +88,6 @@
 #
 # ## Result
 #
-# {{< evidence P067 status >}}
-#
 # The learned relationship remains useful after conversion back. Shuffling removes accuracy; this does not establish behavior beyond the learned numerical range.
 #
 # The error readout is source-unit RMSE divided by the error of always predicting the training mean.
@@ -71,14 +95,7 @@
 # classifications. A useful inverse conversion does not make percentile regression an uncertainty
 # interval, and this test stays within the generator's fitted numerical range.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P067 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P067 script >}}
+# ## Method
 #
 # ### Synthetic process and observability
 #
@@ -113,13 +130,11 @@
 # does not establish calibrated intervals, arbitrary tail accuracy, drift
 # adaptation, or extrapolation beyond the fitted target distribution.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -272,8 +287,42 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.plots import numeric
+
+    run = next((frame for frame in bundle.frames if frame["function"] == "run"))
+    v = bundle.value(run["values"])
+    pairs = []
+    for name, label, rows, metric in [
+        ("output", "Intact held-out inputs", v["visible"], "rmse"),
+        (
+            "control",
+            "Visible inputs shuffled across answers",
+            [v["visible"][int(i)] for i in v["shuffled"]],
+            "shuffled_rmse",
+        ),
+    ]:
+        a, p = (np.asarray(v["targets"]), np.asarray(v[name]))
+        if not np.isclose(np.sqrt(np.mean((a - p) ** 2)), bundle.record["metrics"][metric]):
+            raise ValueError("Source-unit plot disagrees with the recorded full-test RMSE")
+        pairs.append(
+            {
+                "actual": a,
+                "predicted": p,
+                "field": "cost",
+                "label": label,
+                "population": "test",
+                "rows": rows,
+                "coordinates": [(i,) for i in range(len(a))],
+            }
+        )
+    fig, note, interactive = numeric(bundle, spec, pairs=pairs)
+    note += " These are the full held-out intact and shuffled evaluations. The separate target-tampering and checkpoint checks remain in the run record; their 128-coordinate probes do not replace the test population."
+    return (fig, note, interactive)
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

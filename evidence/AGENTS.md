@@ -41,8 +41,10 @@ in publication JSON assets. Never write results back into experiment sources.
 Each experiment declares an isolated uv environment using standard PEP 723
 `# /// script` metadata, with `requires-python` and its direct dependencies.
 Include the reporter's `pyyaml` and `torch` requirements and the relevant relflow
-extra for optional features. Preserve the first Markdown/YAML cell for historical
-readers; place the TOML block in the first code cell. Keep the shared import path
+extra for optional features. Keep question metadata in the first Markdown/YAML cell and put the TOML block
+in the first code cell. Use plain Markdown sections and standard `typst` fences;
+put figure caption/alt text in `evidence-diagram`. Current sources must not
+contain Quarto execution options, shortcodes, or disclosure markup. Keep the shared import path
 relative to `__file__`, so direct `uv run <script>` works outside the checkout.
 Use `uv run evidence/experiments/run.py --wheel /path/to/relflow-<version>-py3-none-any.whl P001`
 to exercise an exact SDK wheel. The runner resolves all dependencies together,
@@ -58,13 +60,35 @@ contains labels, never lists of experiment IDs. Tags describe the protocol, not
 the selected outcome. Static docs reject unknown, duplicate, or missing tags.
 Replace the scaffold's `unreviewed` placeholders before completing an experiment.
 Never rewrite frozen release sources to add tags or infer current datatype tags
-for retired proofs. Historical untagged entries remain visibly archived.
+for retired proofs. Current documentation shows the active script catalog.
 
-The required core catalog lives in `experiments/<category>/`. Optional studies
-live in `research/<category>/`, declare `evidence-requires`, and run only with an
-explicit `--lane research` selection. IDs are global across both directories.
-Hosted execution keeps every core experiment; frontmatter cannot change a lane.
-Static docs and authoring checks cover both lanes without importing resources.
+Each experiment is one removable unit: its file owns the environment, schemas,
+generator, training protocol, checks, review, diagnostic plan, optional custom
+renderers, publication highlights, and scheduling estimates. Adding or removing
+it must require no edit to a shared per-ID table. Shared code owns vocabulary,
+validation, execution, and reusable plotting primitives only.
+
+YAML frontmatter owns `evidence-review` (question, modeling, comparison paths,
+units, scope note, and optional criterion labels), `evidence-plot`, optional
+`evidence-highlight`, and optional per-role `evidence-cost` estimates. The latter
+are advisory seconds, not measurements or training budgets. There are no
+central review, view, highlight, or timing catalogs and no authoring compatibility
+paths for those catalogs.
+
+A diagnostic plan selects either a shared `mode` or a `renderer` function in
+this same script, with optional named `supplements` using the same contract.
+Custom renderers declare `(bundle, spec)` and put their imports and helpers
+inside the function. Return a Matplotlib figure, caption string, and portable
+interactive-data mapping (an empty mapping is valid). Only this function is loaded in the bounded offline plot
+container; module imports, schemas, generators, and training do not execute.
+Render captured observations only. Declare plotting dependencies in the script's
+uv block. Static documentation never loads or executes a renderer.
+
+All canonical studies live in `experiments/<category>/` and belong to the same
+required catalog. There are no execution lanes, opt-in study lists, or directory
+classifications. Every script declares its uv dependencies and owns its tags;
+IDs are discovered from declarations without a central list. Static docs and
+authoring checks inspect the complete catalog without importing model resources.
 
 Starlight reads the declarations, authored comment cells, and selected publication
 through `docs/starlight/src/evidence/data.ts`. Keep visible behavioral criteria,

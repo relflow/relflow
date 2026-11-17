@@ -3,13 +3,7 @@
 # title: Does pretraining reduce the labels needed for a new task?
 # categories:
 # - Representation
-# description: Use noisy categorical and geometric views to predict a hidden four-way
-#   style with a small labeled sample.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample.
 # evidence-readout:
 # - label: Eight-label adaptation
 #   metric:
@@ -26,6 +20,45 @@
 #   - accuracy
 #   format: percent
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Visible fields supply evidence; prediction targets are hidden.
+#   alt: Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample.
+# evidence-review:
+#   question: Does pretraining reduce the labels needed for a new task?
+#   modeling: Generate noisy views of four hidden classes and pretrain without their labels. Adapt the pretrained
+#     encoder using eight labeled examples per class, then compare with training from scratch using the same labeled
+#     subset and linear classification head.
+#   comparison:
+#     metric: Accuracy
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Train from scratch · eight labels per class
+#       path:
+#       - budgets
+#       - '8'
+#       - scratch
+#       - accuracy
+#       format: percent
+#     - label: Adapt pretrained encoder · eight labels per class
+#       path:
+#       - budgets
+#       - '8'
+#       - fine_tuned
+#       - accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The primary chart uses the smallest label budget. Frozen features, shuffled-view pretraining, raw features,
+#     and larger budgets remain separate conditions.
+# evidence-plot:
+#   target: class
+#   focus: Does pretraining reduce the number of downstream labels needed?
+#   comparison: Compare raw, untrained, pretrained, and adapted approaches at each declared label budget.
+#   limit: A learning curve connects only evaluated label counts; pretraining and adaptation budgets stay explicit.
+#   renderer: plot
 # ---
 #
 # Reconstruction can produce valid embeddings without making later predictions easier. This experiment asks
@@ -43,10 +76,7 @@
 # Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample.
 # The example is illustrative; its answer is hidden during scoring.
 #
-# ```{typst}
-# //| label: fig-evidence-p085
-# //| fig-cap: "Visible fields supply evidence; prediction targets are hidden."
-# //| fig-alt: "Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample."
+# ```typst
 # #tree(node("record",kind:"root",body:[Export context],children:(node("first",type:"Enum"),node("second",type:"Enum"),node("geometry",type:"Vector(16)"))))
 # ```
 #
@@ -59,20 +89,11 @@
 #
 # ## Result
 #
-# {{< evidence P085 status >}}
-#
 # No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
 # established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
 # each evaluation condition remain separate.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P085 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P085 script >}}
+# ## Method
 #
 # ### Process, splits, and interpretation
 #
@@ -85,11 +106,10 @@
 # Comparative gains are new provisional gates, not changes to P073. Test evaluation never updates
 # parameters; one seed remains provisional.
 #
-# ### Complete experiment code
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "pyarrow",
@@ -400,8 +420,55 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots
+
+    m = bundle.record["metrics"]
+    counts = sorted(map(int, m["budgets"]))
+    fig, axes = axes_pair(width=10, height=4.8)
+    arms = ["frozen", "fine_tuned", "scratch", "permuted", "raw", "shuffled_labels"]
+    for index, arm in enumerate(arms):
+        axes[0].plot(
+            counts,
+            [m["budgets"][str(count)][arm]["accuracy"] for count in counts],
+            marker=MARKERS[index],
+            color=COLORS[index],
+            lw=1.6,
+            label=human(arm),
+        )
+    axes[0].set(
+        xscale="log",
+        xlabel="Labeled examples per class",
+        ylabel="Independent test accuracy",
+        title="How much supervision does each approach need?",
+        ylim=(0, 1.03),
+    )
+    axes[0].set_xticks(counts, labels=counts)
+    axes[0].minorticks_off()
+    axes[0].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[0].legend(fontsize=8)
+    axes[0].grid(alpha=0.18)
+    dots(
+        axes[1],
+        [f"{count} labels per class" for count in counts],
+        {
+            "Fine-tuned minus scratch": [m["budgets"][str(count)]["fine_tuned_gain_over_scratch"] for count in counts],
+            "Frozen minus raw": [m["budgets"][str(count)]["frozen_gain_over_raw"] for count in counts],
+        },
+        xlabel="Paired gain in test accuracy",
+        reference=(0, "Equal accuracy"),
+        percent=True,
+    )
+    return (
+        fig,
+        "Markers are the evaluated label budgets. The paired gain panel distinguishes an adaptation benefit from a frozen-representation benefit. Pretraining uses additional unlabeled observations and is recorded separately.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

@@ -5,11 +5,6 @@
 # - Calibration
 # description: Generate yes answers 90% of the time, independently of the input. The right probability is therefore
 #   90%.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: True yes probability
 #   metric:
@@ -26,6 +21,58 @@
 #   - mean_probability
 #   format: percent
 # evidence-group: Calibration
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. The answer is sampled; its population probability is 90%.
+#   alt: Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The answer is sampled;
+#     its population probability is 90%.
+# evidence-review:
+#   question: Can relflow learn a 90% probability without a useful input?
+#   modeling: Generate yes/no answers independently of the input, with yes occurring 90% of the time. Train the model
+#     to predict the answer distribution. Compare its average predicted yes probability on familiar and unseen input
+#     IDs with the generator’s recorded probability.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Probability
+#     conditions:
+#     - label: True yes probability
+#       path:
+#       - prior
+#       format: percent
+#     - label: Predicted, known inputs
+#       path:
+#       - capacity_2_known
+#       - mean_probability
+#       format: percent
+#     - label: Predicted, new inputs
+#       path:
+#       - capacity_2_novel
+#       - mean_probability
+#       format: percent
+#     definition: Predicted probability of the named outcome or membership. The task determines the appropriate value;
+#       higher is not always better.
+#     direction: Task-specific interpretation
+#     domain:
+#     - 0
+#     - 1
+#   note: This chart shows probabilities, not accuracy. The full criteria also measure per-record probability error
+#     and expected log loss.
+#   criteria:
+#     prefixes:
+#       capacity_2: Two-row output allocation
+#       capacity_128: 128-row output allocation
+#       capacity_2_known: Two-row allocation · familiar inputs
+#       capacity_2_novel: Two-row allocation · unseen inputs
+#       capacity_128_known: 128-row allocation · familiar inputs
+#       capacity_128_novel: 128-row allocation · unseen inputs
+# evidence-plot:
+#   target: label
+#   focus: Does unused capacity change a learned class prior?
+#   comparison: Compare known and novel-label probabilities at both declared capacities with the generating prior.
+#   limit: A prior-probability comparison is not an empirical reliability curve.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 36
+#   candidate: 36
 # ---
 #
 # This task has a useful probability but no useful feature for separating individual outcomes. Every
@@ -43,10 +90,7 @@
 #
 # yes or no is a sampled hidden answer. A single answer does not determine the true probability.
 #
-# ```{typst}
-# //| label: fig-evidence-categorical-prior
-# //| fig-cap: "Amber cards are hidden prediction targets. The answer is sampled; its population probability is 90%."
-# //| fig-alt: "Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The answer is sampled; its population probability is 90%."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", detail: "Constant"),
 #   node("entity", type: "Category", detail: "Independent identity"),
@@ -70,8 +114,6 @@
 #
 # ## Result
 #
-# {{< evidence P060 status >}}
-#
 # The latest model learns probabilities near the population rate. Accuracy alone would not reveal whether its confidence was appropriate; this does not establish general probability calibration.
 #
 # Probability RMSE compares each written yes probability with 0.9. Excess expected negative log
@@ -80,14 +122,7 @@
 # is a narrow calibration check; it does not establish calibration when probabilities depend on
 # features or rare outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P060 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P060 script >}}
+# ## Method
 #
 # ### Training and evaluation
 #
@@ -106,13 +141,11 @@
 # remain necessary. This two-label evidence does not establish rare-label recall
 # or calibration of other tensorfield losses.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -231,8 +264,34 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    labels = ["Capacity 2, known", "Capacity 2, novel", "Capacity 128, known", "Capacity 128, novel"]
+    keys = ["capacity_2_known", "capacity_2_novel", "capacity_128_known", "capacity_128_novel"]
+    dots(
+        axes[0],
+        labels,
+        {"Mean predicted probability": [m[key]["mean_probability"] for key in keys]},
+        xlabel="Probability of yes",
+        reference=(m["prior"], "Generating prior"),
+    )
+    axes[0].set_xlim(0, 1.02)
+    dots(
+        axes[1],
+        labels,
+        {"Excess NLL": [m[key]["excess_nll"] for key in keys]},
+        xlabel="NLL minus the generating-prior NLL",
+    )
+    return (
+        fig,
+        "The reference is the generator's fixed prior. Unused vocabulary capacity and an unavailable label are separate conditions; these mean readouts are not a reliability curve.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

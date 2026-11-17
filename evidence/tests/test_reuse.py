@@ -13,7 +13,7 @@ import publication
 import pytest
 import releases
 import reuse
-from evidence_ci import collect, digest, finish, plan, write_json
+from evidence_ci import ROOT, collect, digest, finish, plan, write_json
 from experiments.source import frontmatter, metadata, registry
 from record import select
 
@@ -100,7 +100,10 @@ def bundle(tmp_path):
     for identifier in ("P021", "P025", "P038"):
         path = root / "evidence/experiments/example" / (identifier.lower() + ".py")
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(ARCHIVED_SCRIPT.format(identifier=identifier))
+        source = ARCHIVED_SCRIPT.format(identifier=identifier)
+        header = metadata(source)
+        header["evidence-highlight"] = registry(ROOT, measurements=False)[identifier]["header"]["evidence-highlight"]
+        path.write_text(frontmatter(source, header))
     (root / "README.md").write_text(README)
     (root / "uv.lock").write_text("locked-runtime\n")
     (root / "pyproject.toml").write_text('[project]\nversion="0.4.2"\n')

@@ -1,24 +1,69 @@
 # %% [markdown]
 # ---
-# title: "Does confidence stay appropriate when useful readings disappear?"
-# categories: ["Calibration"]
-# description: "Measure written probabilities against an exact visible-information oracle while missingness rates and subgroup frequencies change."
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# title: Does confidence stay appropriate when useful readings disappear?
+# categories:
+# - Calibration
+# description: Measure written probabilities against an exact visible-information oracle while missingness rates and
+#   subgroup frequencies change.
 # evidence-readout:
-# - label: "Matched probability error"
-#   metric: ["conditions", "matched", "probability_rmse"]
+# - label: Matched probability error
+#   metric:
+#   - conditions
+#   - matched
+#   - probability_rmse
 #   format: number
-# - label: "Missing-reading error"
-#   metric: ["conditions", "missing", "probability_rmse"]
+# - label: Missing-reading error
+#   metric:
+#   - conditions
+#   - missing
+#   - probability_rmse
 #   format: number
-# - label: "Selection-shift error"
-#   metric: ["conditions", "selection_shift", "probability_rmse"]
+# - label: Selection-shift error
+#   metric:
+#   - conditions
+#   - selection_shift
+#   - probability_rmse
 #   format: number
 # evidence-group: Calibration
+# evidence-diagram:
+#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
+#     condition.
+#   alt: Does confidence stay appropriate when useful readings disappear? Visible inputs lead to one hidden prediction
+#     target.
+# evidence-review:
+#   question: Does confidence stay appropriate when useful readings disappear?
+#   modeling: Generate yes/no outcomes from a known table of group and signal probabilities. Randomly hide signals
+#     during training, then change how often they are missing at test time. Compare written probabilities with the
+#     exact answer distribution allowed by each record’s remaining visible information.
+#   comparison:
+#     metric: Probability RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Matched random missingness
+#       path:
+#       - conditions
+#       - matched
+#       - probability_rmse
+#       format: number
+#     - label: More randomly missing readings
+#       path:
+#       - conditions
+#       - missing
+#       - probability_rmse
+#       format: number
+#     definition: Root mean squared difference from the true probability allowed by the visible information. This
+#       scores probability estimates, not individual yes/no answers.
+#     direction: Lower error is better
+#   note: The primary chart compares random missingness conditions. Value-dependent selection is a separate diagnostic
+#     because it can change the conditional distribution itself.
+# evidence-plot:
+#   mode: calibration
+#   target: target
+#   focus: Does confidence follow the evidence that is actually available?
+#   comparison: Separate evidence policies and rare strata, comparing predicted probabilities with the known conditional
+#     oracle.
+#   limit: An oracle conditional probability and empirical outcome frequency are distinct references and are labeled
+#     separately.
 # ---
 #
 # Measure written probabilities against an exact visible-information oracle while missingness rates and
@@ -41,10 +86,7 @@
 # 0.224. That is a different statistical problem, and a model is not expected to infer a new observation
 # policy without evidence about it.
 #
-# ```{typst}
-# //| label: fig-evidence-p089
-# //| fig-cap: "The target is hidden. The diagram shows the informative representation; controls change only the declared condition."
-# //| fig-alt: "Does confidence stay appropriate when useful readings disappear? Visible inputs lead to one hidden prediction target."
+# ```typst
 # #tree(node("record", kind: "root", children: (node("group", type: "Enum"), node("signal", type: "Number", detail: "Hidden by selector"), node("target", kind: "target", type: "Boolean"),)))
 # ```
 #
@@ -56,19 +98,10 @@
 #
 # ## Result
 #
-# {{< evidence P089 status >}}
-#
 # The numerical checks below are provisional, predeclared hypotheses, not measured successes. No full
 # learning result is claimed until a matching run is recorded. Smoke runs establish execution only.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P089 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P089 script >}}
+# ## Method
 #
 # ### Population, controls, and scoring
 #
@@ -80,7 +113,6 @@
 # universal robustness to an unannounced change in the true conditional law. P061 already studies
 # unknown-ID calibration; this experiment changes observation availability instead.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
@@ -266,6 +298,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

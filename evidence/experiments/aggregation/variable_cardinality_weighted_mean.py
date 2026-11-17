@@ -4,11 +4,6 @@
 # categories:
 # - Weighted aggregation
 # description: Predict an average in which each value contributes according to its own positive weight.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct pairs
 #   metric:
@@ -21,6 +16,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, value, weight, weighted_mean. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow learn a weighted average?
+#   modeling: 'Generate lists of two to six value–weight pairs. Hide the weighted average: sum(value × weight) divided
+#     by sum(weight). Compare normal test records with copies that swap weights between values while preserving the
+#     original answers.'
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Swapped weights
+#       path:
+#       - corrupted
+#       - rmse
+#       format: number
+#     - label: Correct pairs
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Repeating whole items or scaling all weights should preserve the answer; these invariance checks remain
+#     separate from prediction error.
+# evidence-plot:
+#   mode: regression
+#   target: weighted_mean
+#   focus: Does a weighted mean respect pairing while ignoring common rescaling?
+#   comparison: Compare swapped weights, complete-item permutations, uniform weight scaling, and duplication.
+#   limit: A weighted mean should remain unchanged under common positive scaling and whole-bag duplication.
+# evidence-cost:
+#   baseline: 103
+#   candidate: 103
 # ---
 #
 # A weighted average gives more influence to values with larger weights, then divides by the total
@@ -44,10 +75,7 @@
 # 3.75, so the answer is 0.3 ÷ 3.75 = 0.08. The ordinary unweighted average would be 0.2. A model
 # that ignores which weights accompany which values would miss that distinction.
 #
-# ```{typst}
-# //| label: fig-evidence-variable-cardinality-weighted-mean
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, value, weight, weighted_mean. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -70,11 +98,8 @@
 #
 # ## Result
 #
-# {{< evidence P016 status >}}
-#
 # The model uses relative weights and approximately preserves these equal-answer changes. Zero or
 # negative weights and much longer lists are not covered.
-#
 #
 # Intact error is measured relative to a constant training-mean guess. The drift checks instead
 # measure whether predictions stay stable under the three answer-preserving interventions. These
@@ -82,14 +107,7 @@
 # stability check. Zero weights, negative weights, and lengths beyond the trained range are not
 # covered.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P016 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P016 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -112,8 +130,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -324,6 +340,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

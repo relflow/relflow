@@ -70,14 +70,92 @@ def project(tmp_path):
     return tmp_path
 
 
-def test_authored_views_cover_both_catalog_lanes():
-    specs = json.loads((ROOT / "evidence/diagnostics/views.json").read_text())
-    catalog = registry(ROOT / "evidence", measurements=False, lane="all")
-    assert set(specs) == set(catalog)
-    assert all(spec["focus"] and spec["comparison"] and spec["limit"] for spec in specs.values())
-    assert {key for key, spec in specs.items() if spec["mode"] == "research"} == {
-        key for key, entry in catalog.items() if entry["lane"] == "research"
+def test_every_experiment_owns_its_diagnostic_plan():
+    from evidence.experiments.source import view
+
+    catalog = registry(ROOT / "evidence", measurements=False)
+    for entry in catalog.values():
+        plan = view((ROOT / "evidence" / entry["script"]).read_text())
+        assert all(plan[name] for name in ("focus", "comparison", "limit"))
+
+
+def test_new_diagnostic_uses_captured_frontmatter_without_a_catalog_entry(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    from evidence.diagnostics import build as building
+
+    directory = tmp_path / "bundles" / "new"
+    directory.mkdir(parents=True)
+    source = (
+        "# %% [markdown]\n# ---\n# evidence-plot:\n#   mode: summary\n"
+        "#   focus: A new experiment owns this question.\n"
+        "#   comparison: Its own comparison.\n#   limit: Its own limit.\n# ---\n"
+        "raise RuntimeError('experiment module must never execute while rendering')\n"
+    )
+    manifest = {
+        "id": "P999",
+        "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        "code_sha256": fingerprint(source),
+        "artifacts": {},
+        "runtime": {"github_run_id": "fixture"},
     }
+    (directory / "manifest.json").write_text(json.dumps(manifest))
+    (directory / "record.json").write_text(
+        json.dumps({"outcome": "met", "provenance": {"evidence_revision": "fixture"}})
+    )
+    (directory / "proof.py").write_text(source)
+    (directory / "frames.json").write_text("[]")
+
+    def render(bundle, plan, output):
+        for theme in ("light", "dark"):
+            (output / f"P999-{theme}.svg").write_text("<svg/>")
+        return dict(plan, id="P999", figures=[{"name": "P999", "caption": plan["focus"]}])
+
+    monkeypatch.setitem(sys.modules, "evidence.diagnostics.plots", SimpleNamespace(render=render))
+    output = tmp_path / "output"
+    result = building.build(tmp_path / "bundles", output, ci={"expected": ["P999"]})
+    assert result == {"rendered": 1, "failed": 0, "missing": [], "errors": {}}
+    assert json.loads((output / "P999.json").read_text())["focus"] == "A new experiment owns this question."
+
+
+def test_diagnostic_component_is_isolated_from_model_imports_and_training():
+    import ast
+
+    from evidence.diagnostics.data import Bundle
+
+    bundle = object.__new__(Bundle)
+    bundle.source = (
+        "raise RuntimeError('module and model imports must not execute')\n"
+        "def plot(bundle, spec):\n    return spec['value']\n"
+    )
+    bundle.syntax = ast.parse(bundle.source)
+    bundle.directory = Path("/unused")
+    bundle.components = {}
+    callback = bundle.component("plot")
+    assert callback(bundle, {"value": 17}) == 17
+    assert bundle.component("plot") is callback
+
+
+def test_custom_components_cannot_depend_on_training_module_globals():
+    from evidence.experiments.source import component
+
+    with pytest.raises(ValueError, match="must own its imports and helpers.*training_model"):
+        component("training_model = object()\ndef plot(bundle, spec):\n    return training_model\n", "plot")
+
+
+def test_every_custom_renderer_loads_independently_without_importing_its_experiment():
+    from evidence.diagnostics.data import Bundle
+    from evidence.experiments.source import view
+
+    for entry in registry(ROOT / "evidence", measurements=False).values():
+        source = (ROOT / "evidence" / entry["script"]).read_text()
+        plan = view(source)
+        bundle = object.__new__(Bundle)
+        bundle.source, bundle.directory, bundle.components = source, Path("/unused"), {}
+        for selection in [plan, *plan.get("supplements", {}).values()]:
+            if "renderer" in selection:
+                assert callable(bundle.component(selection["renderer"]))
 
 
 @pytest.mark.parametrize("change", ["figure", "data", "missing", "unsafe"])

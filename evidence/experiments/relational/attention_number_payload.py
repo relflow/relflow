@@ -5,11 +5,6 @@
 # - Argmax retrieval
 # description: Predict the value attached to the highest-scoring candidate after compressing the candidates into learned
 #   summaries.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct pairs
 #   metric:
@@ -20,6 +15,41 @@
 #   - broken_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can a summary retain the winning item’s value?
+#   modeling: Give each candidate a score and a separate payload value. Hide the payload belonging to the highest
+#     score. Compress the candidate collection into learned summaries, then compare correct records with copies that
+#     rotate payloads between candidates while retaining the original answer.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Normalized RMSE
+#     conditions:
+#     - label: Broken pairs
+#       path:
+#       - broken_nrmse
+#       format: number
+#     - label: Correct pairs
+#       path:
+#       - intact_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The control preserves the separate score and payload distributions. It breaks their association, which is
+#     the information needed to retrieve the winner.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Can a compressed relational route recover the requested numeric payload?
+#   comparison: Compare intact and broken identity links using the same original answers.
+#   limit: Low intact error and a broken-link gap are separate requirements.
+# evidence-cost:
+#   baseline: 47
+#   candidate: 46
 # ---
 #
 # Each candidate has a score and a separate numeric payload. The hidden answer is the payload
@@ -42,10 +72,7 @@
 # another candidate carries payload 5.0. A predictor that returns the largest payload, an average
 # payload, or the winning score would be answering a different question.
 #
-# ```{typst}
-# //| label: fig-evidence-attention-number-payload
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("retrieval", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("score", type: "Number"),
@@ -68,11 +95,8 @@
 #
 # ## Result
 #
-# {{< evidence P022 status >}}
-#
 # The tested summaries retain useful score–value relationships. Exact retrieval, larger lists, and
 # speed or memory savings are not established.
-#
 #
 # The error percentages compare predictions with always guessing the mean training payload answer.
 # Low intact error and a substantial rise after breaking pairs support retention of the
@@ -80,14 +104,7 @@
 # isolate the minimum necessary summary width, or measure memory or speed savings against the
 # pass-through route.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P022 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P022 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -104,8 +121,6 @@
 # argmin, category payloads, and group-filtered retrieval remain unimplemented.
 # The [pass-through evidence](pass-through-number-payload.html) provides the simpler
 # route comparison. Use exact preprocessing when retrieval must be exact.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -238,6 +253,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

@@ -4,11 +4,6 @@
 # categories:
 # - Argmax retrieval
 # description: Predict the value attached to the highest score while retaining the encoded candidates.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct pairs
 #   metric:
@@ -19,6 +14,40 @@
 #   - broken_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow return the winning item’s value?
+#   modeling: Give each candidate a score and payload, retain the encoded candidates, and hide the payload with the
+#     highest score. Compare correct records with copies that rotate payloads while leaving scores and expected answers
+#     fixed.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Normalized RMSE
+#     conditions:
+#     - label: Broken pairs
+#       path:
+#       - broken_nrmse
+#       format: number
+#     - label: Correct pairs
+#       path:
+#       - intact_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: P022 asks the same retrieval question after compression. This page tests the route that retains candidates.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Does preserving relational tokens support payload retrieval?
+#   comparison: Inspect intact and identity-corrupted queries alongside the training diagnostic.
+#   limit: Training fit alone is not held-out retrieval evidence.
+# evidence-cost:
+#   baseline: 42
+#   candidate: 41
 # ---
 #
 # The model must return the numeric payload attached to the largest score among three candidates.
@@ -42,10 +71,7 @@
 # is therefore the hidden answer. The payload 5.0 belongs to a lower-scoring candidate and must not
 # win simply because it is numerically larger.
 #
-# ```{typst}
-# //| label: fig-evidence-pass-through-number-payload
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("retrieval", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("score", type: "Number"),
@@ -67,25 +93,15 @@
 #
 # ## Result
 #
-# {{< evidence P023 status >}}
-#
 # Keeping the pairs together supports the learned selection. This test uses three candidates and
 # does not guarantee exact selection.
-#
 #
 # The intact and broken percentages share a constant training-mean baseline; training error is also
 # recorded separately. Low intact error plus worse broken-pair error supports learned selection in
 # this small setting. This is not a controlled speed or memory comparison with the summary model,
 # and it does not establish exact retrieval or larger-candidate generalization.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P023 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P023 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -101,8 +117,6 @@
 # count, selection rule, and payload type. This establishes a three-candidate
 # learning behavior; exact application retrieval belongs in preprocessing.
 # Compare the [attention route](attention-number-payload.html).
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -235,6 +249,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

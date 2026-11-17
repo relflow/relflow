@@ -4,11 +4,6 @@
 # categories:
 # - Schema mutation
 # description: Train on y = a + b, temporarily disable b, then enable it again.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Original model
 #   metric:
@@ -22,6 +17,49 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Can an input be disabled and restored?
+#   modeling: Train on y = a + b, then temporarily disable input b without retraining. Score the original model, the
+#     disabled-input model, and the model after b is restored on the same test rows.
+#   comparison:
+#     kind: Before and after
+#     metric: RMSE
+#     conditions:
+#     - label: Original model
+#       path:
+#       - source
+#       - rmse
+#       format: number
+#     - label: Input disabled · first cycle
+#       path:
+#       - edits
+#       - 0
+#       - scores
+#       - rmse
+#       format: number
+#     - label: Input restored · first cycle
+#       path:
+#       - edits
+#       - 1
+#       - scores
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Restoring an inactive input can reuse its learned state. Separate checks cover repeated cycles, temporary
+#     overrides, and checkpoints; deletion is tested in P050.
+# evidence-plot:
+#   target: y
+#   focus: Does deactivating an input remove its influence and does restoration recover it?
+#   comparison: Pair active, inactive, restored, omitted, and corrupted inputs on the same records.
+#   limit: Zero filling is a distinct intervention from removing an input's participation.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 18
+#   candidate: 18
 # ---
 #
 # ## Example
@@ -39,10 +77,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-mutations-deactivate-input
-# //| fig-alt: "Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("a", type: "Number", body: [Always active]),
 #   node("b", type: "Number", body: [Active → inactive → active]),
@@ -68,18 +103,9 @@
 # activation with no intervening training. Deleting the field, resetting its parameters, or continuing
 # optimization while it is absent raises different questions about what can later be restored.
 #
-# {{< evidence P049 status >}}
-#
 # Disabling b removes useful information; enabling it restores the trained predictions. This tests an input field, rather than disabling a learned output decoder.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P049 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P049 script >}}
+# ## Method
 #
 # ### Remaining work
 #
@@ -88,13 +114,11 @@
 # separate experiments. Training inside an override does not have checkpoint
 # rollback semantics and is not covered here.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -321,8 +345,36 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    edits = m["edits"]
+    labels = [row["edit"] for row in edits]
+    dots(
+        axes[0],
+        labels,
+        {"Normalized RMSE": [row["scores"]["nrmse"] for row in edits]},
+        xlabel="Test RMSE / constant-guess RMSE",
+        reference=(1, "Constant guess"),
+    )
+    names = list(m["controls"])
+    dots(
+        axes[1],
+        [human(name) for name in names],
+        {"Normalized RMSE": [m["controls"][name]["nrmse"] for name in names]},
+        xlabel="Control error on the same test records",
+    )
+    fig.set_size_inches(10, max(4.8, len(edits) * 0.3))
+    return (
+        fig,
+        "Each edit is evaluated on matched held-out records without post-edit fitting. Exact restoration is a paired output test; destructive controls and the source prerequisite remain separate.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

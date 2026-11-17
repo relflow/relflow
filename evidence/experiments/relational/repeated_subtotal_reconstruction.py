@@ -4,11 +4,6 @@
 # categories:
 # - Item alignment
 # description: Predict quantity times price separately for every real item in an order.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct item answers
 #   metric:
@@ -19,6 +14,41 @@
 #   - permuted_target_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with order, items, quantity, unit_price, subtotal. Amber cards are hidden prediction targets.
+#     Repeated collections keep their fields together.
+# evidence-review:
+#   question: Does each subtotal stay with its own item?
+#   modeling: Generate orders with zero to five items. Give each real item its own quantity and price, and hide its
+#     subtotal. Compare predictions with the correct item-level answers and with answers shuffled between items while
+#     keeping all visible inputs fixed.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Normalized RMSE
+#     conditions:
+#     - label: Shuffled item answers
+#       path:
+#       - permuted_target_nrmse
+#       format: number
+#     - label: Correct item answers
+#       path:
+#       - aligned_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The changed-target control tests output alignment. Separate checks preserve empty orders, exact collection
+#     lengths, and inferred flags.
+# evidence-plot:
+#   mode: regression
+#   target: items/subtotal
+#   focus: Do repeated output coordinates stay aligned with their inputs?
+#   comparison: Inspect coordinate-level subtotal predictions and the permuted-target control.
+#   limit: Flattening retains each parent and child position; coordinates are not independent observations.
+# evidence-cost:
+#   baseline: 85
+#   candidate: 84
 # ---
 #
 # ## Example
@@ -36,10 +66,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-repeated-subtotal-reconstruction
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with order, items, quantity, unit_price, subtotal. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("order", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("quantity", type: "Number"),
@@ -67,18 +94,9 @@
 # written. Neither low average error nor correct alignment makes multiplication exact; the example explains
 # the target formula rather than showing a measured prediction.
 #
-# {{< evidence P030 status >}}
-#
 # Predictions follow the correct items, and empty orders stay empty. The arithmetic is approximate and should not replace exact billing calculations.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P030 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P030 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -96,8 +114,6 @@
 # seeds plus ten calibration seeds. The evidence guide also flags a mismatch between
 # its exact-product generator and the noisy-product proposal; that broader noisy
 # task has not been established by this case.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -247,6 +263,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

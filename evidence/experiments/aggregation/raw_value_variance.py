@@ -4,11 +4,6 @@
 # categories:
 # - Distribution statistics
 # description: Predict variance, a measure of how far the values lie from their average.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Variance prediction
 #   metric:
@@ -16,6 +11,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, value, variance. Amber cards are hidden prediction targets. Repeated collections
+#     keep their fields together.
+# evidence-review:
+#   question: Can relflow tell how spread out a list is?
+#   modeling: Generate lists of eight raw numbers with independently varying location and spread. Hide their variance,
+#     the average squared distance from the list mean. The model receives no prepared mean or squared differences.
+#     Compare held-out variance error with a constant predictor.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: A separate paired check holds the mean fixed while changing the spread, so location alone cannot explain
+#     success.
+# evidence-plot:
+#   mode: regression
+#   target: variance
+#   focus: Can the model distinguish equal-mean bags with different dispersion?
+#   comparison: Inspect held-out variance predictions and matched bags that vary their spread.
+#   limit: A mean alone cannot identify variance; the raw collection supplies additional information.
+# evidence-cost:
+#   baseline: 49
+#   candidate: 47
 # ---
 #
 # The model receives eight raw values and predicts their variance: the average squared distance from
@@ -43,10 +74,7 @@
 # 0.04, so averaging the eight squared distances still gives 0.04. The sign of each deviation
 # disappears when it is squared; positive and negative departures cannot cancel.
 #
-# ```{typst}
-# //| label: fig-evidence-raw-value-variance
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, value, variance. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -66,25 +94,15 @@
 #
 # ## Result
 #
-# {{< evidence P007 status >}}
-#
 # The model learns more than the average alone. These results cover the tested list length and do
 # not establish exact variance calculation.
-#
 #
 # Prediction error is normalized against guessing the training-set mean variance, not against the
 # mean of the input values. The matched-mean check adds evidence that spread matters. This is the
 # population definition, dividing by eight; it does not test a sample estimator that divides by
 # seven, nor variable-length lists or extreme outliers.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P007 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P007 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -107,8 +125,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -245,6 +261,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

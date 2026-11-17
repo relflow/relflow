@@ -4,11 +4,6 @@
 # categories:
 # - Schema mutation
 # description: Delete b from a model trained on y = a + b, then continue training with only a.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: After deletion and adaptation
 #   metric:
@@ -30,6 +25,46 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Can relflow adapt after losing an input?
+#   modeling: Train on y = a + b, permanently delete b, and continue fitting with only a. Compare the adapted model’s
+#     RMSE with the best prediction available from a alone. Independent b values now contribute information that no
+#     remaining input can recover.
+#   comparison:
+#     metric: RMSE
+#     kind: Baseline reference
+#     conditions:
+#     - label: Best possible prediction from a alone
+#       path:
+#       - only_a_oracle
+#       - rmse
+#       format: number
+#     - label: Model after deleting b and adapting
+#       path:
+#       - arms
+#       - deleted
+#       - after
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The reference is an information limit, not a trained competitor. Separate controls compare deletion, deactivation,
+#     and a fresh restricted model.
+# evidence-plot:
+#   mode: mutation
+#   target: y
+#   focus: How does deleting an input change the learnable target?
+#   comparison: Compare immediate deletion and adaptation with fresh controls and the remaining-input oracle.
+#   limit: The full-input target and the best remaining-input prediction have different information limits.
+#   targets:
+#   - null
+#   - only_a_distance_nrmse
+# evidence-cost:
+#   baseline: 53
+#   candidate: 53
 # ---
 #
 # ## Example
@@ -47,10 +82,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-mutations-delete-input
-# //| fig-alt: "Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("a", type: "Number", body: [Retained input]),
 #   node("b", type: "Number", body: [Deleted before adaptation]),
@@ -77,18 +109,9 @@
 # retraining the re-added field, and this task does not establish a general transfer-learning advantage over
 # starting fresh.
 #
-# {{< evidence P050 status >}}
-#
 # The edited model approaches the best remaining-information prediction, a. Re-adding the name creates fresh state; it does not restore what was deleted.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P050 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P050 script >}}
+# ## Method
 #
 # ### Remaining work
 #
@@ -97,8 +120,6 @@
 # Re-adding `b` appends it after `y`, and also initializes fresh state; its
 # prediction difference cannot be attributed solely to either change.
 # Relearning after re-addition and transfer advantages are not established.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -416,6 +437,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

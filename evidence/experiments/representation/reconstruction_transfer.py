@@ -5,11 +5,6 @@
 # - Representation
 # description: Learn to reconstruct three noisy views of a hidden class, then freeze the encoder and classify using
 #   eight labeled examples per class.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Reconstruction embedding
 #   metric:
@@ -28,6 +23,64 @@
 #   - raw_accuracy
 #   format: percent
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. Each view is sometimes hidden; the downstream class is absent.
+#   alt: Model tree with record, first, second, geometry. Selector notes identify hidden values. Each view is sometimes
+#     hidden; the downstream class is absent.
+# evidence-review:
+#   question: Do reconstruction embeddings help a new small-label task?
+#   modeling: 'Generate three noisy views of a hidden class: two categorical views and a vector. Pretrain an encoder
+#     by hiding and reconstructing those views, then freeze it. Give the same nearest-centroid classifier eight labeled
+#     examples per class and compare with untrained and shuffled-view encoders.'
+#   comparison:
+#     metric: Accuracy
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Untrained encoder
+#       path:
+#       - arms
+#       - untrained
+#       - accuracy
+#       format: percent
+#     - label: Shuffled-view pretraining
+#       path:
+#       - arms
+#       - permuted_views
+#       - accuracy
+#       format: percent
+#     - label: Reconstruction pretraining
+#       path:
+#       - arms
+#       - reconstruction
+#       - accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The hidden class is never a reconstruction input or target. Every encoder uses the same small labeled probe;
+#     all required control margins still count toward the verdict.
+#   criteria:
+#     prefixes:
+#       untrained: Untrained encoder
+#       reconstruction: Reconstruction pretraining
+#       permuted_views: Shuffled-view pretraining
+# evidence-plot:
+#   target: class
+#   focus: Do reconstruction embeddings improve a separate held-out probe?
+#   comparison: Compare trained, untrained, permuted-view, and raw representations under the same probe labels.
+#   limit: A reconstruction objective need not produce the geometry required by the downstream class task.
+#   geometry:
+#   - reconstruction
+#   - untrained
+#   supplements:
+#     geometry:
+#       mode: representation-geometry
+#   renderer: plot
+# evidence-cost:
+#   baseline: 46
+#   candidate: 47
 # ---
 #
 # The hidden class influences three imperfect views of a record, but the class label is absent during
@@ -45,10 +98,7 @@
 #
 # The hidden class is used only for the later classifier. During reconstruction, parts of the three visible views are sampled for hiding.
 #
-# ```{typst}
-# //| label: fig-evidence-reconstruction-transfer
-# //| fig-cap: "Selector notes identify hidden values. Each view is sometimes hidden; the downstream class is absent."
-# //| fig-alt: "Model tree with record, first, second, geometry. Selector notes identify hidden values. Each view is sometimes hidden; the downstream class is absent."
+# ```typst
 # #tree(node("record", kind: "root", body: [Export frozen embedding], children: (
 #   node("first", type: "Enum", body: [Noisy synonym; sampled reconstruction]),
 #   node("second", type: "Enum", body: [Independent noisy synonym]),
@@ -74,8 +124,6 @@
 #
 # ## Result
 #
-# {{< evidence P073 status >}}
-#
 # The selected run improves on the untrained encoder but misses the required 0.05 accuracy margin. Raw features score higher here; exporting an embedding alone does not establish useful transfer.
 #
 # Accuracy is measured on independent records after freezing the encoder; no downstream gradient
@@ -84,14 +132,7 @@
 # successful export are mechanical properties, not evidence that reconstruction necessarily gives the
 # best representation for a later task.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P073 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P073 script >}}
+# ## Method
 #
 # ### Process and observability
 #
@@ -125,13 +166,11 @@
 # must be finite, unit-normalized, and leave all parameters unchanged. These
 # gates can fail: failure limits the transfer claim without changing the task.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -333,8 +372,38 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    arms = list(m["arms"])
+    dots(
+        axes[0],
+        [human(arm) for arm in arms] + ["Prepared raw features"],
+        {"Probe accuracy": [m["arms"][arm]["accuracy"] for arm in arms] + [m["raw_accuracy"]]},
+        xlabel="Accuracy with eight labeled references per class",
+        reference=(m["chance_accuracy"], "Four-class chance"),
+        percent=True,
+    )
+    dots(
+        axes[1],
+        [human(arm) for arm in arms],
+        {"Shuffled-probe accuracy": [m["arms"][arm]["shuffled_probe_accuracy"] for arm in arms]},
+        xlabel="Accuracy after shuffling reference labels",
+        reference=(m["chance_accuracy"], "Four-class chance"),
+        percent=True,
+    )
+    for ax in axes:
+        ax.set_xlim(0, 1.02)
+    return (
+        fig,
+        "All representation arms use the same held-out labels and the same small reference-label budget. The raw-feature baseline and shuffled reference labels expose gains that reconstruction loss alone cannot establish.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

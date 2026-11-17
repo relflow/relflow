@@ -4,11 +4,6 @@
 # categories:
 # - Collection overlap
 # description: Predict whether two lists have any ID in common, using IDs absent from training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Original lists
 #   metric:
@@ -19,6 +14,48 @@
 #   - broken_auc
 #   format: auc
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with overlap, left, entity_id, right, entity_id, has_overlap. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow find a shared ID across two lists?
+#   modeling: Generate two lists of previously unseen IDs. Half the records share exactly one ID; half share none.
+#     Hide the overlap answer, then remove the shared member from positive test records while retaining their original
+#     labels. Compare ranking scores before and after that change.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: AUC
+#     conditions:
+#     - label: Match removed
+#       path:
+#       - broken_auc
+#       format: auc
+#     - label: Original lists
+#       path:
+#       - intact_auc
+#       format: auc
+#     definition: 'Ranking score: 0.5 is chance and 1 is perfect separation. This is not the percentage of correct
+#       predictions.'
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: This experiment’s checks deliberately characterize near-chance overlap detection. Checks met means that
+#     measured limitation was reproduced, not that overlap detection succeeded.
+# evidence-plot:
+#   mode: classification
+#   target: has_overlap
+#   focus: Does a shared identity across sibling collections control the prediction?
+#   comparison: Compare intact overlaps, renamed and permuted identities, and deliberately broken overlaps.
+#   limit: Renaming preserves equality structure; breaking overlaps changes the answer's supporting evidence.
+#   labels:
+#     test: Intact sibling overlaps
+#     invariant: Equality-preserving rename and reorder
+#     broken: Overlapping identities broken
+# evidence-cost:
+#   baseline: 57
+#   candidate: 56
 # ---
 #
 # ## Example
@@ -42,10 +79,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-direct-sibling-hash-overlap
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with overlap, left, entity_id, right, entity_id, has_overlap. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("overlap", kind: "root", width: 120pt, children: (
 #   node("left", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("entity_id", type: "Hash"),
@@ -74,18 +108,9 @@
 # response to removing matches. A passing status here means those expected behaviors were reproduced, not
 # that the model successfully learned overlap. The simpler scalar-ID experiment helps locate the difficulty.
 #
-# {{< evidence P028 status >}}
-#
 # This model stays near chance and barely responds to removing the match. The result describes this setup and budget, rather than proving that overlap can never be learned.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P028 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P028 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -105,8 +130,6 @@
 # This result characterizes the tested schema and budget, not an impossibility
 # result for transformers. Compute deterministic overlap in a preprocessor or
 # the application when it is needed today.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -341,6 +364,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

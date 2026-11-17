@@ -4,11 +4,6 @@
 # categories:
 # - Masking
 # description: Provide two redundant measurements of the same signal and sometimes hide an entire branch.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: First view hidden
 #   metric:
@@ -29,6 +24,67 @@
 #   - nrmse
 #   format: error
 # evidence-group: Masking
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. hidden skips a whole view and its descendants.
+#   alt: Model tree with record, views, reading, backup, target. Amber cards are hidden prediction targets. hidden
+#     skips a whole view and its descendants.
+# evidence-review:
+#   question: Can relflow recover when a whole branch is hidden?
+#   modeling: Create two branches carrying redundant measurements of one hidden signal. Randomly hide whole branches
+#     during fitting. On the same test records, measure error with both views, either view alone, and neither view
+#     available.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Neither view available
+#       path:
+#       - patterns
+#       - hiddenhidden
+#       - nrmse
+#       format: number
+#     - label: Only first view available
+#       path:
+#       - patterns
+#       - visiblehidden
+#       - nrmse
+#       format: number
+#     - label: Only second view available
+#       path:
+#       - patterns
+#       - hiddenvisible
+#       - nrmse
+#       format: number
+#     - label: Both views available
+#       path:
+#       - patterns
+#       - visiblevisible
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The target is identical in every condition. The no-view condition checks the information boundary; hidden
+#     descendants must never leak into the answer.
+#   criteria:
+#     prefixes:
+#       hiddenhidden: Both views hidden
+#       hiddenvisible: First view hidden
+#       visiblehidden: Second view hidden
+#       visiblevisible: Both views available
+# evidence-plot:
+#   mode: regression
+#   target: target
+#   focus: How much evidence remains when one or both redundant views are hidden?
+#   comparison: Compare both-view, single-view, no-view, and shuffled conditions on matched records.
+#   limit: Redundant views can preserve information after one is removed; this is not a causal attribution score.
+#   labels:
+#     test: Both views visible
+#     selected: Matched visibility condition
+#     shuffled: Visible values shuffled
+# evidence-cost:
+#   baseline: 34
+#   candidate: 34
 # ---
 #
 # ## Example
@@ -48,10 +104,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-branch-ablation
-# //| fig-cap: "Amber cards are hidden prediction targets. hidden skips a whole view and its descendants."
-# //| fig-alt: "Model tree with record, views, reading, backup, target. Amber cards are hidden prediction targets. hidden skips a whole view and its descendants."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("views", kind: "branch", repeated: true, body: [Skip when `hidden`], children: (
 #     node("reading", type: "Number"),
@@ -80,18 +133,9 @@
 # interventions do not establish causal importance, robustness to noisy sensors, or recovery from arbitrary
 # missing branches.
 #
-# {{< evidence P053 status >}}
-#
 # Either view supports prediction. When both are hidden, the model falls back near the constant baseline; the test shows redundancy, rather than causal attribution.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P053 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P053 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -114,8 +158,6 @@
 # accuracy. The encoded presence bits must equal the union of ancestor and
 # local skip selectors. Unselected backups are explicitly left visible when
 # their branch is available.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -289,6 +331,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

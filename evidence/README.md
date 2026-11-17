@@ -102,22 +102,22 @@ architecture and seeded initialization are checked separately. Source and runtim
 fingerprints change, so old measurements keep their original provenance.
 Historical results are never rewritten or presented as a fresh execution.
 
-The default **core** lane runs in required hosted CI. Additional studies with
-optional resources live in `research/<category>/`; they use the same experiment
-format and appear in the docs with their provisioning requirements. List or run that lane
-explicitly:
+Each file is a self-contained experiment. Its YAML frontmatter owns the reviewed
+question, modeling explanation, primary comparison, criterion labels, diagnostic
+plan, optional publication highlights, and optional scheduling estimates. Custom
+`(bundle, spec)` plot functions live in that same file with their own imports.
+Adding or removing it updates the catalog without editing any side list. See
+[SPEC.md](SPEC.md#self-contained-experiment-files).
+
+All studies live in `experiments/<category>/` and run in the required hosted
+catalog. There are no lanes or optional exclusions. Each script owns its uv
+dependencies and classification tags. Use `--list` to inspect the full catalog,
+or pass IDs to run a local selection explicitly:
 
 ```sh
-uv run evidence/experiments/run.py --lane all --list
-uv run evidence/experiments/run.py --wheel /path/to/provisioned-relflow.whl \
-  --lane research P091
+uv run evidence/experiments/run.py --list
+uv run evidence/experiments/run.py --wheel /path/to/relflow.whl P099 P100
 ```
-
-Read the selected page's Reproduce tab for its declared `evidence-requires`.
-P091 requires TorchJD and P092 requires a real offline Text encoder. P099/P100
-are provisional Duration/Ordinal studies awaiting full paired validation under
-the 0.5 protocol. A research selection does not download
-models, substitute a mocked encoder, or replace a missing measurement with a pass.
 
 Create an authoring file from the repository root:
 
@@ -132,9 +132,6 @@ the decorator and reporting entrypoint. The title defaults to words from the
 filename; the category comes from the first path segment. The display group
 reuses that category's existing group when unambiguous, otherwise its name.
 Use `--title`, `--group`, `--id`, or `--seed` to choose those values.
-Add `--lane research` to scaffold a separately provisioned study. IDs are
-allocated across both lanes, and research sources must describe their resources
-in `evidence-requires`.
 Creation reads declarations without importing experiments or model packages,
 and refuses to overwrite an existing file. IDs increase beyond the current
 maximum instead of filling gaps.

@@ -5,11 +5,6 @@
 # - Vocabulary
 # description: Introduce a new cohort of input identities while keeping output labels and hidden-answer selection
 #   fixed.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Largest probability change, second cohort
 #   metric:
@@ -22,6 +17,48 @@
 #   - admission_mean_drift
 #   format: number
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. hide chooses which label answers are hidden.
+#   alt: Model tree with record, entity, context, label. Amber cards are hidden prediction targets. hide chooses which
+#     label answers are hidden.
+# evidence-review:
+#   question: Can admitting a new input change predictions before learning?
+#   modeling: Train on one cohort of identities, then admit a new cohort from training data without an optimizer update.
+#     Predict the same held-out rows immediately before and after admission. Measure the largest change in predicted
+#     probability for each later cohort.
+#   comparison:
+#     metric: Prediction drift
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Second cohort · largest change
+#       path:
+#       - '1'
+#       - admission_max_drift
+#       format: number
+#     - label: Third cohort · largest change
+#       path:
+#       - '2'
+#       - admission_max_drift
+#       format: number
+#     definition: Absolute change in predictions after an operation, on the scale named in each condition. Zero means
+#       no change.
+#     direction: Task-specific interpretation
+#   note: Unchanged predictions test the admission invariant only. Separate learning-quality gates must also hold
+#     after continued fitting.
+#   criteria:
+#     prefixes:
+#       '0': Initial cohort
+#       '1': Second cohort
+#       '2': Third cohort
+# evidence-plot:
+#   target: target
+#   focus: What changes for existing and newly admitted identity cohorts?
+#   comparison: Follow the same named cohorts before and after each admission phase.
+#   limit: Do not mix a changed cohort population with a change in its predictions.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 65
+#   candidate: 65
 # ---
 #
 # Adding an input identity to a vocabulary and learning that identity's behavior are separate
@@ -40,10 +77,7 @@
 #
 # label is hidden where hide is true. Each new cohort has unrelated identity effects.
 #
-# ```{typst}
-# //| label: fig-evidence-rolling-input-admission
-# //| fig-cap: "Amber cards are hidden prediction targets. hide chooses which label answers are hidden."
-# //| fig-alt: "Model tree with record, entity, context, label. Amber cards are hidden prediction targets. hide chooses which label answers are hidden."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("entity", type: "Category", detail: "Growing input vocabulary"),
 #   node("context", type: "Category", detail: "Fixed low/high evidence"),
@@ -68,8 +102,6 @@
 #
 # ## Result
 #
-# {{< evidence P066 status >}}
-#
 # The selected run records zero prediction drift and unchanged reconstruction NLL when new input
 # identities are admitted, before an optimizer update. Its overall result remains unmet: the second
 # cohort's cold marginal RMSE is 0.1653 against the declared 0.15 limit. Preserving predictions at
@@ -82,14 +114,7 @@
 # an unmet cold-quality criterion, and these staged fits do not test uninterrupted optimizer-state
 # continuation.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P066 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P066 script >}}
+# ## Method
 #
 # ### Training and controls
 #
@@ -107,13 +132,11 @@
 # These quality gates are provisional; the admission invariant is structural.
 # The same generator and gates run unchanged against the pre-fix baseline.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -294,8 +317,43 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    keys = sorted(m, key=int)
+    for index, stage in enumerate(["cold", "admitted", "learned", "shuffled"]):
+        present = [key for key in keys if stage in m[key]]
+        axes[0].plot(
+            [int(key) for key in present],
+            [m[key][stage]["oracle_rmse"] for key in present],
+            marker=MARKERS[index],
+            color=COLORS[index],
+            label=human(stage),
+        )
+    axes[0].set(
+        xticks=list(map(int, keys)),
+        xlabel="New identity cohort",
+        ylabel="RMSE against its conditional oracle",
+        title="Availability and learning are separate",
+    )
+    axes[0].legend(fontsize=8)
+    present = [key for key in keys if "admission_max_drift" in m[key]]
+    dots(
+        axes[1],
+        [f"Cohort {key}" for key in present],
+        {"Maximum admission drift": [m[key]["admission_max_drift"] for key in present]},
+        xlabel="Largest paired output change at admission",
+    )
+    return (
+        fig,
+        "Only measured stages are drawn for each cohort. The admission drift compares the same observations immediately before and after admitting their identities.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

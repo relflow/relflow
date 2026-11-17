@@ -13,7 +13,10 @@ sys.path.insert(0, str(ROOT / "experiments"))
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(f"datatype_proof_{name}", ROOT / "research/datatypes" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(
+        f"datatype_proof_{name}",
+        ROOT / "experiments" / ("temporal" if name == "duration_equivalence" else "representation") / f"{name}.py",
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

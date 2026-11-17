@@ -4,11 +4,6 @@
 # categories:
 # - Category-conditioned reduction
 # description: Ask for a group’s minimum, maximum, average, or total from the same list.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Group A, maximum
 #   metric:
@@ -23,6 +18,82 @@
 #   - intact/sum/A/nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow answer all twelve group-and-operation requests?
+#   modeling: Give each item a group and value, then request one group’s minimum, maximum, average, or total. Hide
+#     the requested answer. Generate independent lists for training and testing, and measure every combination of
+#     three groups and four operations.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Min · group A
+#       path:
+#       - intact/min/A/nrmse
+#       format: number
+#     - label: Min · group B
+#       path:
+#       - intact/min/B/nrmse
+#       format: number
+#     - label: Min · group C
+#       path:
+#       - intact/min/C/nrmse
+#       format: number
+#     - label: Max · group A
+#       path:
+#       - intact/max/A/nrmse
+#       format: number
+#     - label: Max · group B
+#       path:
+#       - intact/max/B/nrmse
+#       format: number
+#     - label: Max · group C
+#       path:
+#       - intact/max/C/nrmse
+#       format: number
+#     - label: Mean · group A
+#       path:
+#       - intact/mean/A/nrmse
+#       format: number
+#     - label: Mean · group B
+#       path:
+#       - intact/mean/B/nrmse
+#       format: number
+#     - label: Mean · group C
+#       path:
+#       - intact/mean/C/nrmse
+#       format: number
+#     - label: Sum · group A
+#       path:
+#       - intact/sum/A/nrmse
+#       format: number
+#     - label: Sum · group B
+#       path:
+#       - intact/sum/B/nrmse
+#       format: number
+#     - label: Sum · group C
+#       path:
+#       - intact/sum/C/nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The chart compares errors across the twelve tasks, not an ablation. All twelve must satisfy their own criteria.
+#   criteria:
+#     operations: group
+# evidence-plot:
+#   target: answer
+#   focus: Can group selection combine with the requested reduction?
+#   comparison: Compare every recorded group-operation cell on a shared error scale.
+#   limit: The cell grid reports tested combinations; a pooled score cannot establish every operation.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 409
+#   candidate: 417
 # ---
 #
 # Two instructions jointly define the answer: which group to select and which operation to apply.
@@ -59,10 +130,7 @@
 # to the shown request. On the same B values, sum would request 0.6, mean 0.15, and min −0.9.
 # Changing the instruction changes the answer without changing the list.
 #
-# ```{typst}
-# //| label: fig-evidence-group-operation-composition
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("request", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -87,25 +155,15 @@
 #
 # ## Result
 #
-# {{< evidence P027 status >}}
-#
 # All tested combinations learn. This exact experiment does not corrupt either request, so stronger
 # evidence that both instructions are used remains needed.
-#
 #
 # Each error percentage uses that particular group's and operation's training-mean baseline. The
 # overview shows a few examples, while the checks cover all twelve combinations. Low errors support
 # the composed task on these familiar labels and fixed group sizes; they do not show that an unseen
 # operation or unseen combination can be composed without training examples.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P027 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P027 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -122,13 +180,11 @@
 # test absent groups and missing values. Sweep reduction width independently of
 # the number of requested cells. See the [filtered-mean control](filtered-mean.html).
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -292,8 +348,69 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import caption
+
+    m = bundle.record["metrics"]
+    identifier = bundle.manifest["id"]
+    cells = []
+    for key, value in m.items():
+        parts = key.split("/")
+        if parts[-1] != "nrmse":
+            continue
+        panel, row, column = ("Intact requests", parts[1], parts[2])
+        cells.append((panel, row, column, float(value), False))
+    if not cells:
+        raise ValueError(f"{identifier}: no authored composition cells matched the captured record")
+    panels = list(dict.fromkeys((item[0] for item in cells)))
+    rows = list(dict.fromkeys((item[1] for item in cells)))
+    columns = list(dict.fromkeys((item[2] for item in cells)))
+    fig = plt.figure(figsize=(max(7.8, len(panels) * 4.5), 4.8), layout="constrained")
+    grid = fig.add_gridspec(1, len(panels) + 1, width_ratios=[*[1] * len(panels), 0.045])
+    maximum = max((value for _, _, _, value, _ in cells))
+    cmap = plt.get_cmap("YlOrRd").copy()
+    cmap.set_bad("#8a9691")
+    for index, panel in enumerate(panels):
+        ax = fig.add_subplot(grid[0, index])
+        matrix = np.full((len(rows), len(columns)), np.nan)
+        flags = {}
+        for p, row, column, value, flag in cells:
+            if p == panel:
+                matrix[rows.index(row), columns.index(column)] = value
+                flags[rows.index(row), columns.index(column)] = flag
+        image = ax.imshow(matrix, cmap=cmap, vmin=0, vmax=max(maximum, 0.1), aspect="auto")
+        ax.set(
+            xticks=range(len(columns)),
+            xticklabels=[human(c) for c in columns],
+            yticks=range(len(rows)),
+            yticklabels=[human(r) for r in rows],
+            title=caption(panel),
+        )
+        ax.tick_params(axis="x", labelsize=9, rotation=15)
+        for i, j in np.ndindex(matrix.shape):
+            value = matrix[i, j]
+            text = "unrecorded" if np.isnan(value) else f"{value:.3f}" + (" *" if flags.get((i, j)) else "")
+            ax.text(
+                j, i, text, ha="center", va="center", fontsize=9, color="white" if value > maximum * 0.65 else "#243b35"
+            )
+    fig.colorbar(image, cax=fig.add_subplot(grid[0, -1]), label="Normalized RMSE (lower is better)")
+    note = "All panels share the same error scale. Every displayed cell is a measured condition; gray cells are unrecorded, rather than zero."
+    return (
+        fig,
+        note,
+        {
+            "metric_cells": [
+                {"panel": p, "row": r, "column": c, "normalized_rmse": value, "withheld": flag}
+                for p, r, c, value, flag in cells
+            ]
+        },
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

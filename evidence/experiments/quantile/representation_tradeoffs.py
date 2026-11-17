@@ -4,11 +4,6 @@
 # categories:
 # - Quantile
 # description: Compare Number and Quantile on rank and amount tasks, with clean training and rare corrupt measurements.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Corrupt training, Number
 #   metric:
@@ -23,6 +18,61 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Separate models predict rank or amount.
+#   alt: Model tree with measurement, x, target. Amber cards are hidden prediction targets. Separate models predict
+#     rank or amount.
+# evidence-review:
+#   question: Should a number be represented by size or percentile?
+#   modeling: Give the same numeric tasks to Number and Quantile models. In the highlighted condition, corrupt 2%
+#     of training input measurements by multiplying them by 100 without changing their targets; keep evaluation clean.
+#     Compare source-unit RMSE on the numeric task.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Corrupt training, Number
+#       path:
+#       - input_tasks
+#       - amount_number_contaminated
+#       - rmse
+#       format: number
+#     - label: Corrupt training, Quantile
+#       path:
+#       - input_tasks
+#       - amount_quantile_contaminated
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The chart isolates contaminated inputs. Clean-data, rank, tail, and noisy-target experiments remain below;
+#     the test does not presume either type always wins.
+#   criteria:
+#     prefixes:
+#       amount_number_clean: Numeric task · Number · clean inputs
+#       amount_number_contaminated: Numeric task · Number · contaminated inputs
+#       amount_quantile_clean: Numeric task · Quantile · clean inputs
+#       amount_quantile_contaminated: Numeric task · Quantile · contaminated inputs
+#       rank_number_clean: Rank task · Number · clean inputs
+#       rank_number_contaminated: Rank task · Number · contaminated inputs
+#       rank_quantile_clean: Rank task · Quantile · clean inputs
+#       rank_quantile_contaminated: Rank task · Quantile · contaminated inputs
+#       number_mae: Number target · MAE objective
+#       number_mse: Number target · MSE objective
+#       quantile_mae: Quantile target · MAE objective
+#       quantile_mse: Quantile target · MSE objective
+# evidence-plot:
+#   target: target
+#   focus: When do representation and loss choices favor different answers?
+#   comparison: Separate corrupted-input robustness from the noisy-target population optima.
+#   limit: Source-unit and percentile objectives need not share an optimum, especially in heavy tails.
+#   supplements:
+#     optima:
+#       renderer: plot_optima
+#   renderer: plot
+# evidence-cost:
+#   baseline: 107
+#   candidate: 108
 # ---
 #
 # A number tells us both an amount and a position in a distribution. For example,
@@ -50,10 +100,7 @@
 # its original answer. This creates a misleading input measurement. The test does
 # this to 2% of training inputs; its validation and test observations stay clean.
 #
-# ```{typst}
-# //| label: fig-evidence-numeric-tradeoffs
-# //| fig-cap: "Amber cards are hidden prediction targets. Separate models predict rank or amount."
-# //| fig-alt: "Model tree with measurement, x, target. Amber cards are hidden prediction targets. Separate models predict rank or amount."
+# ```typst
 # #tree(node("measurement", kind: "root", children: (
 #   node("x", type: "Number / Quantile", detail: "Matched input choice"),
 #   node("target", kind: "target", type: "Enum / Number", detail: "Separate task models"),
@@ -74,12 +121,9 @@
 # training. Each model is therefore compared with the optimum for its own
 # objective, as well as scored in common original units.
 #
-#
 # Measure overall and tail errors separately. Also compare noisy output targets learned in original units versus percentile units.
 #
 # ## Result
-#
-# {{< evidence P077 status >}}
 #
 # Read rank accuracy and amount error as different questions. Contamination and
 # tail comparisons are diagnostics; the checks do not require Quantile to win.
@@ -87,14 +131,7 @@
 # the objective asks the model to estimate. These generated distributions support
 # a controlled comparison, rather than a universal datatype recommendation.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P077 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P077 script >}}
+# ## Method
 #
 # ### Input representation experiment
 #
@@ -136,13 +173,11 @@
 # of at least 10% of the conditional source means, establishing a behavioral
 # distinction in addition to the analytical one.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -407,8 +442,77 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    amount = [key for key in m["input_tasks"] if key.startswith("amount_")]
+    rank = [key for key in m["input_tasks"] if key.startswith("rank_")]
+    dots(
+        axes[0],
+        [human(key.removeprefix("amount_")) for key in amount],
+        {
+            "Central RMSE": [m["input_tasks"][key]["central_rmse"] for key in amount],
+            "Tail RMSE": [m["input_tasks"][key]["tail_rmse"] for key in amount],
+        },
+        xlabel="Amount prediction RMSE (source units)",
+    )
+    dots(
+        axes[1],
+        [human(key.removeprefix("rank_")) for key in rank],
+        {
+            "Central accuracy": [m["input_tasks"][key]["central_accuracy"] for key in rank],
+            "Tail accuracy": [m["input_tasks"][key]["tail_accuracy"] for key in rank],
+        },
+        xlabel="Rank classification accuracy",
+        percent=True,
+    )
+    axes[1].set_xlim(0, 1.02)
+    return (
+        fig,
+        "Input contamination, input representation, and target task stay distinct. Central and tail populations use the proof's declared partition; regression error and classification accuracy have separate axes.",
+        {},
+    )
+
+
+def plot_optima(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.5)
+    tasks = ["number_mae", "number_mse", "quantile_mae", "quantile_mse"]
+    optima = m["population_optima"]
+    for index, task in enumerate(tasks):
+        values = m["noisy_targets"][task]["group_predictions"]
+        x = np.arange(len(values)) + (index - 1.5) * 0.07
+        axes[0].scatter(x, values, color=COLORS[index], marker=MARKERS[index], s=35, label=human(task))
+        axes[0].scatter(x, optima[task], color=COLORS[index], marker="x", s=40)
+    axes[0].set(
+        xticks=range(3),
+        xticklabels=["Group 1", "Group 2", "Group 3"],
+        ylabel="Predicted answer in source units",
+        title="Different objectives can prefer different answers",
+    )
+    axes[0].legend(fontsize=8)
+    dots(
+        axes[1],
+        [human(task) for task in tasks],
+        {"Mean relative optimum error": [m["noisy_targets"][task]["mean_relative_optimum_error"] for task in tasks]},
+        xlabel="Relative distance to each task's own population optimum",
+    )
+    return (
+        fig,
+        "Filled markers are learned group-mean predictions; crosses are the known population optima for the declared representation and loss. Each arm is judged against its own optimum, not against an incompatible objective's answer.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

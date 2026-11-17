@@ -5,11 +5,6 @@
 # - Representation
 # description: Predict a signal from three noisy sensors, sometimes hiding one or more readings. An extra sensor carries
 #   no useful information.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Error with all three sensors
 #   metric:
@@ -22,6 +17,69 @@
 #   - corrupted_first_sensor_mse
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, first, second, third, nuisance, target. Amber cards are hidden prediction targets.
+#     Other fields provide the input.
+# evidence-review:
+#   question: Can relflow combine noisy measurements with missing readings?
+#   modeling: Generate three noisy sensor readings of one hidden signal and an unrelated fourth reading. Randomly
+#     hide sensors during training, excluding one visibility pattern. Compare prediction error from each sensor alone
+#     with the error from all three together on the same test records.
+#   comparison:
+#     metric: MSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Sensor 1 alone
+#       path:
+#       - patterns
+#       - '100'
+#       - mse
+#       format: number
+#     - label: Sensor 2 alone
+#       path:
+#       - patterns
+#       - '010'
+#       - mse
+#       format: number
+#     - label: Sensor 3 alone
+#       path:
+#       - patterns
+#       - '001'
+#       - mse
+#       format: number
+#     - label: All three sensors
+#       path:
+#       - patterns
+#       - '111'
+#       - mse
+#       format: number
+#     definition: Mean squared prediction error, in squared target units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: 'The corrupt-sensor stress test is secondary: the model was not trained to detect that corruption. The full
+#     verdict also checks missingness patterns and information leakage.'
+#   criteria:
+#     prefixes:
+#       '100': Sensor 1 visible
+#       '101': Sensors 1 and 3 visible
+#       '110': Sensors 1 and 2 visible
+#       '111': All three sensors visible
+#       '000': No sensors visible
+#       '001': Sensor 3 visible
+#       '010': Sensor 2 visible
+#       '011': Sensors 2 and 3 visible
+# evidence-plot:
+#   target: target
+#   focus: Does combining or removing noisy measurements change predictions for the right reason?
+#   comparison: Compare all eight visibility patterns, the exact conditional mean, and paired corruption controls.
+#   limit: The generator's conditional interval is not learned model uncertainty; the no-evidence check remains visible.
+#   supplements:
+#     controls:
+#       renderer: plot_controls
+#   renderer: plot
+# evidence-cost:
+#   baseline: 23
+#   candidate: 24
 # ---
 #
 # Every useful sensor is a noisy reading of the same hidden signal. The task requires combining
@@ -44,10 +102,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-incomplete-evidence
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, first, second, third, nuisance, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("first", type: "Number", body: [Skip when `hide_first`]),
 #   node("second", type: "Number", body: [Skip when `hide_second`]),
@@ -74,8 +129,6 @@
 #
 # ## Result
 #
-# {{< evidence P074 status >}}
-#
 # The selected run meets the combined-sensor and masking checks but misses the no-evidence prior
 # requirement. A corrupted visible sensor can still sharply increase error; the stress result is
 # diagnostic.
@@ -86,14 +139,7 @@
 # recover the corresponding two-sensor prediction, but this does not imply that a visible corrupted
 # reading is automatically rejected.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P074 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P074 script >}}
+# ## Method
 #
 # ### Process and information boundary
 #
@@ -127,13 +173,11 @@
 # Hiding that same corrupted sensor must exactly recover its corresponding
 # two-sensor prediction. All comparisons use the final fixed-budget model.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -330,8 +374,196 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from matplotlib.colors import LogNorm
+
+    from evidence.diagnostics.data import Bundle
+    from evidence.diagnostics.plots import COLORS, finite
+
+    def sensor_data(bundle: Bundle) -> dict:
+        frames = [frame for frame in bundle.frames if frame["function"] == "prediction"]
+        if len(frames) != 19:
+            raise ValueError(
+                f"{bundle.manifest['id']} requires its eight paired visibility/poison controls and three stress readouts"
+            )
+        result = {}
+        for index, frame in enumerate(frames):
+            rows = bundle.value(frame["values"]["rows"])
+            prediction = finite(bundle.value(frame["result"]))
+            if index < 16 and index % 2 == 1:
+                continue
+            key = "".join(("0" if rows[0][f"hide_{name}"] else "1" for name in ["first", "second", "third"]))
+            if index >= 16:
+                key = ["nuisance_permuted", "first_sensor_corrupted", "corrupted_sensor_hidden"][index - 16]
+            item = {"rows": rows, "prediction": prediction, "target": finite([row["target"] for row in rows])}
+            if index < 16:
+                precision = np.array(
+                    [not rows[0][f"hide_{name}"] for name in ["first", "second", "third"]]
+                ) / np.square([0.8, 1, 1.2])
+                variance = 1 / (1 + precision.sum())
+                readings = finite([[row[name] for name in ["first", "second", "third"]] for row in rows])
+                item.update(oracle_mean=readings @ precision * variance, oracle_variance=float(variance))
+                metric = bundle.record["metrics"]["patterns"][key]
+                np.testing.assert_allclose(
+                    np.mean((prediction - item["target"]) ** 2), metric["mse"], rtol=1e-10, atol=1e-12
+                )
+                np.testing.assert_allclose(
+                    np.mean((prediction - item["oracle_mean"]) ** 2),
+                    metric["distance_to_oracle"],
+                    rtol=1e-10,
+                    atol=1e-12,
+                )
+            result[key] = item
+        return result
+
+    data = sensor_data(bundle)
+    fig = plt.figure(figsize=(13, 7.2), layout="constrained")
+    grid = fig.add_gridspec(2, 5, width_ratios=[1, 1, 1, 1, 0.055])
+    densities = []
+    for index, key in enumerate(["111", "110", "101", "011", "100", "010", "001", "000"]):
+        ax = fig.add_subplot(grid[index // 4, index % 4])
+        d = data[key]
+        if key == "000":
+            ax.scatter([row["nuisance"] for row in d["rows"]], d["prediction"], s=3, alpha=0.25, color=COLORS[1])
+            ax.axhline(0, color="gray", ls="--")
+            ax.set_xlabel("Irrelevant nuisance")
+        else:
+            densities.append(
+                ax.hexbin(
+                    d["oracle_mean"],
+                    d["prediction"],
+                    gridsize=32,
+                    extent=(-3.5, 3.5, -3.5, 3.5),
+                    mincnt=1,
+                    cmap="viridis",
+                    rasterized=True,
+                )
+            )
+            ax.plot([-3.5, 3.5], [-3.5, 3.5], ls="--", color="gray", lw=1)
+            ax.set_xlabel("Conditional mean")
+        ax.set(
+            ylabel="Model prediction",
+            xlim=(-3.5, 3.5),
+            ylim=(-3.5, 3.5),
+            title=key
+            + (
+                ": withheld pattern" if key == "101" else ": no useful sensors" if key == "000" else ": seen visibility"
+            ),
+        )
+        ax.set_aspect("equal")
+        ax.tick_params(labelsize=9)
+        distance = bundle.record["metrics"]["patterns"][key]["distance_to_oracle"]
+        ax.text(0.03, 0.96, f"Oracle distance MSE {distance:.3f}", transform=ax.transAxes, va="top", fontsize=8)
+    scale = LogNorm(vmin=1, vmax=max((float(density.get_array().max()) for density in densities)))
+    for density in densities:
+        density.set_norm(scale)
+    fig.colorbar(densities[0], cax=fig.add_subplot(grid[:, 4]), label="Records per hexagon (log)")
+    samples = {
+        key: {
+            "prediction": d["prediction"][:16].tolist(),
+            "target": d["target"][:16].tolist(),
+            "oracle_mean": d["oracle_mean"][:16].tolist(),
+            "oracle_variance": d["oracle_variance"],
+            "readings": [[row[name] for name in ["first", "second", "third"]] for row in d["rows"][:16]],
+        }
+        for key, d in data.items()
+        if len(key) == 3
+    }
+    return (
+        fig,
+        "All eight conditions use the same 2,048 held-out observations. Hexagons share a count scale. With no useful sensor, the optimal mean is zero; that panel exposes any response to nuisance. Per-pattern errors are recomputed from retained predictions and verified against the proof.",
+        {"kind": "fusion", "patterns": samples},
+    )
+
+
+def plot_controls(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.data import Bundle
+    from evidence.diagnostics.plots import COLORS, axes_pair, finite
+
+    def sensor_data(bundle: Bundle) -> dict:
+        frames = [frame for frame in bundle.frames if frame["function"] == "prediction"]
+        if len(frames) != 19:
+            raise ValueError(
+                f"{bundle.manifest['id']} requires its eight paired visibility/poison controls and three stress readouts"
+            )
+        result = {}
+        for index, frame in enumerate(frames):
+            rows = bundle.value(frame["values"]["rows"])
+            prediction = finite(bundle.value(frame["result"]))
+            if index < 16 and index % 2 == 1:
+                continue
+            key = "".join(("0" if rows[0][f"hide_{name}"] else "1" for name in ["first", "second", "third"]))
+            if index >= 16:
+                key = ["nuisance_permuted", "first_sensor_corrupted", "corrupted_sensor_hidden"][index - 16]
+            item = {"rows": rows, "prediction": prediction, "target": finite([row["target"] for row in rows])}
+            if index < 16:
+                precision = np.array(
+                    [not rows[0][f"hide_{name}"] for name in ["first", "second", "third"]]
+                ) / np.square([0.8, 1, 1.2])
+                variance = 1 / (1 + precision.sum())
+                readings = finite([[row[name] for name in ["first", "second", "third"]] for row in rows])
+                item.update(oracle_mean=readings @ precision * variance, oracle_variance=float(variance))
+                metric = bundle.record["metrics"]["patterns"][key]
+                np.testing.assert_allclose(
+                    np.mean((prediction - item["target"]) ** 2), metric["mse"], rtol=1e-10, atol=1e-12
+                )
+                np.testing.assert_allclose(
+                    np.mean((prediction - item["oracle_mean"]) ** 2),
+                    metric["distance_to_oracle"],
+                    rtol=1e-10,
+                    atol=1e-12,
+                )
+            result[key] = item
+        return result
+
+    data = sensor_data(bundle)
+    fig, axes = axes_pair(width=10, height=4.6)
+    cases = [
+        ("111", "All sensors clean"),
+        ("first_sensor_corrupted", "First sensor +6"),
+        ("011", "First sensor hidden"),
+        ("corrupted_sensor_hidden", "Corrupted sensor hidden"),
+    ]
+    errors = [(data[key]["prediction"] - data[key]["target"]) ** 2 for key, _ in cases]
+    axes[0].boxplot(
+        errors,
+        orientation="horizontal",
+        tick_labels=[label for _, label in cases],
+        showfliers=False,
+        medianprops={"color": COLORS[1]},
+    )
+    axes[0].set(xlabel="Squared prediction error", title="Paired corruption and removal", xscale="symlog")
+    for key, reference, label, color in [
+        ("first_sensor_corrupted", "111", "Visible corruption", COLORS[1]),
+        ("corrupted_sensor_hidden", "011", "Corrupted reading hidden", COLORS[2]),
+    ]:
+        axes[1].scatter(
+            data[reference]["prediction"],
+            data[key]["prediction"] - data[reference]["prediction"],
+            s=6,
+            alpha=0.2,
+            color=color,
+            label=label,
+        )
+    axes[1].axhline(0, ls="--", color="gray")
+    axes[1].set(
+        xlabel="Prediction before intervention",
+        ylabel="Paired prediction change",
+        title="Does hiding restore the corresponding output?",
+    )
+    axes[1].legend(fontsize=8)
+    return (
+        fig,
+        "Boxes show medians, quartiles, and 1.5-IQR whiskers, with outliers omitted from that display. The scatter includes every pair. Hidden corruption is compared with the same clean two-sensor condition, which has less evidence than the all-clean condition.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

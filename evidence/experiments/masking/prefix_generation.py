@@ -5,11 +5,6 @@
 # - Masking
 # description: Expose the beginning of a simple numeric sequence, hide its remaining events, and predict the next
 #   value.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Next value after two events
 #   metric:
@@ -23,6 +18,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Masking
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. future hides events; next chooses the answer.
+#   alt: Model tree with record, events, value. Selector notes identify hidden values. future hides events; next chooses
+#     the answer.
+# evidence-review:
+#   question: Can relflow predict the next value without seeing the future?
+#   modeling: Generate straight-line sequences with a fresh starting value and increment for every record. Show only
+#     the first two to four values and hide the future. For the primary comparison, roll predictions forward from
+#     two true starting values and compare with always repeating the last observed value.
+#   comparison:
+#     metric: RMSE
+#     kind: Baseline reference
+#     conditions:
+#     - label: Repeat the last observed value
+#       path:
+#       - rollout
+#       - persistence_rmse
+#       format: number
+#     - label: Model rollout
+#       path:
+#       - rollout
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: This is a short synthetic linear rollout, not a general time-series forecast. Separate tests score each
+#     prefix length and verify that hidden future values cannot leak.
+# evidence-plot:
+#   target: events/value
+#   focus: Can visible prefixes support the next hidden value and a rollout?
+#   comparison: Separate one-step prefix predictions, swapped prefixes, and multi-step generated continuations.
+#   limit: Rollout error and one-step normalized error have different scales and are shown separately.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 40
+#   candidate: 40
 # ---
 #
 # ## Example
@@ -44,10 +75,7 @@
 #
 # Events marked future are hidden. next selects the single value to predict.
 #
-# ```{typst}
-# //| label: fig-evidence-prefix-generation
-# //| fig-cap: "Selector notes identify hidden values. future hides events; next chooses the answer."
-# //| fig-alt: "Model tree with record, events, value. Selector notes identify hidden values. future hides events; next chooses the answer."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("events", kind: "branch", repeated: true, body: [Skip when `future`; no reduction], children: (
 #     node("value", type: "Number", body: [Reconstruct when `next`]),
@@ -74,18 +102,9 @@
 # progressions; the result does not establish open-ended sequence modeling, language generation, or
 # forecasting with changing dynamics.
 #
-# {{< evidence P054 status >}}
-#
 # Next-value prediction and the short rollout work on these sequences. This does not establish language generation or general forecasting.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P054 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P054 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -110,13 +129,11 @@
 # coordinate, while encoder presence selects exactly the prefix. The supplied
 # correct suffix is used only as an evaluation label, never in the rollout.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -314,8 +331,34 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.5)
+    keys = sorted(m["prefixes"], key=int)
+    dots(
+        axes[0],
+        [f"{key} visible events" for key in keys],
+        {
+            "Actual prefix": [m["prefixes"][key]["nrmse"] for key in keys],
+            "Swapped prefix": [m["prefixes"][key]["shuffled_nrmse"] for key in keys],
+        },
+        xlabel="One-step normalized RMSE",
+    )
+    dots(
+        axes[1],
+        ["Autoregressive rollout", "Last-value persistence"],
+        {"Source-unit RMSE": [m["rollout"]["rmse"], m["rollout"]["persistence_rmse"]]},
+        xlabel="Multi-step rollout RMSE in source units",
+    )
+    return (
+        fig,
+        "One-step predictions and repeated rollout are different tests and use separate scales. Only evaluated prefix lengths are shown; future-value poisoning remains an independent masking check.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

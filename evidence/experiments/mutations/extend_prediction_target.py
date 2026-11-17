@@ -4,11 +4,6 @@
 # categories:
 # - Schema mutation
 # description: Add hidden target w to a model already trained to predict u and v from a and b.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: New target before training
 #   metric:
@@ -27,6 +22,51 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, a, b, u, v, w. Amber cards are hidden prediction targets. Other fields provide the
+#     input.
+# evidence-review:
+#   question: What happens when a new prediction target is added?
+#   modeling: Train a model to predict two hidden numeric targets from inputs a and b. Add a third hidden target,
+#     w, without replacing the existing heads. Measure w’s RMSE immediately after the edit and after continued training
+#     on all targets.
+#   comparison:
+#     kind: Before and after
+#     metric: RMSE
+#     conditions:
+#     - label: Before continued training
+#       path:
+#       - arms
+#       - extended
+#       - before
+#       - w
+#       - rmse
+#       format: number
+#     - label: After continued training
+#       path:
+#       - arms
+#       - extended
+#       - after
+#       - w
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Learning the new target is only part of the test. Separate criteria check preservation of existing state
+#     and predictions, optimizer coverage, and save/load.
+# evidence-plot:
+#   mode: mutation
+#   target: w
+#   focus: What transfers when a new prediction target is added?
+#   comparison: Compare validation trajectories for the extended model, controls, and a fresh matched adaptation run.
+#   limit: The source model has prior training; adaptation steps and cumulative training are different budgets.
+#   targets:
+#   - w
+#   - u
+# evidence-cost:
+#   baseline: 158
+#   candidate: 159
 # ---
 #
 # Start with a model that already answers two questions about the same pair of
@@ -63,10 +103,7 @@
 # two answers remain hidden from the input encoder, so the new task still has
 # to be learned from `a` and `b`.
 #
-# ```{typst}
-# //| label: fig-evidence-mutations-add-target
-# //| fig-alt: "Model tree with record, a, b, u, v, w. Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("a", type: "Number"),
 #   node("b", type: "Number"),
@@ -102,8 +139,6 @@
 #
 # ## Result
 #
-# {{< evidence P047 status >}}
-#
 # Read the preservation checks and the learning curve as separate results.
 # The checks tell you whether the edit preserved existing state and predictions;
 # the curve shows how the added task is learned during further training. Low
@@ -114,14 +149,7 @@
 # retention when old labels are unavailable, an advantage over every fresh
 # model, or transfer to a different data distribution.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P047 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P047 script >}}
+# ## Method
 #
 # ### Remaining work
 #
@@ -134,8 +162,6 @@
 # measure a simple useful extension, not transfer to a new data distribution.
 # The pooling-scale diagnostic helps investigate preservation failures: should
 # permanently hidden outputs change the capacity used to scale visible evidence?
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -440,6 +466,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

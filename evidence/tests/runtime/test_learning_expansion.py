@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
@@ -71,49 +70,3 @@ def test_anomaly_marginal_baseline_is_exactly_chance_and_noise_is_heterogeneous(
         for group in experiment.GROUPS
     }
     assert np.std(errors["noisy"]) > 6 * np.std(errors["quiet"])
-
-
-def test_objectives_share_an_observed_vector_but_require_distinct_coordinates():
-    experiment = load("research/representation/objective_interference.py")
-    rows = list(experiment.records(128, 11))
-    for row in rows:
-        assert len(row["observations"]) == 8
-        assert row["primary"] == row["observations"][:4]
-        assert len(row["auxiliary"]) == 4
-    assert (
-        np.mean(
-            np.square(
-                np.asarray([row["auxiliary"] for row in rows]) - np.asarray([row["observations"][4:] for row in rows])
-            )
-        )
-        > 0.03
-    )
-
-
-@pytest.mark.parametrize("arm", ["primary_only", "auxiliary_only", "summed", "jacobian"])
-@pytest.mark.parametrize("weight", [1.0, 8.0])
-def test_objective_interference_arms_construct_with_a_valid_shared_bottleneck(arm, weight):
-    experiment = load("research/representation/objective_interference.py")
-    model = experiment.build(arm, weight)
-    assert model.schema.d_model < 8
-
-
-def test_text_corpus_holds_out_whole_phrases_and_requires_both_inputs():
-    experiment = load("research/representation/text_semantics.py")
-    phrases = [
-        {phrase for intent in experiment.CORPUS[split] for phrase in intent} for split in ("train", "validate", "test")
-    ]
-    assert not (phrases[0] & phrases[1] or phrases[0] & phrases[2] or phrases[1] & phrases[2])
-    rows = list(experiment.records(512, 11, "test"))
-    for policy in experiment.POLICIES:
-        assert np.mean([row["review"] for row in rows if row["policy"] == policy]) == 0.5
-    scores = experiment.measure(np.full(len(rows), 0.5), rows)
-    assert scores["accuracy"] == 0.5
-    assert np.isfinite(scores["nll"])
-
-
-def test_text_resource_requires_explicit_real_offline_snapshot(monkeypatch):
-    experiment = load("research/representation/text_semantics.py")
-    monkeypatch.delenv("EVIDENCE_TEXT_MODEL", raising=False)
-    with pytest.raises(RuntimeError, match="pinned local"):
-        experiment.resource()

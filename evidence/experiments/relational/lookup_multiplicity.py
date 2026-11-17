@@ -3,13 +3,7 @@
 # title: Can lookup handle absent keys and several matches?
 # categories:
 # - Relational
-# description: A fresh query key selects zero or more source payloads, with hidden existence and mean-payload
-#   outputs.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: A fresh query key selects zero or more source payloads, with hidden existence and mean-payload outputs.
 # evidence-readout:
 # - label: One-match error
 #   metric:
@@ -24,6 +18,55 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Visible inputs and the hidden prediction target for this controlled task.
+#   alt: A fresh query key selects zero or more source payloads, with hidden existence and mean-payload outputs.
+# evidence-review:
+#   question: Can lookup handle absent keys and several matches?
+#   modeling: Create a fresh query ID with zero, one, two, or three matching source records. Hide both whether any
+#     match exists and the average of matching payloads; the synthetic no-match payload is zero. Score match detection
+#     separately for every match count.
+#   comparison:
+#     metric: Accuracy
+#     kind: Recorded conditions
+#     conditions:
+#     - label: 0 matching sources · match detection
+#       path:
+#       - intact
+#       - matches_0
+#       - found_accuracy
+#       format: percent
+#     - label: 1 matching sources · match detection
+#       path:
+#       - intact
+#       - matches_1
+#       - found_accuracy
+#       format: percent
+#     - label: 2 matching sources · match detection
+#       path:
+#       - intact
+#       - matches_2
+#       - found_accuracy
+#       format: percent
+#     - label: 3 matching sources · match detection
+#       path:
+#       - intact
+#       - matches_3
+#       - found_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The primary chart shows whether any match was found. Numeric retrieval, record reordering, and broken-key
+#     controls must pass their own criteria; this is not an exact database join.
+# evidence-plot:
+#   target: answer
+#   focus: Can the model distinguish missing, unique, and duplicated matches?
+#   comparison: Separate match probability from numeric answer error at each declared multiplicity.
+#   limit: A correct found/not-found flag does not establish the right numeric aggregation for duplicates.
+#   renderer: plot
 # ---
 #
 # The query selects every source record with the same identity. In the illustration, owl matches 0.2 and
@@ -44,10 +87,7 @@
 # answer: 0.5
 # ```
 #
-# ```{typst}
-# //| label: fig-evidence-p098
-# //| fig-cap: "Visible inputs and the hidden prediction target for this controlled task."
-# //| fig-alt: "A fresh query key selects zero or more source payloads, with hidden existence and mean-payload outputs."
+# ```typst
 # #tree(node("lookup", kind: "root", children: (node("source", kind: "branch", children: (node("entity_id", type: "Hash"), node("value", type: "Number"))), node("query_key", type: "Hash"), node("found", kind: "target", type: "Boolean"), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
@@ -61,21 +101,12 @@
 #
 # ## Result
 #
-# {{< evidence P098 status >}}
-#
 # These checks define a new experiment. A full recorded run is required before claiming that the model
 # meets them. Lower normalized error is better; a value of one matches the stated constant reference. The
 # numerical gates are provisional and must be calibrated on separate validation seeds rather than adjusted
 # after seeing acceptance-test outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P098 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P098 script >}}
+# ## Method
 #
 # ### Process, controls, and held-out evaluation
 #
@@ -90,12 +121,11 @@
 # Reordered quality is gated, but exact permutation invariance is not assumed of positional attention. This
 # learned approximate retrieval task is not an exact database-join contract.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -303,8 +333,75 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.7)
+    conditions = [name for name in ["intact", "reordered", "changed_query"] if name in m]
+    if not conditions:
+        conditions = [name for name, value in m.items() if isinstance(value, dict) and "matches_0" in value]
+    for index, name in enumerate(conditions):
+        x = list(range(4))
+        values = m[name]
+        axes[0].plot(
+            x,
+            [values[f"matches_{count}"]["found_accuracy"] for count in x],
+            marker=MARKERS[index],
+            color=COLORS[index],
+            label=human(name),
+        )
+        axes[1].plot(
+            x,
+            [values[f"matches_{count}"]["payload_rmse"] for count in x],
+            marker=MARKERS[index],
+            color=COLORS[index],
+            label=human(name),
+        )
+    axes[0].set(
+        title="Does a matching key exist?",
+        xlabel="Number of matches",
+        ylabel="Found/not-found accuracy",
+        xticks=range(4),
+        ylim=(0, 1.03),
+    )
+    axes[0].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].set(
+        title="Is the numeric answer right?",
+        xlabel="Number of matches",
+        ylabel="Payload RMSE (source units)",
+        xticks=range(4),
+    )
+    for ax in axes:
+        ax.legend(fontsize=8)
+        ax.grid(alpha=0.18)
+    frame = next((frame for frame in bundle.frames if frame["function"] == "predict"))
+    rows = bundle.value(frame["values"]["rows"])
+    probability, predicted = bundle.value(frame["result"])
+    samples = [
+        {
+            "coordinate": [i],
+            "input": row,
+            "actual": row["answer"],
+            "predicted": float(predicted[i]),
+            "found_probability": float(probability[i]),
+            "matches": sum((item["entity_id"] == row["query_key"] for item in row["source"])),
+        }
+        for i, row in enumerate(rows[:16])
+    ]
+    return (
+        fig,
+        "No match has a defined zero payload in this generator. Multiple matches require the mean of their matched values, so existence accuracy and payload error remain separate. Source-unit RMSE keeps the zero-match condition defined.",
+        {
+            "kind": "numeric",
+            "conditions": [{"label": "Intact lookup", "field": "answer", "n": len(rows), "records": samples}],
+        },
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

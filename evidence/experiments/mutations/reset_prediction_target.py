@@ -4,11 +4,6 @@
 # categories:
 # - Schema mutation
 # description: Reset the learned predictor for u while preserving its sibling target v.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Reset target, before retraining
 #   metric:
@@ -35,6 +30,49 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, a, b, u, v. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Can one prediction target be reset and relearned?
+#   modeling: Train two hidden numeric targets, then reset only the learned head for u. Continue training both targets
+#     on the same task. Compare u’s RMSE immediately after reset with its error after retraining.
+#   comparison:
+#     kind: Before and after
+#     metric: RMSE
+#     conditions:
+#     - label: Before continued training
+#       path:
+#       - arms
+#       - selective_reset
+#       - before
+#       - u
+#       - rmse
+#       format: number
+#     - label: After continued training
+#       path:
+#       - arms
+#       - selective_reset
+#       - after
+#       - u
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The sibling v must retain its state and immediate predictions. A complete-reset control checks that erasing
+#     both heads actually removes both learned skills.
+# evidence-plot:
+#   mode: mutation
+#   target: u
+#   focus: What is lost immediately after selectively resetting a target?
+#   comparison: Keep the reset target and sibling target separate during continuation and matched reset controls.
+#   limit: Both labels remain in continued training, so sibling retention is not a frozen-head experiment.
+#   targets:
+#   - u
+#   - v
+# evidence-cost:
+#   baseline: 69
+#   candidate: 70
 # ---
 #
 # ## Example
@@ -54,10 +92,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-mutations-reset-target
-# //| fig-alt: "Model tree with record, a, b, u, v. Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("a", type: "Number"),
 #   node("b", type: "Number"),
@@ -84,18 +119,9 @@
 # adaptation. A preserved sibling immediately after reset is not a claim that its predictions remain fixed
 # during later joint training, nor that resetting a shared ancestor would have the same local effect.
 #
-# {{< evidence P048 status >}}
-#
 # The selected target loses its learned prediction and then relearns; its sibling survives the reset. Resetting a shared branch is a different case.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P048 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P048 script >}}
+# ## Method
 #
 # ### Remaining work
 #
@@ -103,8 +129,6 @@
 # context-producing branch, resetting descendants, and relearning without
 # sibling labels require their own experiments. Localized loss here depends
 # on the selected field being hidden from the shared context.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -368,6 +392,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

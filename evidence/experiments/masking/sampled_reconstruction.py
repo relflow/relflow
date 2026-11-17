@@ -4,11 +4,6 @@
 # categories:
 # - Masking
 # description: Sometimes hide x or y during training, then ask the model to recover the missing value from the other.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Recover y from x
 #   metric:
@@ -23,6 +18,59 @@
 #   - nrmse
 #   format: error
 # evidence-group: Masking
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. Each field is sometimes hidden during training.
+#   alt: Model tree with record, x, y. Selector notes identify hidden values. Each field is sometimes hidden during
+#     training.
+# evidence-review:
+#   question: Can hiding values teach a relationship in both directions?
+#   modeling: Generate independent x values and set y = 2x + 0.3. Randomly hide either field during training so the
+#     model learns to reconstruct it from the other. At test time, request each direction and compare intact context
+#     with shuffled context.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Recover x · shuffled y
+#       path:
+#       - directions
+#       - x
+#       - shuffled_nrmse
+#       format: number
+#     - label: Recover x · correct y
+#       path:
+#       - directions
+#       - x
+#       - nrmse
+#       format: number
+#     - label: Recover y · shuffled x
+#       path:
+#       - directions
+#       - y
+#       - shuffled_nrmse
+#       format: number
+#     - label: Recover y · correct x
+#       path:
+#       - directions
+#       - y
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The four bars use normalized error so both directions can be shown on comparable reference scales. Hidden-value
+#     poisoning is checked separately.
+# evidence-plot:
+#   mode: regression
+#   target: y
+#   focus: Can either field be reconstructed from its visible partner?
+#   comparison: Inspect both directions, hidden-value poisoning, and shuffled visible context.
+#   limit: Only selected hidden targets contribute to each scored reconstruction direction.
+#   additional_targets:
+#   - x
+# evidence-cost:
+#   baseline: 19
+#   candidate: 19
 # ---
 #
 # ## Example
@@ -41,10 +89,7 @@
 #
 # Values marked for reconstruction are hidden. During training, the selection is sampled separately for each field.
 #
-# ```{typst}
-# //| label: fig-evidence-sampled-reconstruction
-# //| fig-cap: "Selector notes identify hidden values. Each field is sometimes hidden during training."
-# //| fig-alt: "Model tree with record, x, y. Selector notes identify hidden values. Each field is sometimes hidden during training."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", body: [35% sampled; query `hide_x`]),
 #   node("y", type: "Number", body: [35% sampled; query `hide_y`]),
@@ -69,18 +114,9 @@
 # bounded synthetic inputs. They do not demonstrate recovery from arbitrary missingness patterns, causal
 # inference, or reliable imputation when real variables contain noise or do not determine one another.
 #
-# {{< evidence P051 status >}}
-#
 # The model learns both directions. When both values are hidden, the original answer cannot be identified; this is a small relationship test, not general imputation evidence.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P051 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P051 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -101,8 +137,6 @@
 # only a hidden source value must leave predictions unchanged within 1e-5.
 # Mask diagnostics also check reproducibility, epoch variation, and the absence
 # of sampled reconstruction requests during ordinary prediction.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -248,6 +282,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

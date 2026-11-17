@@ -56,7 +56,6 @@ def create(
     group: str | None = None,
     identifier: str | None = None,
     seed: int = 0,
-    lane: str = "core",
 ) -> Path:
     """Create a complete authoring skeleton without importing or running a model."""
     match = re.fullmatch(r"([a-z][a-z0-9_]*)/([a-z][a-z0-9_]*)(?:\.py)?", target)
@@ -67,9 +66,7 @@ def create(
     category, name = match.groups()
     if name in {"reporting", "source", "run", "render"}:
         raise ValueError(f"Experiment name {name!r} conflicts with shared tooling; choose another name")
-    if lane not in {"core", "research"}:
-        raise ValueError(f"Create an experiment in the core or research lane; got {lane!r}")
-    directory = root / ("experiments" if lane == "core" else "research")
+    directory = root / "experiments"
     family = directory / category
     path = family / f"{name}.py"
     for parent in (root, directory, family):
@@ -78,7 +75,7 @@ def create(
     if path.exists() or path.is_symlink():
         raise FileExistsError(f"Experiment already exists; choose another name: {path}")
 
-    entries = registry(root, measurements=False, lane="all")
+    entries = registry(root, measurements=False)
     identifier = (
         identifier if identifier is not None else f"P{max((int(key[1:]) for key in entries), default=0) + 1:03d}"
     )
@@ -99,17 +96,10 @@ def create(
     source = template.substitute(
         identifier=json.dumps(declared.id),
         seed=str(declared.seed),
-        number=declared.id,
         title=json.dumps(title, ensure_ascii=False),
         group=json.dumps(group, ensure_ascii=False),
         category=json.dumps(category.replace("_", " ").title(), ensure_ascii=False),
     )
-    if lane == "research":
-        source = source.replace(
-            "# evidence-readout:",
-            '# evidence-requires: ["TODO: Declare the required wheel, extra, or offline model resource"]\n# evidence-readout:',
-            1,
-        )
     family.mkdir(parents=True, exist_ok=True)
     with path.open("x") as handle:
         handle.write(source)
@@ -127,12 +117,6 @@ def main() -> None:
     parser.add_argument("--group", help="New experiment's documentation group; inferred from its category.")
     parser.add_argument("--id", dest="identifier", help="Explicit new P identifier instead of the next available ID.")
     parser.add_argument("--seed", type=int)
-    parser.add_argument(
-        "--lane",
-        choices=("core", "research", "all"),
-        default="core",
-        help="Core is required hosted evidence; research is explicitly provisioned and opt-in.",
-    )
     parser.add_argument("--steps", type=int)
     parser.add_argument("--accelerator", choices=("cpu", "gpu", "mps", "auto"), default="cpu")
     parser.add_argument("--threads", type=int, default=1)
@@ -140,8 +124,6 @@ def main() -> None:
     parser.add_argument("--wheel", type=Path, help="Exact relflow wheel to use instead of the published package.")
     options = parser.parse_args()
     if options.new is not None:
-        if options.lane == "all":
-            parser.error("--new requires one lane: core or research")
         if (
             options.experiments
             or options.steps is not None
@@ -159,7 +141,6 @@ def main() -> None:
                 group=options.group,
                 identifier=options.identifier,
                 seed=options.seed if options.seed is not None else 0,
-                lane=options.lane,
             )
         except (ValueError, FileExistsError) as error:
             parser.error(str(error))
@@ -169,13 +150,11 @@ def main() -> None:
         return
     if any(value is not None for value in (options.title, options.group, options.identifier)):
         parser.error("--title, --group, and --id apply only to --new")
-    entries = registry(root, measurements=False, lane=options.lane)
+    entries = registry(root, measurements=False)
     selected = options.experiments or list(entries)
     unknown = sorted(set(selected) - entries.keys())
     if unknown:
-        parser.error(
-            f"Unknown {options.lane} evidence IDs: {', '.join(unknown)}. Use --lane all --list to see every experiment."
-        )
+        parser.error(f"Unknown evidence IDs: {', '.join(unknown)}. Use --list to see every experiment.")
     if options.list:
         for identifier in selected:
             print(f"{identifier}  {entries[identifier]['script']}")

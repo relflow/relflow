@@ -9,7 +9,7 @@ SVG = "http://www.w3.org/2000/svg"
 XLINK = "http://www.w3.org/1999/xlink"
 ET.register_namespace("", SVG)
 ET.register_namespace("xlink", XLINK)
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 ASSETS = ROOT / "docs/starlight/src/assets/branding"
 
 
@@ -27,7 +27,7 @@ def render():
                 "--ignore-system-fonts",
                 "--input",
                 f"theme={theme}",
-                "docs/starlight/branding/header.typ",
+                "docs/assets/branding/site/header.typ",
                 str(destination),
             ],
             cwd=ROOT,

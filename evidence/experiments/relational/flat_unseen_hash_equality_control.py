@@ -4,11 +4,6 @@
 # categories:
 # - Collection overlap
 # description: Ask whether two individual IDs match, as a simpler comparison beside the two-list overlap test.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Original pairs
 #   metric:
@@ -19,6 +14,46 @@
 #   - broken_auc
 #   format: auc
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with pair, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can relflow compare two unfamiliar IDs directly?
+#   modeling: Give two previously unseen IDs and hide whether they match. Use equal numbers of matching and nonmatching
+#     pairs. After fitting, replace one ID in every matching pair while retaining its original label. Compare AUC
+#     on intact and changed pairs.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: AUC
+#     conditions:
+#     - label: Matches removed
+#       path:
+#       - broken_auc
+#       format: auc
+#     - label: Original pairs
+#       path:
+#       - intact_auc
+#       format: auc
+#     definition: 'Ranking score: 0.5 is chance and 1 is perfect separation. This is not the percentage of correct
+#       predictions.'
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: This isolates single-pair equality from the two-list overlap task in P028.
+# evidence-plot:
+#   mode: classification
+#   target: equal
+#   focus: Does direct Hash equality respond when the match is broken?
+#   comparison: Pair each intact probability with the corresponding broken-equality probability.
+#   limit: The records use previously unseen identities; no persistent vocabulary lookup is available.
+#   labels:
+#     test: Intact equality
+#     broken: Equality match broken
+# evidence-cost:
+#   baseline: 30
+#   candidate: 31
 # ---
 #
 # ## Example
@@ -36,10 +71,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-flat-unseen-hash-equality-control
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with pair, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("pair", kind: "root", width: 120pt, children: (
 #   node("left_id", type: "Hash"),
 #   node("right_id", type: "Hash"),
@@ -65,18 +97,9 @@
 # unfamiliar-ID equality; they do not establish list overlap, joins over arbitrary structures, or reliable
 # behavior for every possible hash collision.
 #
-# {{< evidence P029 status >}}
-#
 # Direct ID matching works, so the harder overlap failure cannot be blamed solely on the Hash representation. This does not establish comparisons between all pairs in two lists.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P029 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P029 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -93,8 +116,6 @@
 # promotion seed matrix. Retain the broken-equality intervention when changing
 # Hash configuration or testing more difficult schemas, so a collection failure
 # can be distinguished from a failure of scalar identity comparison.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -230,6 +251,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

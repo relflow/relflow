@@ -21,7 +21,7 @@ from pathlib import Path, PurePosixPath
 
 from evidence_ci import digest, identity, resolved, task_key
 from experiments.source import describe, metadata, registry
-from record import readme_content, validate
+from record import highlights, readme_content, validate
 from releases import LEGACY, inventory
 from releases import comparison as select_comparison
 
@@ -478,10 +478,8 @@ def equivalent(
             if old_table != new_table:
                 if new != readme_content(headers, new):
                     raise ValueError("README metrics differ from the selected archived measurements")
-                for identifier in ("P021", "P025", "P038"):
-                    selected(
-                        headers[identifier]["header"], manifest, records, manifest_sha256, reports_sha256, run, release
-                    )
+                for identifier, entry, _ in highlights(headers):
+                    selected(entry["header"], manifest, records, manifest_sha256, reports_sha256, run, release)
         # The description is verified against Git by wheel_equivalence; it never changes execution.
         normalized.pop("README.md", None)
     checksum = hashlib.sha256()

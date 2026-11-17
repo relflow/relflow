@@ -4,11 +4,6 @@
 # categories:
 # - Peer-relative inference
 # description: Predict how far each value lies above or below the average of its group.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct groups
 #   metric:
@@ -19,6 +14,40 @@
 #   - corrupted_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow compare an item with its own group?
+#   modeling: Give each item a value and group. Hide its difference from that group’s average, producing one answer
+#     per item. Compare normal records with copies whose group labels are rotated while values and original answers
+#     stay fixed.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Changed groups
+#       path:
+#       - corrupted_rmse
+#       format: number
+#     - label: Correct groups
+#       path:
+#       - intact_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Additional tests shift every value in a group equally and reorder whole items; both should preserve the
+#     corresponding deviations.
+# evidence-plot:
+#   mode: regression
+#   target: items/deviation
+#   focus: Can each item be compared with the peers in its own group?
+#   comparison: Compare intact, corrupted-group, translated, and reordered records.
+#   limit: Group corruption changes the appropriate peer mean; translation should preserve deviations.
+# evidence-cost:
+#   baseline: 171
+#   candidate: 172
 # ---
 #
 # ## Example
@@ -40,10 +69,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-grouped-peer-deviation
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("collection", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -71,18 +97,9 @@
 # deviations. Evidence for these controlled pairs is narrower than evidence for arbitrary group sizes,
 # unseen grouping rules, or exact group-by arithmetic.
 #
-# {{< evidence P032 status >}}
-#
 # The model uses the correct peers and approximately preserves equal group shifts. Every group contains two items, making this simpler than general group averaging.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P032 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P032 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -100,8 +117,6 @@
 # leave-one-out means. Current permutation gates allow approximate behavior.
 # The [one-summary variant](single-query-preserves-group-membership.html) tests
 # whether a narrower collection route retains enough context.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -307,6 +322,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

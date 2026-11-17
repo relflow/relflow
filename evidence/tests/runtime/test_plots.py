@@ -1,4 +1,4 @@
-"""Group and historical Cluster records retain their measured plot shapes."""
+"""Shared primitives and experiment-owned components render recorded values without model imports."""
 
 import ast
 from types import SimpleNamespace
@@ -12,7 +12,6 @@ from evidence.diagnostics.plots import (
     group_composition,
     group_learning,
     group_predictions,
-    grouping,
     trajectory,
 )
 
@@ -29,25 +28,6 @@ def test_trajectory_uses_recorded_metric_names(point, expected):
     fig, _, _ = trajectory(SimpleNamespace(record={"metrics": {"trajectory": [point]}}), {})
     assert tuple(axis.get_ylabel() for axis in fig.axes) == expected
     assert all(len(axis.lines) == 1 for axis in fig.axes)
-
-
-def test_group_partition_plot_uses_fixed_width():
-    arm = {"expected_partition": [0, 0, 1, 1], "assignments": [0, 0, 1, 1], "adjusted_rand": 1.0}
-    bundle = SimpleNamespace(
-        manifest={"id": "P078"}, record={"metrics": {"group_counts": {"4": {"stable": arm, "no_regime": arm}}}}
-    )
-    fig, _, _ = grouping(bundle, {})
-    assert fig.axes[0].images[0].get_array().shape == (2, 4)
-
-
-@pytest.mark.parametrize("identity", ["cluster", "group"])
-@pytest.mark.parametrize("identifier", ["P095", "P112"])
-def test_tradeoff_plot_supports_historical_and_current_arms(identity, identifier):
-    arm = {"nrmse": 0.5, "rare_identity_nrmse": 0.7}
-    arms = {name: arm for name in (identity, "category", "oracle", "shuffled")}
-    bundle = SimpleNamespace(manifest={"id": identifier}, record={"metrics": {"conditions": {"dense": {"arms": arms}}}})
-    fig, _, _ = grouping(bundle, {})
-    assert len(fig.axes[0].collections) == 4
 
 
 def test_regime_prediction_labels_distinguish_the_shuffled_control():
@@ -102,35 +82,62 @@ def test_group_composition_retains_unassigned_identities():
     assert sum(patch.get_width() for patch in fig.axes[0].patches) == 4
 
 
-@pytest.mark.parametrize(
-    ("identifier", "measured_mode", "expected"),
-    [("P099", "duration", "duration"), ("P100", "ordinal", "ordinal"), ("P111", None, "group")],
-)
-def test_measured_research_uses_the_datatype_or_group_renderer(
-    monkeypatch, tmp_path, identifier, measured_mode, expected
-):
+@pytest.mark.parametrize("mode", ["regression", "classification", "group-learning"])
+def test_rendering_resolves_declared_modes_without_experiment_ids(monkeypatch, tmp_path, mode):
     import matplotlib.pyplot as plt
 
     from evidence.diagnostics import plots
 
     calls = []
 
-    def handler(name):
-        def draw(bundle, spec):
-            calls.append(name)
-            return plt.figure(), name, {}
+    def draw(bundle, spec):
+        calls.append(mode)
+        return plt.figure(), mode, {}
 
-        return draw
+    monkeypatch.setitem(plots.HANDLERS, mode, draw)
+    bundle = SimpleNamespace(manifest={"id": "P999"}, record={"metrics": {}})
+    plots.render(bundle, {"mode": mode, "focus": "focus", "comparison": "comparison", "limit": "limit"}, tmp_path)
+    assert calls == [mode, mode]
 
-    for name in ("duration", "ordinal", "research"):
-        monkeypatch.setitem(plots.HANDLERS, name, handler(name))
-    monkeypatch.setattr(plots, "group_learning", handler("group"))
-    monkeypatch.setattr(plots, "group_composition", handler("composition"))
-    monkeypatch.setattr(plots, "group_predictions", handler("predictions"))
-    bundle = SimpleNamespace(manifest={"id": identifier}, record={"metrics": {"group_counts": {}}})
-    spec = {"mode": "research", "focus": "focus", "comparison": "comparison", "limit": "limit"}
-    if measured_mode:
-        spec["measured_mode"] = measured_mode
-    plots.render(bundle, spec, tmp_path)
-    assert calls.count(expected) == 2
-    assert calls[0] == expected
+
+def draw(identifier, metrics):
+    from pathlib import Path
+
+    from evidence.diagnostics.data import Bundle
+    from evidence.experiments.source import registry, view
+
+    root = Path(__file__).resolve().parents[2]
+    entry = registry(root, measurements=False)[identifier]
+    source = (root / entry["script"]).read_text()
+    plan = view(source)
+    bundle = object.__new__(Bundle)
+    bundle.source, bundle.directory, bundle.components = source, Path("/unused"), {}
+    bundle.manifest = {"id": "P999"}
+    bundle.record = {"metrics": metrics}
+    return bundle.component(plan["renderer"])(bundle, plan)
+
+
+@pytest.mark.parametrize(
+    ("identifier", "metrics", "values"),
+    [
+        ("P017", {"signal_auc": 0.9, "noise_auc": 0.5}, [0.9, 0.5]),
+        ("P021", {"hash_auc": 0.94, "category_oov_auc": 0.51, "shuffled_auc": 0.5}, [0.94, 0.51, 0.5]),
+    ],
+)
+def test_owned_components_render_declared_scores_without_identifier_routing(identifier, metrics, values):
+    import matplotlib.pyplot as plt
+
+    fig, note, _ = draw(identifier, metrics)
+    np.testing.assert_allclose(fig.axes[0].collections[0].get_offsets()[:, 0], values)
+    assert note
+    plt.close(fig)
+
+
+def test_owned_group_plot_uses_current_group_arms():
+    import matplotlib.pyplot as plt
+
+    arm = {"nrmse": 0.5, "rare_identity_nrmse": 0.7}
+    arms = {name: arm for name in ("group", "category", "oracle", "shuffled")}
+    fig, _, _ = draw("P112", {"conditions": {"dense": {"arms": arms}}})
+    assert len(fig.axes[0].collections) == 4
+    plt.close(fig)

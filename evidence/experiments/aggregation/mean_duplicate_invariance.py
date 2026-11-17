@@ -5,11 +5,6 @@
 # - Cardinality generalization
 # description: Predict the average amount, using a branch that averages its encoded items without item attention;
 #   the branch's count lane sees the repetition, the average must not.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Average prediction
 #   metric:
@@ -21,6 +16,46 @@
 #   - duplication_drift
 #   format: number
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, amount, mean_amount. Amber cards are hidden prediction targets. Repeated collections
+#     keep their fields together.
+# evidence-review:
+#   question: Does repeating a list preserve its average?
+#   modeling: Generate lists of numbers and hide their arithmetic average. A Mean branch averages their encoded values,
+#     with item attention disabled. Train a decoder to recover the numerical average, then score independent lists
+#     against a constant predictor. Reordering items and repeating the entire list should leave the answer unchanged.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Permutation and repetition stability are separate checks below; low prediction error alone does not establish
+#     either property.
+# evidence-plot:
+#   mode: regression
+#   target: mean_amount
+#   focus: Does duplicating a collection leave its mean unchanged?
+#   comparison: Pair each bag with its duplicated and permuted versions.
+#   limit: Duplicate invariance concerns complete records, not arbitrary changes to their values.
+#   labels:
+#     test: Original bags
+#     duplicate(test): Every complete item duplicated
+#     permute(test): Complete items reordered
+# evidence-cost:
+#   baseline: 21
+#   candidate: 21
 # ---
 #
 # Averages should ignore wholesale repetition: repeating every observation changes how much data is
@@ -42,10 +77,7 @@
 # 0.8: its total doubles from 1.0 to 2.0, but dividing by four items still gives 0.5. Repeating just
 # one item would be a different intervention and need not preserve the mean.
 #
-# ```{typst}
-# //| label: fig-evidence-mean-duplicate-invariance
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, amount, mean_amount. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("amount", type: "Number"),
@@ -66,25 +98,15 @@
 #
 # ## Result
 #
-# {{< evidence P003 status >}}
-#
 # The selected run learns accurate averages and meets the declared repetition-drift tolerance. Mean
 # also carries a count lane, so a stable mean prediction does not imply an identical summary.
-#
 #
 # The main error percentage compares predicted averages with a constant guess. The two drift scores
 # compare predictions with each other before and after an answer-preserving change; zero drift alone
 # would also be possible for a useless constant predictor, so accuracy and stability are checked
 # together. This does not establish invariance for every reduction or attention configuration.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P003 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P003 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -111,8 +133,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -282,6 +302,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

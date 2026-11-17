@@ -5,11 +5,6 @@
 # - Schema mutation
 # description: Train a useful predictor, then make edits that should not alter its visible information or learned
 #   state.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Trained model
 #   metric:
@@ -23,6 +18,51 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, x, code, y, unused. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Do harmless schema edits preserve predictions?
+#   modeling: Train a predictor, then change metadata or add and remove inactive fields without changing its useful
+#     inputs. Compare predictions on the same test records before and after each edit. The primary chart shows the
+#     largest prediction change for each edit in the first cycle.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Prediction drift
+#     conditions:
+#     - label: Metadata edit
+#       path:
+#       - edits
+#       - 0
+#       - max_prediction_drift
+#       format: number
+#     - label: Inactive extension
+#       path:
+#       - edits
+#       - 1
+#       - max_prediction_drift
+#       format: number
+#     - label: Inactive deletion
+#       path:
+#       - edits
+#       - 2
+#       - max_prediction_drift
+#       format: number
+#     definition: Absolute change in predictions after an operation, on the scale named in each condition. Zero means
+#       no change.
+#     direction: Task-specific interpretation
+#   note: Zero drift means identical predictions for that edit. Repeated cycles, equivalent key changes, checkpoint
+#     round-trips, and rejected edits are checked separately.
+# evidence-plot:
+#   target: y
+#   focus: Which schema edits preserve the learned function immediately?
+#   comparison: Inspect paired output changes for neutral edits, serialization, and destructive controls.
+#   limit: A downstream preservation check is interpretable only after its source model meets the declared prerequisite.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 19
+#   candidate: 19
 # ---
 #
 # ## Example
@@ -40,10 +80,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-mutations-neutral-edits
-# //| fig-alt: "Model tree with record, x, code, y, unused. Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("x", type: "Number", body: [Source key becomes *renamed_x*]),
 #   node("code", type: "Category"),
@@ -70,18 +107,9 @@
 # are chosen to preserve the available information. The result does not promise unchanged predictions after
 # adding active evidence, changing model capacity, or adapting the model with further training.
 #
-# {{< evidence P046 status >}}
-#
 # These edits preserve predictions; a reset loses the learned relationship. Changes to visible context or model size need separate checks.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P046 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P046 script >}}
+# ## Method
 #
 # ### Remaining work
 #
@@ -90,13 +118,11 @@
 # Renaming schema addresses and resizing learned tensors require separate
 # experiments; matching physical input values does not make those neutral edits.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -292,8 +318,34 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    edits = m["edits"]
+    labels = [row["edit"] for row in edits]
+    dots(
+        axes[0],
+        labels,
+        {"Maximum paired drift": [row["max_prediction_drift"] for row in edits]},
+        xlabel="Maximum absolute output change",
+    )
+    dots(
+        axes[1],
+        ["Learned source", "Complete reset"],
+        {"Normalized RMSE": [m["source"]["nrmse"], m["controls"]["complete_reset"]["nrmse"]]},
+        xlabel="Test RMSE / constant-guess RMSE",
+        reference=(1, "Constant guess"),
+    )
+    fig.set_size_inches(10, max(4.8, len(edits) * 0.3))
+    return (
+        fig,
+        "Each edit is evaluated on matched held-out records without post-edit fitting. Exact restoration is a paired output test; destructive controls and the source prerequisite remain separate.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

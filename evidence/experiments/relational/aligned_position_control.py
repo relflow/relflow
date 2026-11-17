@@ -4,11 +4,6 @@
 # categories:
 # - Associative recall
 # description: Place source values and questions in matching positions, then ask the model to copy the values.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Matching IDs
 #   metric:
@@ -19,6 +14,41 @@
 #   - broken_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Selector notes identify hidden values. Source values are visible; query values are hidden.
+#   alt: Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values.
+#     Source values are visible; query values are hidden.
+# evidence-review:
+#   question: Can matching positions make an apparent ID lookup misleading?
+#   modeling: Place source values and their queries in corresponding positions, with matching IDs. Hide the copied
+#     values. Then rotate query IDs without moving the queries or changing their expected answers. Compare error before
+#     and after the ID change.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: Normalized RMSE
+#     conditions:
+#     - label: Changed IDs
+#       path:
+#       - broken_nrmse
+#       format: number
+#     - label: Matching IDs
+#       path:
+#       - intact_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The checks intentionally test a positional shortcut. Remaining accurate after IDs change is not evidence
+#     of an ID-based lookup.
+# evidence-plot:
+#   mode: regression
+#   target: memory/value
+#   focus: Can aligned positions explain apparent identity retrieval?
+#   comparison: Compare intact and identity-rotated queries while positions remain aligned.
+#   limit: Position copying can solve this control; it does not establish use of identity keys.
+# evidence-cost:
+#   baseline: 100
+#   candidate: 99
 # ---
 #
 # This is a deliberately misleading lookup setup: the right value can be copied without using an ID
@@ -42,10 +72,7 @@
 # first query and the second source into the second query. Correct predictions alone cannot tell
 # those strategies apart.
 #
-# ```{typst}
-# //| label: fig-evidence-aligned-position-control
-# //| fig-cap: "Selector notes identify hidden values. Source values are visible; query values are hidden."
-# //| fig-alt: "Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values. Source values are visible; query values are hidden."
+# ```typst
 # #tree(node("association", kind: "root", width: 120pt, children: (
 #   node("memory", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("entity_id", type: "Hash"),
@@ -69,25 +96,15 @@
 #
 # ## Result
 #
-# {{< evidence P024 status >}}
-#
 # Accuracy survives the changed IDs. Success on aligned records can therefore hide a positional
 # shortcut.
-#
 #
 # These errors are normalized against always predicting zero for query values. Small errors on both
 # versions, with little gap, demonstrate that the apparent lookup task admits a shortcut. A passing
 # result here is not a positive claim about associative recall; the independently shuffled lookup
 # experiment removes this fixed source-to-query position relationship.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P024 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P024 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -101,8 +118,6 @@
 # Repeat seed calibration and retain this control alongside identity evidences.
 # Its successful predictions cannot establish unseen-key lookup: the required
 # information is already available through a fixed position relationship.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -240,6 +255,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

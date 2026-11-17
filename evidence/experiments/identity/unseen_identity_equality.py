@@ -4,11 +4,6 @@
 # categories:
 # - Identity
 # description: Ask whether two IDs are equal, using IDs absent from training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Hash inputs
 #   metric:
@@ -23,6 +18,59 @@
 #   - shuffled_auc
 #   format: auc
 # evidence-group: Identity
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with identity, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields
+#     provide the input.
+# evidence-review:
+#   question: Can relflow recognize matching IDs relflow has never seen?
+#   modeling: 'Give the model two identifiers and hide a Boolean target indicating whether they match. Training and
+#     test use disjoint identifier names. Compare Hash with Category on the same equality task: new Category labels
+#     share the unknown representation, whereas Hash retains equality within an encoded batch. A shuffled-label control
+#     checks for an accidental signal.'
+#   comparison:
+#     kind: Controlled comparison
+#     metric: AUC
+#     conditions:
+#     - label: Unknown Category inputs
+#       path:
+#       - category_oov_auc
+#       format: auc
+#     - label: Hash inputs
+#       path:
+#       - hash_auc
+#       format: auc
+#     definition: 'Ranking score: 0.5 is chance and 1 is perfect separation. This is not the percentage of correct
+#       predictions.'
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: ''
+# evidence-plot:
+#   target: equal
+#   focus: Can equality transfer to identities absent from training?
+#   comparison: Compare Hash, unknown Category labels, and shuffled-label training.
+#   limit: The task tests equality within a record, not learning a persistent identity vocabulary.
+#   renderer: plot
+# evidence-highlight:
+#   order: 1
+#   title: Match IDs absent from training
+#   result:
+#     metric:
+#     - hash_auc
+#     text: '**{value:.4f} AUC** with `Hash`'
+#     minimum: 0
+#     maximum: 1
+#   control:
+#     metric:
+#     - category_oov_auc
+#     text: '{value:.4f} with unknown `Category` labels'
+#     minimum: 0
+#     maximum: 1
+# evidence-cost:
+#   baseline: 62
+#   candidate: 62
 # ---
 #
 # The task is equality, not remembering what a particular ID means. The model receives two strings
@@ -44,10 +92,7 @@
 # equality. The experiment scores new equal and unequal pairs, rather than assigning a permanent
 # yes/no meaning to any one string.
 #
-# ```{typst}
-# //| label: fig-evidence-identity-unseen-identity-equality
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with identity, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("identity", kind: "root", children: (
 #   node("left_id", type: "Hash", width: 150pt,),
 #   node("right_id", type: "Hash", width: 150pt,),
@@ -68,25 +113,15 @@
 #
 # ## Result
 #
-# {{< evidence P021 status >}}
-#
 # Hash preserves a useful matching signal for new IDs. This test compares two IDs within one record;
 # larger lookups and joins require their own evidence.
-#
 #
 # AUC describes ranking of equal versus unequal pairs: 0.5 is chance and 1 is perfect ranking.
 # Strong Hash AUC together with chance-like Category and shuffled-label controls supports the tested
 # unseen-identity comparison. It is not a guarantee of collision-free hashing, probability
 # calibration, or reliable lookup across arbitrarily large memories.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P021 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P021 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -109,13 +144,11 @@
 # predictions remain stable. Repeat the three evaluations over three core
 # seeds and at least ten calibration seeds, keeping the Category boundary.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
@@ -248,8 +281,26 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import matplotlib.pyplot as plt
+
+    from evidence.diagnostics.plots import dots
+
+    m = bundle.record["metrics"]
+    labels = ["Hash, new identities", "Category, unavailable identities", "Shuffled-label training"]
+    values = [m["hash_auc"], m["category_oov_auc"], m["shuffled_auc"]]
+    fig, ax = plt.subplots(figsize=(8, 3.8), layout="constrained")
+    dots(
+        ax, labels, {"Held-out AUC": values}, xlabel="Ranking AUC (higher is better)", reference=(0.5, "Chance ranking")
+    )
+    ax.set_xlim(-0.02, 1.03)
+    return (
+        fig,
+        "These are the proof's independent held-out ranking scores. AUC is not accuracy, and no unobserved ROC curve is drawn from these summary values.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

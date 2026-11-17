@@ -4,17 +4,46 @@
 # categories:
 # - Peer-relative inference
 # description: Give each item both its value and its peer average, then predict their difference.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Difference prediction
 #   metric:
 #   - intact_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with collection, items, value, peer_mean, deviation. Amber cards are hidden prediction targets.
+#     Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow subtract an average supplied as input?
+#   modeling: Give every item both its value and an already calculated peer average. Hide their difference. Vary the
+#     overall location between records so the raw value alone is not a useful shortcut, and compare held-out subtraction
+#     error with a constant predictor.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - intact_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The average is supplied upstream. This isolates local subtraction and repeated-output alignment from learning
+#     an aggregate.
+# evidence-plot:
+#   mode: regression
+#   target: items/deviation
+#   focus: Can the model use an explicitly supplied peer mean?
+#   comparison: Inspect deviations when the aggregation step has already been prepared.
+#   limit: This control isolates downstream use of the mean rather than discovering peer groups.
+# evidence-cost:
+#   baseline: 118
+#   candidate: 117
 # ---
 #
 # ## Example
@@ -36,10 +65,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-supplied-peer-mean-control
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with collection, items, value, peer_mean, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("collection", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -66,18 +92,9 @@
 # mean makes this a test of the final subtraction step. A good result helps rule out an inability to produce
 # local differences, but cannot show that the harder mean-inference or grouping steps have been learned.
 #
-# {{< evidence P034 status >}}
-#
 # Local subtraction works when both numbers are supplied. This does not show that the model can calculate the average or choose the right peers.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P034 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P034 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -92,8 +109,6 @@
 # Repeat three core seeds and ten calibration seeds, then test missing operands
 # and variable lengths. The [raw ungrouped case](ungrouped-peer-deviation.html)
 # removes the supplied mean to test learned aggregation.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -232,6 +247,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

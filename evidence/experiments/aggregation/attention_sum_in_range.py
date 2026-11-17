@@ -4,11 +4,6 @@
 # categories:
 # - Cardinality generalization
 # description: Predict the total of a list whose length varies within the range used in training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: New lists
 #   metric:
@@ -16,6 +11,44 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections
+#     keep their fields together.
+# evidence-review:
+#   question: Can relflow add a list of numbers?
+#   modeling: Generate independent lists of one to six amounts between −1 and 1. Give the model the amounts in a repeated
+#     branch and hide their sum as a Number target. Training, validation, and test use separate lists. Compare test
+#     RMSE with a predictor that always returns a constant.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: ''
+# evidence-plot:
+#   mode: regression
+#   target: total
+#   focus: Does the model preserve a bag's total when its complete items are reordered?
+#   comparison: Compare held-out totals with the same bags after permutation.
+#   limit: An ordering check does not establish extrapolation to longer collections.
+#   labels:
+#     test: Intact held-out bags
+#     permute(test): Complete items reordered
+# evidence-cost:
+#   baseline: 53
+#   candidate: 53
 # ---
 #
 # Each record is a small bag of signed numbers. The model receives the items and must predict their
@@ -38,10 +71,7 @@
 # answer 1.2. Negative amounts matter: predicting the number of items, or simply adding their
 # magnitudes, would produce a different answer.
 #
-# ```{typst}
-# //| label: fig-evidence-attention-sum-in-range
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("amount", type: "Number"),
@@ -61,24 +91,14 @@
 #
 # ## Result
 #
-# {{< evidence P001 status >}}
-#
 # The model learns an approximate total in this range. Longer lists need a separate test.
-#
 #
 # Prediction error is compared with always guessing the training-set mean total: 100% means that
 # constant guess, and lower is better. Permutation drift instead measures how much predictions move
 # when the answer should stay fixed. These checks cover approximate addition within the tested
 # length range, not a general-purpose exact calculator.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P001 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P001 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -101,8 +121,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -252,6 +270,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

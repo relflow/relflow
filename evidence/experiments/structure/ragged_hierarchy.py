@@ -4,11 +4,6 @@
 # categories:
 # - Structure
 # description: Account records contain days, sessions, transactions, and a hidden largest-session total.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Familiar structures
 #   metric:
@@ -21,6 +16,39 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Structure
+# evidence-diagram:
+#   caption: Visible inputs and the hidden prediction target for this controlled task.
+#   alt: Account records contain days, sessions, transactions, and a hidden largest-session total.
+# evidence-review:
+#   question: Can irregular hierarchies preserve which values belong together?
+#   modeling: Generate accounts containing days, sessions, and transaction amounts. Pair accounts with the same amounts
+#     and collection lengths but different session memberships, then hide the largest session total. Compare familiar
+#     and longer structures on independently generated accounts.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Familiar structures
+#       path:
+#       - familiar
+#       - normalized_rmse
+#       format: number
+#     - label: Unseen length combinations
+#       path:
+#       - unseen_lengths
+#       - normalized_rmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The model receives no prepared totals. An information-bound reference removes grouping; structural-hole
+#     checks define null placeholders as zero contribution only for this synthetic task.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Does the model retain ragged hierarchy rather than just a flat bag?
+#   comparison: Inspect intact, flattened, and structural-hole conditions with their paired target changes.
+#   limit: Null collections, empty collections, and null items are different structures and remain explicit in examples.
 # ---
 #
 # An account contains days, each day contains sessions, and each session contains transactions. The hidden
@@ -39,10 +67,7 @@
 # answer: 12.0
 # ```
 #
-# ```{typst}
-# //| label: fig-evidence-p083
-# //| fig-cap: "Visible inputs and the hidden prediction target for this controlled task."
-# //| fig-alt: "Account records contain days, sessions, transactions, and a hidden largest-session total."
+# ```typst
 # #tree(node("account", kind: "root", children: (node("days", kind: "branch", children: (node("sessions", kind: "branch", children: (node("transactions", kind: "branch", children: (node("amount", type: "Number"),)),)),)), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
@@ -56,21 +81,12 @@
 #
 # ## Result
 #
-# {{< evidence P083 status >}}
-#
 # These checks define a new experiment. A full recorded run is required before claiming that the model
 # meets them. Lower normalized error is better; a value of one matches the stated constant reference. The
 # numerical gates are provisional and must be calibrated on separate validation seeds rather than adjusted
 # after seeing acceptance-test outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P083 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P083 script >}}
+# ## Method
 #
 # ### Process, controls, and held-out evaluation
 #
@@ -88,7 +104,6 @@
 # intervention, not a claim about the value of unobserved real-world transactions. Expanded sources remain
 # explicitly bounded by six slots per axis.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
@@ -310,6 +325,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

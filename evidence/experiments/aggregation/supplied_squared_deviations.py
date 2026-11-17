@@ -4,11 +4,6 @@
 # categories:
 # - Distribution statistics
 # description: Supply each value’s squared distance from the average, then predict the average of those distances.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Average prediction
 #   metric:
@@ -16,6 +11,41 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, squared_deviation, variance. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow average prepared squared differences?
+#   modeling: Calculate each value’s squared distance from its list mean before giving data to the model. A Mean branch
+#     receives the eight prepared squared differences; the hidden target is their average, or population variance.
+#     Compare held-out error with a constant predictor.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The model does not learn centering or squaring here. P007 tests variance from raw values.
+# evidence-plot:
+#   mode: regression
+#   target: variance
+#   focus: Can pooling combine supplied squared deviations?
+#   comparison: Inspect prediction error across the held-out variance range.
+#   limit: The generator supplies squared deviations rather than asking the model to derive them.
+# evidence-cost:
+#   baseline: 12
+#   candidate: 12
 # ---
 #
 # Variance can be calculated by averaging squared distances from a list's mean. Here those distances
@@ -44,10 +74,7 @@
 # deliberately absent: squared distances describe spread, not which side of the mean each value
 # occupied.
 #
-# ```{typst}
-# //| label: fig-evidence-supplied-squared-deviations
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, squared_deviation, variance. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("squared_deviation", width: 150pt, type: "Number"),
@@ -68,25 +95,15 @@
 #
 # ## Result
 #
-# {{< evidence P009 status >}}
-#
 # This tests the final averaging step. The inputs already contain the difficult parts of calculating
 # variance.
-#
 #
 # The error percentage uses the constant training-mean variance as its baseline. A small error
 # supports the reduction and numeric readout in this setting; it does not show that the model
 # learned to center or square raw measurements. The answer uses population variance, and all scored
 # lists have the same length.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P009 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P009 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -107,8 +124,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -237,6 +252,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

@@ -4,11 +4,6 @@
 # categories:
 # - Calendar reasoning
 # description: Distinguish February 29 from March 1 when both can be day 60 of a year.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Day number only
 #   metric:
@@ -19,6 +14,48 @@
 #   - with_week_of_month_accuracy
 #   format: percent
 # evidence-group: Temporal
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Can day 60 reveal the month in a leap year?
+#   modeling: Choose dates where day 60 is either February 29 or March 1. With only day-of-year visible, the inputs
+#     are identical but the answers differ. Compare that model with one also given week-of-month, which resolves the
+#     ambiguity.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Accuracy
+#     conditions:
+#     - label: Day number only
+#       path:
+#       - day_only_accuracy
+#       format: percent
+#     - label: Week-of-month added
+#       path:
+#       - with_week_of_month_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: The two runs use different training budgets. This is an information-availability comparison, not a matched
+#     compute ablation.
+# evidence-plot:
+#   mode: temporal
+#   target: target
+#   focus: Which added calendar part resolves the date ambiguity?
+#   comparison: Compare the day-only model with the declared extra calendar context.
+#   limit: The plot follows the generator's actual calendar rule rather than a generic date illustration.
+#   conditions:
+#   - label: Day only
+#     metric: day_only_accuracy
+#   - label: Additional calendar context
+#     metric: with_week_of_month_accuracy
+# evidence-cost:
+#   baseline: 11
+#   candidate: 11
 # ---
 #
 # ## Example
@@ -35,10 +72,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-temporal-leap-boundary-requires-context
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("calendar", kind: "root", children: (
 #   node("observed_at", type: "DateParts", width: 150pt,),
 #   node("target", kind: "target", type: "Category", detail: "month",),
@@ -63,18 +97,9 @@
 # year numbers: those numbers are not exposed as inputs here. The result concerns this specific
 # February/March collision, rather than general date arithmetic or every calendar boundary.
 #
-# {{< evidence P043 status >}}
-#
 # Day number alone cannot separate identical inputs with different answers. The added coordinate resolves these cases; general leap-year reasoning is not tested.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P043 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P043 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -94,8 +119,6 @@
 # Investigate why adding the finer `day_of_month` coordinate optimizes less
 # reliably than `week_of_month`. Test application policies that map leap dates
 # onto a canonical non-leap calendar separately.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -248,6 +271,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

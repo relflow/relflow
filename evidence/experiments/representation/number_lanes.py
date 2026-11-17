@@ -5,11 +5,6 @@
 # - Representation
 # description: Compare Number, which embeds raw and log lanes and reads out standardized log-scale deviations, with
 #   Quantile ranks on additive, moderate-tail, heavy-tail, and far-from-zero targets.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Heavy tails, Number
 #   metric:
@@ -30,6 +25,45 @@
 #   - normalized_mae
 #   format: error
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Each arm changes only how numbers are represented.
+#   alt: Model tree with customer, price, rate, ltv. Amber cards are hidden prediction targets. Each arm changes only
+#     how numbers are represented.
+# evidence-review:
+#   question: Can one number representation serve additive and multiplicative structure?
+#   modeling: Generate additive and multiplicative prediction tasks, including heavy-tailed inputs and targets far
+#     from zero. Compare Number and Quantile under matched data and training budgets. The primary chart holds the
+#     heavy-tailed task and Number target fixed while changing only the input representation.
+#   comparison:
+#     kind: Controlled comparison
+#     metric: MAE
+#     conditions:
+#     - label: Number inputs · Number target
+#       path:
+#       - heavy
+#       - number_number
+#       - mae
+#       format: number
+#     - label: Quantile inputs · Number target
+#       path:
+#       - heavy
+#       - rank_number
+#       - mae
+#       format: number
+#     definition: Mean absolute prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The full checks cover every task. Longer-budget runs and alternative target representations are separate;
+#     the primary chart is not a universal ranking.
+#   description: Compare Number and Quantile on additive, heavy-tailed, and far-from-zero prediction tasks.
+# evidence-plot:
+#   target: target
+#   focus: Which numeric representation works across additive and heavy-tail tasks?
+#   comparison: Keep equal-budget comparisons separate from the declared longer-budget diagnostic and oracle errors.
+#   limit: Compare source-unit errors within each task; do not pool incompatible target scales.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 305
+#   candidate: 306
 # ---
 #
 # Can the same numerical datatype handle adding ordinary values, multiplying
@@ -58,10 +92,7 @@
 # fixed 1000 offset is added. The target formula stays simple even though its
 # scale changes considerably.
 #
-# ```{typst}
-# //| label: fig-evidence-number-lanes
-# //| fig-cap: "Amber cards are hidden prediction targets. Each arm changes only how numbers are represented."
-# //| fig-alt: "Model tree with customer, price, rate, ltv. Amber cards are hidden prediction targets. Each arm changes only how numbers are represented."
+# ```typst
 # #tree(node("customer", kind: "root", children: (
 #   node("price", type: "Number / Quantile", detail: "raw and log lanes, or ranks"),
 #   node("rate", type: "Number / Quantile", detail: "raw and log lanes, or ranks"),
@@ -83,7 +114,6 @@
 # answer but pairs it with another observation's inputs. Separate bulk, tail, and
 # outside-training-range measurements reveal where mistakes occur.
 #
-#
 # Hold the data, model width, optimizer, and update budget fixed. Change only the
 # numeric datatype: Number, which embeds a raw lane and a signed-log lane and
 # reads targets out as standardized deviations on the signed-log scale, or
@@ -94,8 +124,6 @@
 #
 # ## Result
 #
-# {{< evidence P079 status >}}
-#
 # Read the task-specific errors together. The checks ask whether Number approaches
 # the known median answer and remains close to the Quantile-input comparison;
 # they do not establish that one representation wins on every distribution.
@@ -104,14 +132,7 @@
 # additional diagnostics, so a single overall percentage does not summarize all
 # of the tradeoffs. These are controlled synthetic tasks with known formulas.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P079 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P079 script >}}
+# ## Method
 #
 # ### Synthetic processes and oracles
 #
@@ -166,13 +187,11 @@
 # information beyond the log lane, or mixed-sign heavy tails. Mixed precision
 # needs its own explicit comparison; these fits declare full float32 precision.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -417,8 +436,42 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    tasks = ["additive", "narrow", "moderate", "heavy"]
+    dots(
+        axes[0],
+        [human(task) for task in tasks],
+        {
+            "Number input → Number output": [m[task]["number_number"]["normalized_mae"] for task in tasks],
+            "Quantile input → Number output": [m[task]["rank_number"]["normalized_mae"] for task in tasks],
+            "Population-median oracle": [m[task]["oracle_mae"] / m[task]["baseline_mae"] for task in tasks],
+        },
+        xlabel=f"MAE / baseline MAE at {m['budget']} updates",
+    )
+    tasks = [task for task in tasks if "bulk_oracle_ratio" in m[task]["number_number"]]
+    labels = [human(task) + " · " + part for task in tasks for part in ["bulk", "tail"]]
+    dots(
+        axes[1],
+        labels,
+        {
+            human(arm): [m[task][arm][f"{part}_oracle_ratio"] for task in tasks for part in ["bulk", "tail"]]
+            for arm in ["number_number", "rank_number"]
+        },
+        xlabel="MAE / oracle MAE within each region",
+        reference=(1, "Population oracle"),
+    )
+    return (
+        fig,
+        "The main comparison uses matched 500-update models and source-unit errors normalized within each task. Bulk and tail errors are separate. Longer-budget diagnostics remain in the full record and are not mixed into these equal-budget points.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

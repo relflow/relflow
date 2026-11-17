@@ -1,24 +1,85 @@
 # %% [markdown]
 # ---
-# title: "Does input jitter buy robustness at a reasonable clean-data cost?"
-# categories: ["Representation"]
-# description: "Compare zero, modest, and excessive input jitter on a small fixed regression dataset with independent nuisance coordinates."
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# title: Does input jitter buy robustness at a reasonable clean-data cost?
+# categories:
+# - Representation
+# description: Compare zero, modest, and excessive input jitter on a small fixed regression dataset with independent
+#   nuisance coordinates.
 # evidence-readout:
-# - label: "No jitter, noisy error"
-#   metric: ["arms", "none", "conditions", "strong_noise", "nrmse"]
+# - label: No jitter, noisy error
+#   metric:
+#   - arms
+#   - none
+#   - conditions
+#   - strong_noise
+#   - nrmse
 #   format: number
-# - label: "Small jitter, noisy error"
-#   metric: ["arms", "small", "conditions", "strong_noise", "nrmse"]
+# - label: Small jitter, noisy error
+#   metric:
+#   - arms
+#   - small
+#   - conditions
+#   - strong_noise
+#   - nrmse
 #   format: number
-# - label: "Small jitter, clean error"
-#   metric: ["arms", "small", "conditions", "clean", "nrmse"]
+# - label: Small jitter, clean error
+#   metric:
+#   - arms
+#   - small
+#   - conditions
+#   - clean
+#   - nrmse
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
+#     condition.
+#   alt: Does input jitter buy robustness at a reasonable clean-data cost? Visible inputs lead to one hidden prediction
+#     target.
+# evidence-review:
+#   question: Does input jitter buy robustness at a reasonable clean-data cost?
+#   modeling: Fit identical regression models on the same small training set with no, modest, or excessive input jitter.
+#     Test clean and noisy versions of the same held-out records while keeping targets unchanged. Compare noisy-input
+#     error first, then inspect the clean-data cost.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: No jitter · noisy test inputs
+#       path:
+#       - arms
+#       - none
+#       - conditions
+#       - strong_noise
+#       - nrmse
+#       format: number
+#     - label: Modest jitter · same noisy inputs
+#       path:
+#       - arms
+#       - small
+#       - conditions
+#       - strong_noise
+#       - nrmse
+#       format: number
+#     - label: Excessive jitter · same noisy inputs
+#       path:
+#       - arms
+#       - excessive
+#       - conditions
+#       - strong_noise
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: Robustness gains are measured, not required by the pass criteria. Checks met alone does not establish that
+#     jitter improved generalization.
+# evidence-plot:
+#   target: target
+#   focus: When does training jitter help or harm generalization?
+#   comparison: Compare clean and perturbed test conditions at each declared jitter level.
+#   limit: No test condition selects the training configuration; the clean-data cost stays visible.
+#   renderer: plot
 # ---
 #
 # Compare zero, modest, and excessive input jitter on a small fixed regression dataset with independent
@@ -38,10 +99,7 @@
 # An extra noisy reading changes what the model observes, while the underlying answer stays the same.
 # Jitter may encourage smoother predictions, but enough jitter also removes real information.
 #
-# ```{typst}
-# //| label: fig-evidence-p090
-# //| fig-cap: "The target is hidden. The diagram shows the informative representation; controls change only the declared condition."
-# //| fig-alt: "Does input jitter buy robustness at a reasonable clean-data cost? Visible inputs lead to one hidden prediction target."
+# ```typst
 # #tree(node("record", kind: "root", children: (node("signal", type: "Number", detail: "Training jitter"), node("nuisance", type: "Vector(8)"), node("target", kind: "target", type: "Number"),)))
 # ```
 #
@@ -53,19 +111,10 @@
 #
 # ## Result
 #
-# {{< evidence P090 status >}}
-#
 # The numerical checks below are provisional, predeclared hypotheses, not measured successes. No full
 # learning result is claimed until a matching run is recorded. Smoke runs establish execution only.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P090 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P090 script >}}
+# ## Method
 #
 # ### Population, controls, and scoring
 #
@@ -76,12 +125,11 @@
 # Report clean and noisy errors plus the train-test gap. Checks require finite execution and basic
 # learning; the sign of the paired robustness benefit is a research result, not an assumed win.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -227,8 +275,44 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]["arms"]
+    arms = ["none", "small", "excessive"]
+    conditions = ["clean", "mild_noise", "strong_noise"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    matrix = np.array([[m[a]["conditions"][c]["nrmse"] for c in conditions] for a in arms])
+    image = axes[0].imshow(matrix, cmap="YlOrRd", vmin=0, vmax=max(1, float(matrix.max())), aspect="auto")
+    axes[0].set(
+        xticks=range(3),
+        xticklabels=["Clean", "Mild noise", "Strong noise"],
+        yticks=range(3),
+        yticklabels=["No jitter", "Small jitter (0.08)", "Excessive jitter (1.5)"],
+        xlabel="Held-out input condition",
+        title="Every jitter × evaluation condition",
+    )
+    for i, j in np.ndindex(matrix.shape):
+        axes[0].text(j, i, f"{matrix[i, j]:.3f}", ha="center", va="center", color="#243b35")
+    fig.colorbar(image, ax=axes[0], fraction=0.035, label="Test nRMSE (lower is better)")
+    dots(
+        axes[1],
+        ["No jitter", "Small jitter", "Excessive jitter"],
+        {
+            "Training RMSE": [m[a]["train_rmse"] for a in arms],
+            "Clean held-out RMSE": [m[a]["conditions"]["clean"]["rmse"] for a in arms],
+        },
+        xlabel="RMSE in original target units",
+    )
+    return (
+        fig,
+        "The matrix includes all nine measured conditions, with 1 representing constant-guess error. The right panel separates training and clean held-out error on the same source-unit scale. Jitter stops at evaluation; adding too much can degrade the learned relationship.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

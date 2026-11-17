@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import ast
+import builtins
 import hashlib
 import json
 import re
+import symtable
 import tomllib
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, NamedTuple
 
 import yaml
 
@@ -167,7 +169,7 @@ def metadata(source: str) -> dict[str, Any]:
             opened = True
         elif value.rstrip() == "---":
             try:
-                document = yaml.safe_load("\n".join(header))
+                document = yaml.load("\n".join(header), Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader))
             except yaml.YAMLError as error:
                 raise ValueError(f"Evidence script YAML header is invalid: {error}") from error
             if not isinstance(document, dict) or not all(isinstance(key, str) for key in document):
@@ -228,16 +230,74 @@ def snapshot(path: Path) -> dict[str, Any]:
     return document
 
 
+def component(source: str, name: str) -> ast.FunctionDef:
+    """Read one isolated diagnostic component without evaluating the experiment module."""
+    definitions = [node for node in ast.parse(source).body if isinstance(node, ast.FunctionDef) and node.name == name]
+    if len(definitions) != 1:
+        raise ValueError(f"Diagnostic renderer {name!r} must name one top-level function")
+    definition = definitions[0]
+    args = definition.args
+    if (
+        [arg.arg for arg in args.args] != ["bundle", "spec"]
+        or args.posonlyargs
+        or args.kwonlyargs
+        or args.vararg
+        or args.kwarg
+        or args.defaults
+        or definition.decorator_list
+    ):
+        raise ValueError(f"Diagnostic renderer {name!r} requires the signature (bundle, spec) without decorators")
+    scope = symtable.symtable(ast.unparse(definition), "<diagnostic component>", "exec").get_children()[0]
+    scopes = [scope]
+    unresolved = set()
+    while scopes:
+        current = scopes.pop()
+        unresolved.update(
+            symbol.get_name() for symbol in current.get_symbols() if symbol.is_global() and symbol.is_referenced()
+        )
+        scopes.extend(current.get_children())
+    unresolved -= {*vars(builtins), name}
+    if unresolved:
+        raise ValueError(
+            f"Diagnostic renderer {name!r} must own its imports and helpers; "
+            f"unresolved module names: {', '.join(sorted(unresolved))}"
+        )
+    return definition
+
+
+def view(source: str) -> dict[str, Any]:
+    """Read an experiment's diagnostic plan without importing its model code."""
+    plan = metadata(source).get("evidence-plot")
+    if not isinstance(plan, dict):
+        raise ValueError("Experiment frontmatter must declare an evidence-plot mapping")
+    for name in ("focus", "comparison", "limit"):
+        if not isinstance(plan.get(name), str) or not plan[name].strip():
+            raise ValueError(f"evidence-plot.{name} must be a nonempty string")
+    supplements = plan.get("supplements", {})
+    if not isinstance(supplements, dict) or any(
+        not isinstance(name, str) or re.fullmatch(r"[a-z][a-z0-9-]*", name) is None or not isinstance(selection, dict)
+        for name, selection in supplements.items()
+    ):
+        raise ValueError("evidence-plot.supplements must map safe figure names to renderer selections")
+    for selection in [plan, *supplements.values()]:
+        selected = selection.keys() & {"mode", "renderer"}
+        if len(selected) != 1:
+            raise ValueError("Each evidence-plot figure must select exactly one mode or renderer")
+        name = selection[next(iter(selected))]
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("Each evidence-plot figure needs a nonempty mode or renderer name")
+        if "renderer" in selection:
+            component(source, name)
+    return plan
+
+
 def registry(
     root: Path | None = None,
     *,
     publication: Path | None = None,
     measurements: bool = True,
-    lane: Literal["core", "research", "all"] = "core",
 ) -> dict[str, dict[str, Any]]:
-    """Discover static experiment declarations; hosted execution selects the core lane."""
-    if lane not in {"core", "research", "all"}:
-        raise ValueError(f"Evidence lane must be core, research, or all; got {lane!r}")
+    """Discover the complete experiment catalog without importing model code."""
     root = root or Path(__file__).resolve().parents[1]
     selected = publication or root / "results.json"
     recorded = (
@@ -248,22 +308,13 @@ def registry(
     entries = {}
     seen = set()
     pages = set()
-    scripts = [
-        (script, kind)
-        for directory, kind in (("experiments", "core"), ("research", "research"))
-        for script in sorted((root / directory).glob("*/*.py"))
-    ]
-    for script, kind in scripts:
+    for script in sorted((root / "experiments").glob("*/*.py")):
         if script.is_symlink() or script.parent.is_symlink() or script.parent.parent.is_symlink():
             raise ValueError("Canonical experiment sources must be regular files")
         source = script.read_text()
         header = describe(source)
         tags(source)
         identifier = header["evidence-id"]
-        if "evidence-lane" in header:
-            raise ValueError(
-                f"{identifier}: the experiment directory owns its lane; remove evidence-lane from frontmatter"
-            )
         if identifier in seen:
             raise ValueError(f"Invalid or duplicate evidence ID: {identifier}")
         seen.add(identifier)
@@ -276,14 +327,9 @@ def registry(
             not isinstance(item, str) or not item.strip() for item in requirements
         ):
             raise ValueError(f"{identifier}: evidence-requires must be a list of nonempty resource descriptions")
-        if kind == "research" and not requirements:
-            raise ValueError(f"{identifier}: research experiments must declare evidence-requires")
-        if lane != "all" and kind != lane:
-            continue
         entries[identifier] = {
             "script": script.relative_to(root).as_posix(),
             "page": page,
-            "lane": kind,
             "header": header,
             "run": recorded["results"].get(identifier),
             "report": recorded["report"],

@@ -4,11 +4,6 @@
 # categories:
 # - Calendar reasoning
 # description: Predict whether a time lies in a weekday business-hours window.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Weekday only
 #   metric:
@@ -23,6 +18,53 @@
 #   - composed_accuracy
 #   format: percent
 # evidence-group: Temporal
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Does relflow need both weekday and hour?
+#   modeling: 'Generate weekday business-hour observations and two kinds of near miss: weekdays outside the window,
+#     and weekends inside it. Hide whether the business is open. Train otherwise matched models with weekday only,
+#     hour only, or both, and compare accuracy on fresh dates.'
+#   comparison:
+#     metric: Accuracy
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Weekday only
+#       path:
+#       - day_only_accuracy
+#       format: percent
+#     - label: Hour only
+#       path:
+#       - hour_only_accuracy
+#       format: percent
+#     - label: Weekday and hour
+#       path:
+#       - composed_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Each single coordinate leaves ambiguous cases. The comparison tests combining the two visible calendar parts.
+# evidence-plot:
+#   mode: temporal
+#   target: target
+#   focus: Why are both day and hour needed to identify the business window?
+#   comparison: Compare day-only, hour-only, and composed calendar evidence.
+#   limit: The held-out calendar stream is independent; no performance curve is inferred from the three accuracy values.
+#   conditions:
+#   - label: Day only
+#     metric: day_only_accuracy
+#   - label: Hour only
+#     metric: hour_only_accuracy
+#   - label: Day and hour
+#     metric: composed_accuracy
+# evidence-cost:
+#   baseline: 28
+#   candidate: 28
 # ---
 #
 # ## Example
@@ -39,10 +81,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-temporal-business-window-requires-composition
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("calendar", kind: "root", children: (
 #   node("observed_at", type: "DateParts", width: 150pt,),
 #   node("target", kind: "target", type: "Category", detail: "open or closed",),
@@ -67,18 +106,9 @@
 # time zones, varying local opening schedules, or daylight-saving transitions, so a high score is not a
 # deployed business-calendar service.
 #
-# {{< evidence P042 status >}}
-#
 # Combining the coordinates resolves this constructed task. Holidays, time zones, and daylight-saving rules are not covered.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P042 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P042 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -97,8 +127,6 @@
 # Repeat all three fits over three core seeds and at least ten calibration
 # seeds. Extend to further coordinate combinations and characterize timezone
 # and daylight-saving preprocessing independently of this naive-calendar test.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -277,6 +305,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

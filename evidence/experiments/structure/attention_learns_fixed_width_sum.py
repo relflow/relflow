@@ -4,17 +4,45 @@
 # categories:
 # - Hierarchical statistics
 # description: Predict the total of six independently chosen amounts.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Total prediction
 #   metric:
 #   - test_nrmse
 #   format: error
 # evidence-group: Structure
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, transactions, amount, global_total. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow add six numbers?
+#   modeling: Generate independent records containing exactly six amounts sampled between −1 and 1. Put the amounts
+#     in a repeated branch and hide their sum as a Number target. Score held-out totals with RMSE and compare with
+#     a predictor that always returns the training-set average total.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - test_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: ''
+# evidence-plot:
+#   mode: regression
+#   target: global_total
+#   focus: Can attention learn a total at the declared fixed collection width?
+#   comparison: Inspect validation and independent test errors against the training-mean baseline.
+#   limit: Fixed-width success does not establish arbitrary-length arithmetic.
+# evidence-cost:
+#   baseline: 26
+#   candidate: 26
 # ---
 #
 # ## Example
@@ -37,10 +65,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-structure-attention-learns-fixed-width-sum
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, transactions, amount, global_total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("amount", type: "Number"),
@@ -67,18 +92,9 @@
 # items, the model could learn a fixed-width strategy that would not carry over to an arbitrary-length
 # collection.
 #
-# {{< evidence P039 status >}}
-#
 # The model learns this small sum. This baseline does not test item reordering, varying lengths, deeper nesting, or exact addition.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P039 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P039 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -101,8 +117,6 @@
 # The [nested-cardinality evidence](attention-preserves-nested-cardinality.html)
 # tests a statistic whose answer changes when those same amounts are regrouped.
 # Use [preprocessing](/advanced/data-modules/) when a sum must be exact.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -224,6 +238,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

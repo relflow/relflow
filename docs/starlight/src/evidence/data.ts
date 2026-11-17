@@ -5,6 +5,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { tags, type Tags } from './catalog.ts';
+import { readReview, type Review } from './metadata.ts';
 
 export type MetricValue =
   string | number | boolean | null | MetricValue[] | { [key: string]: MetricValue };
@@ -64,12 +65,12 @@ interface Readout {
 }
 
 export interface EvidenceEntry {
+  review: Review;
   id: string;
   tags: Tags | null;
   title: string;
   description: string;
   family: string;
-  lane: 'core' | 'research';
   requirements: string[];
   sourcePath: string;
   sourceRevision: string;
@@ -82,7 +83,6 @@ export interface EvidenceEntry {
   readouts: Readout[];
   result: EvidenceRecord | null;
   sourceMatches: boolean;
-  archived: boolean;
 }
 
 type Header = Record<string, unknown>;
@@ -93,8 +93,6 @@ interface Declaration {
   header: Header;
   source: string;
   sourcePath: string;
-  lane: 'core' | 'research';
-  archived?: boolean;
 }
 
 const site = process.cwd();
@@ -326,36 +324,30 @@ function identify(source: string, metadata: Header): string {
 
 function declarations(directory = join(root, 'evidence'), required = true): Declaration[] {
   const entries: Declaration[] = [];
-  for (const [collection, lane] of [
-    ['experiments', 'core'],
-    ['research', 'research'],
-  ] as const) {
-    const parent = join(directory, collection);
-    if (!existsSync(parent)) continue;
-    for (const family of readdirSync(parent, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory())
+  const parent = join(directory, 'experiments');
+  if (!existsSync(parent)) return [];
+  for (const family of readdirSync(parent, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const file of readdirSync(join(parent, family.name), { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.py'))
       .sort((a, b) => a.name.localeCompare(b.name))) {
-      for (const file of readdirSync(join(parent, family.name), { withFileTypes: true })
-        .filter((entry) => entry.isFile() && entry.name.endsWith('.py'))
-        .sort((a, b) => a.name.localeCompare(b.name))) {
-        const sourcePath = `evidence/${collection}/${family.name}/${file.name}`;
-        const source = readFileSync(join(parent, family.name, file.name), 'utf8');
-        const metadata = header(source);
-        const id = identify(source, metadata);
-        const classified = tags(source, sourcePath);
-        if (required && classified === null)
-          throw new Error(
-            `${sourcePath}: declare [tool.relflow.evidence] capability, types, and conditions.`,
-          );
-        entries.push({
-          id,
-          tags: classified,
-          header: metadata,
-          source,
-          sourcePath,
-          lane,
-        });
-      }
+      const sourcePath = `evidence/experiments/${family.name}/${file.name}`;
+      const source = readFileSync(join(parent, family.name, file.name), 'utf8');
+      const metadata = header(source);
+      const id = identify(source, metadata);
+      const classified = tags(source, sourcePath);
+      if (required && classified === null)
+        throw new Error(
+          `${sourcePath}: declare [tool.relflow.evidence] capability, types, and conditions.`,
+        );
+      entries.push({
+        id,
+        tags: classified,
+        header: metadata,
+        source,
+        sourcePath,
+      });
     }
   }
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length)
@@ -365,20 +357,6 @@ function declarations(directory = join(root, 'evidence'), required = true): Decl
 
 const declared = declarations();
 const frozen = explicit ? declarations(join(dirname(publicationPath), 'source'), false) : [];
-const identifiers = new Set(declared.map((entry) => entry.id));
-for (const [id, record] of Object.entries(publication.results)) {
-  if (!identifiers.has(id)) {
-    const expected = record.provenance.script_sha256;
-    const entry = frozen.find((entry) => entry.id === id);
-    if (!entry || digest(entry.source) !== expected) {
-      throw new Error(
-        `Evidence record ${id} in ${publicationPath} has no experiment declaration in this checkout or an exact retained CI source. Select its verified reports/source directory alongside the publication.`,
-      );
-    }
-    declared.push({ ...entry, archived: true });
-  }
-}
-declared.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
 
 function page(sourcePath: string): string {
   return `docs/evidence/${basename(dirname(sourcePath))}/${basename(sourcePath, '.py').replaceAll('_', '-')}`;
@@ -437,37 +415,27 @@ function presentation(
     .map((part) => part.text)
     .join('\n');
   markdown = markdown.replace(/^\s*---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
-  const diagram = { caption: '', alt: '' };
-  markdown = markdown.replace(
-    /^```\{typst\}[^\n]*\n([\s\S]*?)^```[ \t]*$/gm,
-    (_block, body: string) => {
-      for (const match of body.matchAll(/^\s*\/\/\|\s*fig-(cap|alt):\s*(.+)$/gm)) {
-        const value: unknown = parse(match[2]);
-        if (typeof value === 'string') {
-          if (match[1] === 'cap' && !diagram.caption) diagram.caption = value;
-          if (match[1] === 'alt' && !diagram.alt) diagram.alt = value;
-        }
-      }
-      return '';
-    },
-  );
-  markdown = markdown.replace(
-    /<details class="evidence-details">\s*<summary>Experiment details and code<\/summary>/,
-    '\n## __method__\n',
-  );
-  const closing = markdown.lastIndexOf('</details>');
-  if (closing !== -1)
-    markdown = markdown.slice(0, closing) + markdown.slice(closing + '</details>'.length);
-  markdown = markdown
-    .replace(/\{\{<\s*evidence\s+[^>]*>\}\}/g, '')
-    .replace(/^### (?:Run this experiment|Complete experiment code)[ \t]*$/gm, '');
+  const metadata = header(source);
+  const declared = metadata['evidence-diagram'];
+  if (
+    declared !== undefined &&
+    (!object(declared) ||
+      typeof declared.caption !== 'string' ||
+      !declared.caption.trim() ||
+      typeof declared.alt !== 'string' ||
+      !declared.alt.trim())
+  )
+    throw new Error(`${sourcePath}: evidence-diagram requires nonempty caption and alt strings.`);
+  const diagram = {
+    caption: object(declared) ? (declared.caption as string) : '',
+    alt: object(declared) ? (declared.alt as string) : '',
+  };
+  markdown = markdown.replace(/^```typst[^\n]*\n[\s\S]*?^```[ \t]*$/gm, '');
   const sections: Sections = { intro: '', example: '', comparison: '', result: '', method: '' };
   let active: keyof Sections = 'intro';
   for (const line of markdown.split('\n')) {
-    const heading = /^## (Example|Comparison|Result|__method__)[ \t]*$/.exec(line);
-    if (heading)
-      active =
-        heading[1] === '__method__' ? 'method' : (heading[1].toLowerCase() as keyof Sections);
+    const heading = /^## (Example|Comparison|Result|Method)[ \t]*$/.exec(line);
+    if (heading) active = heading[1].toLowerCase() as keyof Sections;
     else sections[active] += `${line}\n`;
   }
   for (const key of Object.keys(sections) as (keyof Sections)[]) {
@@ -551,12 +519,18 @@ export const evidenceEntries: EvidenceEntry[] = declared.map((entry) => {
   const sourcePath = retained?.sourcePath || entry.sourcePath;
   const selected = selectedSource(entry, result, sourceRevision);
   const content = selected.matches
-    ? presentation(selected.source, sourcePath, sourceRevision)
+    ? presentation(entry.source, entry.sourcePath, checkoutRevision)
     : {
         code: '',
         sections: { intro: '', example: '', comparison: '', result: '', method: '' },
         diagram: { caption: '', alt: '' },
       };
+  content.code = selected.matches
+    ? cells(selected.source)
+        .filter((part) => !part.markdown)
+        .map((part) => part.text)
+        .join('')
+    : '';
   const metadata = selected.matches ? header(selected.source) : entry.header;
   const requirements = entry.header['evidence-requires'] || [];
   if (!Array.isArray(requirements) || requirements.some((value) => typeof value !== 'string'))
@@ -566,11 +540,11 @@ export const evidenceEntries: EvidenceEntry[] = declared.map((entry) => {
   }
   return {
     id: entry.id,
+    review: readReview(entry.header['evidence-review'], entry.sourcePath),
     tags: entry.tags,
     title: entry.header.title as string,
     description: entry.header.description as string,
     family: entry.header['evidence-group'] as string,
-    lane: entry.lane,
     requirements: requirements as string[],
     sourcePath,
     sourceRevision,
@@ -581,6 +555,5 @@ export const evidenceEntries: EvidenceEntry[] = declared.map((entry) => {
     readouts: selected.matches ? readouts(metadata, result) : [],
     result,
     sourceMatches: selected.matches,
-    archived: entry.archived === true,
   };
 });

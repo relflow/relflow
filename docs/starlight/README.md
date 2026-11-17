@@ -93,8 +93,8 @@ each option. Its source
 is `src/pages/palettes.astro`, `src/palettes/`, and `src/data/palettes.ts`.
 Palette exploration is separate from the selected documentation theme.
 
-The header and favicon use the selected soft-canopy logo from `logo-rework`,
-with matching light/dark SVGs and the serif wordmark. See `branding/README.md`
+The header and favicon use the checked-in soft-canopy mark assets,
+with matching light/dark SVGs and the serif wordmark. See `../assets/branding/site/README.md`
 for source provenance and regeneration. Normal builds use the prepared vectors.
 
 Prose mentions of `relflow` also use a small serif wordmark in the theme’s accent
@@ -535,10 +535,10 @@ recorded SHA256 before use. No proof-source archive is maintained in Git.
 
 Each experiment has a page at `/evidence/Pxxx/`. Its interrogative title leads
 into **How is the question modeled?**, followed by a single **Primary comparison**.
-`src/evidence/reviews.ts` contains an individually authored question, modeling
-explanation, explicit primary comparison, and scope note for every experiment.
-There is no extracted-paragraph or first-readout fallback. `src/evidence/catalog.ts`
-exposes those reviews and the shared vocabulary for five capabilities
+Each script's YAML `evidence-review` owns its authored question, modeling
+explanation, primary comparison, criterion labels, and scope note. Shared
+`src/evidence/metadata.ts` validates the contract without listing experiment IDs.
+`src/evidence/catalog.ts` owns the shared vocabulary for five capabilities
 (Computation, Structure, Representation, Training, Reliability), primary leaf types,
 and evaluation conditions. Each experiment owns its assignments in its PEP 723
 `[tool.relflow.evidence]` table; there are no central ID membership lists. Every current proof has one capability and at least one

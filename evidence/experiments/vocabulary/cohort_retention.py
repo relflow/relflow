@@ -3,13 +3,7 @@
 # title: What is forgotten when old examples stop arriving?
 # categories:
 # - Vocabulary
-# description: Predict a cohort-specific response and retain earlier cohorts through
-#   sequential adaptation.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: Predict a cohort-specific response and retain earlier cohorts through sequential adaptation.
 # evidence-readout:
 # - label: Joint reference error
 #   metric:
@@ -24,6 +18,47 @@
 #   - final_mean_nrmse
 #   format: number
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Visible fields supply evidence; prediction targets are hidden.
+#   alt: Predict a cohort-specific response and retain earlier cohorts through sequential adaptation.
+# evidence-review:
+#   question: What is forgotten when old examples stop arriving?
+#   modeling: Generate three visible cohorts with different numeric response rules. Fit them sequentially, with an
+#     independent test set for each cohort. Compare final error with no replay, a small sample of old training rows,
+#     and full joint rehearsal.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: No replay of old examples
+#       path:
+#       - arms
+#       - no_replay
+#       - final_mean_nrmse
+#       format: number
+#     - label: Small replay sample
+#       path:
+#       - arms
+#       - small_replay
+#       - final_mean_nrmse
+#       format: number
+#     - label: Joint rehearsal reference
+#       path:
+#       - arms
+#       - joint
+#       - final_mean_nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: These are different training-data policies under the same update budget. The experiment records forgetting;
+#     it does not require replay to win or assume perfect retention.
+# evidence-plot:
+#   target: answer
+#   focus: What is retained when vocabulary cohorts arrive over time?
+#   comparison: Follow each cohort's error after each declared training phase, separating replay policies.
+#   limit: Cohort membership is fixed when measuring retention, and unseen cohorts remain separately labeled.
+#   renderer: plot
 # ---
 #
 # Adapting to new observations can improve the current cohort while damaging earlier predictions. Retention
@@ -40,10 +75,7 @@
 # Predict a cohort-specific response and retain earlier cohorts through sequential adaptation. The example
 # is illustrative; its answer is hidden during scoring.
 #
-# ```{typst}
-# //| label: fig-evidence-p086
-# //| fig-cap: "Visible fields supply evidence; prediction targets are hidden."
-# //| fig-alt: "Predict a cohort-specific response and retain earlier cohorts through sequential adaptation."
+# ```typst
 # #tree(node("record",kind:"root",children:(node("cohort",type:"Enum"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
 # ```
 #
@@ -55,20 +87,11 @@
 #
 # ## Result
 #
-# {{< evidence P086 status >}}
-#
 # No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
 # established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
 # each evaluation condition remain separate.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P086 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P086 script >}}
+# ## Method
 #
 # ### Process, splits, and interpretation
 #
@@ -81,11 +104,10 @@
 # perfect no-replay retention or guaranteed replay superiority is assumed. Statistics continue to follow the
 # actual training stream, so reported forgetting includes the complete fitted model state.
 #
-# ### Complete experiment code
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -272,8 +294,45 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    for index, (arm, value) in enumerate(m["arms"].items()):
+        history = value["history"]
+        axes[0].plot(
+            range(len(history)),
+            [row["scores"]["A"]["nrmse"] for row in history],
+            marker=MARKERS[index],
+            color=COLORS[index],
+            label=human(arm),
+        )
+    axes[0].set(
+        xticks=[0, 1, 2],
+        xticklabels=["After A", "After B", "After C"],
+        ylabel="Cohort A normalized RMSE",
+        title="What happens to the first cohort?",
+    )
+    axes[0].legend(fontsize=8)
+    arms = list(m["arms"])
+    dots(
+        axes[1],
+        [human(arm) for arm in arms],
+        {
+            f"Cohort {cohort}": [m["arms"][arm]["history"][-1]["scores"][cohort]["nrmse"] for arm in arms]
+            for cohort in ["A", "B", "C"]
+        },
+        xlabel="Final normalized RMSE, each fixed cohort",
+    )
+    return (
+        fig,
+        "Cohort A is evaluated on the same held-out population after every phase. The final panel keeps all cohorts separate, including cohorts the continued-A control never learns.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

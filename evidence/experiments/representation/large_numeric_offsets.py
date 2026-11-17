@@ -1,24 +1,73 @@
 # %% [markdown]
 # ---
-# title: "Can learning preserve small differences beside enormous offsets?"
-# categories: ["Representation"]
-# description: "Compare the same smooth regression around zero and around one trillion, keeping source values and residual scoring in float64."
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# title: Can learning preserve small differences beside enormous offsets?
+# categories:
+# - Representation
+# description: Compare the same smooth regression around zero and around one trillion, keeping source values and residual
+#   scoring in float64.
 # evidence-readout:
-# - label: "Wide-offset error"
-#   metric: ["arms", "wide", "nrmse"]
+# - label: Wide-offset error
+#   metric:
+#   - arms
+#   - wide
+#   - nrmse
 #   format: number
-# - label: "Centered error"
-#   metric: ["arms", "centered", "nrmse"]
+# - label: Centered error
+#   metric:
+#   - arms
+#   - centered
+#   - nrmse
 #   format: number
-# - label: "Float32 input error"
-#   metric: ["arms", "float32", "nrmse"]
+# - label: Float32 input error
+#   metric:
+#   - arms
+#   - float32
+#   - nrmse
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
+#     condition.
+#   alt: Can learning preserve small differences beside enormous offsets? Visible inputs lead to one hidden prediction
+#     target.
+# evidence-review:
+#   question: Can learning preserve small differences beside enormous offsets?
+#   modeling: Generate the same small regression differences near zero and near a trillion. Fit matched models using
+#     float64 source values, explicit centering, or deliberate float32 input conversion. Compare residual error after
+#     removing the target offset.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Input rounded to float32
+#       path:
+#       - arms
+#       - float32
+#       - nrmse
+#       format: number
+#     - label: Large offset retained in float64
+#       path:
+#       - arms
+#       - wide
+#       - nrmse
+#       format: number
+#     - label: Explicitly centered input
+#       path:
+#       - arms
+#       - centered
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The float32 control loses the source differences before the model receives them. This tests preservation
+#     and learning of numerical detail, not recovery of information already rounded away.
+# evidence-plot:
+#   target: target
+#   focus: Can small numeric differences survive a very large offset?
+#   comparison: Compare numeric arms on matched source values, including the shuffled-input control.
+#   limit: Plots center large-offset values explicitly so the offset cannot visually erase their spread.
+#   renderer: plot
 # ---
 #
 # Compare the same smooth regression around zero and around one trillion, keeping source values and
@@ -37,10 +86,7 @@
 # The comparison asks whether that small spread survives encoding, learning, and numeric readout. It
 # does not ask one model trained at zero to understand a new, unseen offset.
 #
-# ```{typst}
-# //| label: fig-evidence-p087
-# //| fig-cap: "The target is hidden. The diagram shows the informative representation; controls change only the declared condition."
-# //| fig-alt: "Can learning preserve small differences beside enormous offsets? Visible inputs lead to one hidden prediction target."
+# ```typst
 # #tree(node("record", kind: "root", children: (node("x", type: "Number"), node("target", kind: "target", type: "Number"),)))
 # ```
 #
@@ -52,19 +98,10 @@
 #
 # ## Result
 #
-# {{< evidence P087 status >}}
-#
 # The numerical checks below are provisional, predeclared hypotheses, not measured successes. No full
 # learning result is claimed until a matching run is recorded. Smoke runs establish execution only.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P087 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P087 script >}}
+# ## Method
 #
 # ### Population, controls, and scoring
 #
@@ -75,12 +112,11 @@
 # calibration. The float32 arm is expected to lose information; low error there would demand a leakage
 # investigation.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -225,8 +261,46 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, axes_pair, dots
+
+    m = bundle.record["metrics"]["arms"]
+    arms = ["zero", "wide", "centered", "float32"]
+    fig, axes = axes_pair(width=10, height=4.9)
+    dots(
+        axes[0],
+        ["Zero-centered source", "Float64 source near 10¹²", "Explicitly precentered", "Float32 ingress near 10¹²"],
+        {"Intact inputs": [m[a]["nrmse"] for a in arms], "Shuffled inputs": [m[a]["shuffled_nrmse"] for a in arms]},
+        xlabel="Residual RMSE / constant-guess RMSE",
+        reference=(1, "Constant-guess error"),
+    )
+    pairs = bundle.pairs("target")
+    for index, arm in enumerate(["wide", "float32"]):
+        pair = next((p for p in pairs if p["context"].get("arm") == arm and p["call"] == "prediction(model, test)"))
+        actual, predicted = (pair["actual"] - 1000000000000.0, pair["predicted"] - 1000000000000.0)
+        if not np.isclose(np.sqrt(np.mean((actual - predicted) ** 2)), m[arm]["residual_rmse"]):
+            raise ValueError("Centered precision scatter disagrees with the proof's residual score")
+        axes[1].scatter(actual, predicted, s=7, alpha=0.23, color=COLORS[index], label=human(arm), rasterized=True)
+    axes[1].plot([-3.2, 3.2], [-3.2, 3.2], ls="--", color="gray")
+    axes[1].set(
+        xlabel="Actual target minus 10¹²",
+        ylabel="Model prediction minus 10¹²",
+        title="Predictions after subtracting 10¹²",
+        xlim=(-3.3, 3.3),
+        ylim=(-3.3, 3.3),
+    )
+    axes[1].legend(fontsize=9)
+    axes[1].grid(alpha=0.18)
+    return (
+        fig,
+        f"All four arms use matched latent draws and the same fixed budget. The wide scatter subtracts 10¹² in float64 on both axes. Float32 ingress leaves {m['float32']['input_unique_values']:,} distinct training input, versus {m['wide']['input_unique_values']:,} in the wide float64 arm; later normalization cannot recover discarded differences.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

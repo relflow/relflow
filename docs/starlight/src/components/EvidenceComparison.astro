@@ -29,16 +29,7 @@ const zero = ((0 - min) / (max - min)) * 100;
               <li data-metric-path={JSON.stringify(point.path)} data-value={point.value}>
                 <div class="bar-label">
                   <span>{point.label}</span>
-                  <strong>
-                    {formatValue(
-                      point.value,
-                      point.format === 'percent'
-                        ? 'percent'
-                        : chart.metric === 'AUC'
-                          ? 'auc'
-                          : 'number',
-                    )}
-                  </strong>
+                  <strong>{formatValue(point.value, point.format)}</strong>
                 </div>
                 <div class="track" aria-hidden="true" style={`--zero:${zero}%`}>
                   <span

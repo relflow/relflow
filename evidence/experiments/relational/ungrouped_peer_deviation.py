@@ -4,11 +4,6 @@
 # categories:
 # - Peer-relative inference
 # description: Predict each item’s difference from the list average without supplying that average.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Original lists
 #   metric:
@@ -19,6 +14,39 @@
 #   - translated_nrmse
 #   format: error
 # evidence-group: Relational
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with collection, items, value, deviation. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow infer an average and compare each item?
+#   modeling: Give a list of six values and hide each item’s difference from the list average. Do not provide the
+#     average. Compare error on normal lists and on copies with the same constant added to every value, which leaves
+#     all correct deviations unchanged.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: RMSE
+#     conditions:
+#     - label: Original lists
+#       path:
+#       - intact_rmse
+#       format: number
+#     - label: Shifted lists
+#       path:
+#       - translated_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: 'Reordering items is checked separately: the predictions should move with their items.'
+# evidence-plot:
+#   mode: regression
+#   target: items/deviation
+#   focus: Can the model compare an item with the ungrouped collection mean?
+#   comparison: Compare original, translated, and reordered collections.
+#   limit: Translation preserves the true deviations and complete-record permutation preserves their correspondence.
+# evidence-cost:
+#   baseline: 100
+#   candidate: 99
 # ---
 #
 # ## Example
@@ -40,10 +68,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-ungrouped-peer-deviation
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with collection, items, value, deviation. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("collection", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("value", type: "Number"),
@@ -70,18 +95,9 @@
 # The generator's six-item width and centered synthetic distribution constrain the conclusion: this is not a
 # demonstration of arbitrary-length mean calculation or exact subtraction.
 #
-# {{< evidence P035 status >}}
-#
 # The model approximately combines list information with each item’s value. This result covers six-item lists, rather than arbitrary lengths or exact arithmetic.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P035 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P035 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -97,8 +113,6 @@
 # empty collections, and missing values, and tighten the equivariance contract.
 # The [grouped case](grouped-peer-deviation.html) adds membership selection;
 # the [supplied-mean control](supplied-peer-mean-control.html) removes aggregation.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -277,6 +291,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

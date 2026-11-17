@@ -4,11 +4,6 @@
 # categories:
 # - Cardinality generalization
 # description: Give the model both a repeated amount and its count, then test larger counts absent from training.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Larger counts
 #   metric:
@@ -16,6 +11,46 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Does the count help with longer lists?
+#   modeling: Train a model to predict a repeated amount’s total from the items and a visible count. Training counts
+#     range from one to six; test counts range from seven to ten. Duplicating a test list also doubles the supplied
+#     count and expected total.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - unseen_score
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - unseen_score
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The primary comparison measures larger-count prediction error. It does not isolate the effect of removing
+#     the count input.
+# evidence-plot:
+#   mode: regression
+#   target: total
+#   focus: Does a supplied count help on unseen collection lengths?
+#   comparison: Inspect longer bags and the paired effect of duplicating shorter bags.
+#   limit: Success here relies on the visible count and the tested generator.
+#   labels:
+#     unseen: 'Unseen lengths: 7–10 items'
+#     short: Short bags before duplication
+#     duplicate(short): Matched bags and visible count doubled
+# evidence-cost:
+#   baseline: 29
+#   candidate: 29
 # ---
 #
 # This is a test of extending an amount-times-count relationship beyond the counts used in training.
@@ -44,10 +79,7 @@
 # training. To picture the scaling check within the allowed capacity, start with four copies, whose
 # answer is 2.0, and duplicate that whole bag while changing item_count from four to eight.
 #
-# ```{typst}
-# //| label: fig-evidence-visible-count-unseen-lengths
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("item_count", type: "Number"),
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
@@ -68,11 +100,8 @@
 #
 # ## Result
 #
-# {{< evidence P005 status >}}
-#
 # The model extends the amount-times-count relationship to these larger counts. The count is
 # supplied, so this does not show that it learned to count items.
-#
 #
 # The reported error compares the longer-list predictions with a constant training-mean guess. The
 # scaling error compares the duplicated prediction with twice the original prediction. These are
@@ -80,14 +109,7 @@
 # properly. The result is limited to repeated equal values and the tested finite capacity, with
 # count explicitly available.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P005 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P005 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -112,8 +134,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -271,6 +291,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

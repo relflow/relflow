@@ -16,6 +16,7 @@ import hosted
 import pytest
 import runtime
 from evidence_ci import digest, plan, registry, suite_identity, task_key, write_json
+from experiments.source import frontmatter, metadata
 
 
 def wheel(path, content):
@@ -42,20 +43,14 @@ def source(root, count=24):
 
 
 def hints(root, tasks):
-    value = {
-        "schema": 1,
-        "source": {
-            "repository": "relflow/relflow",
-            "run_id": 123,
-            "run_attempt": 1,
-            "head_sha": "a" * 40,
-            "executor_sha": "b" * 40,
-            "artifact": {"id": 456, "name": "relflow-evidence-attempt-1", "digest": "sha256:" + "c" * 64},
-        },
-        "tasks": tasks,
-    }
-    (root / "timings.json").write_text(json.dumps(value))
-    return value
+    for identifier, entry in registry(root, measurements=False).items():
+        if identifier not in tasks:
+            continue
+        path = root / entry["script"]
+        source = path.read_text()
+        header = metadata(source)
+        header["evidence-cost"] = tasks[identifier]
+        path.write_text(frontmatter(source, header))
 
 
 @pytest.fixture
@@ -198,10 +193,20 @@ def test_unknown_proofs_have_positive_costs_and_spread_across_twelve_shards(tmp_
         run_id="unmeasured", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
     )
     frozen = hosted.scheduling(suite)
-    assert frozen["timings_sha256"] is None
     assert all(value == 1.0 for roles in frozen["costs"].values() for value in roles.values())
     buckets = hosted.assignments(manifest, suite)
     assert len(buckets) == 12 and all(len(bucket) == 2 for bucket in buckets)
+
+
+def test_adding_and_removing_a_script_updates_planning_without_side_lists(tmp_path):
+    suite = source(tmp_path / "suite", count=1)
+    added = suite / "experiments/family/independent.py"
+    added.write_text((suite / "experiments/family/proof_0.py").read_text().replace("P901", "P999"))
+    hints(suite, {"P999": {"baseline": 12, "candidate": 14}})
+    assert set(hosted.scheduling(suite)["costs"]) == {"P901", "P999"}
+    assert hosted.scheduling(suite)["costs"]["P999"] == {"baseline": 12, "candidate": 14}
+    added.unlink()
+    assert set(hosted.scheduling(suite)["costs"]) == {"P901"}
 
 
 def test_unknown_proofs_use_the_largest_valid_published_hint(tmp_path, monkeypatch):
@@ -220,7 +225,6 @@ def test_missing_role_hints_use_the_registered_median_without_creating_unknown_t
     suite = source(tmp_path / "suite")
     hints(suite, {"P901": {"baseline": 2, "candidate": 6}, "P999": {"baseline": 86400, "candidate": 86400}})
     frozen = hosted.scheduling(suite)
-    assert frozen["timings_sha256"] == digest(suite / "timings.json")
     assert frozen["costs"]["P902"] == {"baseline": 4.0, "candidate": 4.0}
     assert set(frozen["costs"]) == set(registry(suite))
 
@@ -245,8 +249,14 @@ def test_measured_expensive_proof_is_balanced_and_scheduled_before_cheap_work(tm
     after = plan(
         run_id="scheduled", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
     )
-    assert after["tasks"] == original["tasks"]
-    assert after["runtime_sha256"] == original["runtime_sha256"]
+    assert [
+        {key: value for key, value in task.items() if key not in {"script_sha256", "inputs_sha256"}}
+        for task in after["tasks"]
+    ] == [
+        {key: value for key, value in task.items() if key not in {"script_sha256", "inputs_sha256"}}
+        for task in original["tasks"]
+    ]
+    assert after["runtime_sha256"] != original["runtime_sha256"]
 
 
 def test_pair_assignment_uses_both_role_costs_while_task_order_uses_each_role(tmp_path):
@@ -274,15 +284,7 @@ def test_pair_assignment_uses_both_role_costs_while_task_order_uses_each_role(tm
 def test_malformed_timing_costs_fail_before_assignment(tmp_path, value):
     suite = source(tmp_path / "suite")
     hints(suite, {"P901": {"baseline": value}})
-    with pytest.raises(ValueError, match="Scheduling hints.*finite positive"):
-        hosted.scheduling(suite)
-
-
-@pytest.mark.parametrize("value", ["{", json.dumps({"schema": True, "source": {}, "tasks": {}})])
-def test_optional_timing_file_may_be_missing_but_not_malformed(tmp_path, value):
-    suite = source(tmp_path / "suite")
-    (suite / "timings.json").write_text(value)
-    with pytest.raises(ValueError, match="Scheduling hints"):
+    with pytest.raises(ValueError, match="evidence-cost.*finite positive"):
         hosted.scheduling(suite)
 
 
@@ -296,7 +298,7 @@ def test_resealed_plan_rejects_changed_frozen_scheduling_inputs(planned, changed
         manifest["suite_sha256"] = suite_identity(prepared / "source")
     (prepared / "manifest.json").write_text(json.dumps(manifest))
     reseal(prepared)
-    with pytest.raises(ValueError, match="scheduling hints.*frozen"):
+    with pytest.raises(ValueError, match="canonical tasks|scheduling hints.*frozen"):
         hosted.load_plan(prepared)
 
 

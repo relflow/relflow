@@ -65,8 +65,11 @@ exceptions for scratch files or generated output.
 
 - `src/relflow/` owns package Python code; `tests/` owns package checks.
 - `docs/` owns static publishing, authored pages, examples, and curated assets.
-- `evidence/experiments/` and `evidence/research/` own Python experiments;
-  each declares its own dependency environment and classification tags.
+- `evidence/experiments/` owns every Python learning experiment; each script
+  declares its dependency environment and classification tags; every experiment
+  belongs to the same required CI catalog. Each file owns its review, diagnostic
+  components, highlights, and scheduling estimates. Adding or removing an experiment
+  must require no edit to a central per-ID table.
 - `native/` owns Rust sources, Python bindings, and their tests.
 - `scripts/` contains explicitly admitted repository tools. One-off investigations
   and generated reports belong outside the tracked tree.

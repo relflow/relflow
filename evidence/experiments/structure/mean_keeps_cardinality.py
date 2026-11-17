@@ -5,11 +5,6 @@
 # - Hierarchical statistics
 # description: Predict both average and total after an average-only branch with item attention disabled; the branch's
 #   count lane keeps the total recoverable.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Average prediction
 #   metric:
@@ -25,6 +20,43 @@
 #   - 1
 #   format: number
 # evidence-group: Structure
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, transactions, amount, mean_amount, global_total. Amber cards are hidden prediction
+#     targets. Repeated collections keep their fields together.
+# evidence-review:
+#   question: Can relflow distinguish lists with the same average but different totals?
+#   modeling: Repeat the same amount one to six times and hide both the average and total. Disable item attention
+#     and summarize the collection with Mean, which also carries a count signal. Compare the learned total with a
+#     constant predictor on held-out records.
+#   comparison:
+#     metric: RMSE
+#     kind: Baseline reference
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - total_baseline_rmse
+#       format: number
+#     - label: Predicted total
+#       path:
+#       - total_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: A separate pair uses one versus six copies of the same amount. This implementation tests the count-augmented
+#     Mean summary, not a plain average that discards count.
+#   description: Learn separate averages and totals from repeated values summarized with a count signal.
+# evidence-plot:
+#   mode: regression
+#   target: global_total
+#   focus: Can the same representation support both a mean and a total?
+#   comparison: Inspect the two readouts and the matched one-copy/six-copy probes.
+#   limit: Mean and total require different responses to repetition.
+#   additional_targets:
+#   - mean_amount
+# evidence-cost:
+#   baseline: 12
+#   candidate: 12
 # ---
 #
 # ## Example
@@ -43,10 +75,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-structure-mean-keeps-cardinality
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, transactions, amount, mean_amount, global_total. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("amount", type: "Number"),
@@ -73,18 +102,9 @@
 # therefore should not be read as evidence that averaging destroys all cardinality. The experiment is
 # restricted to equal values within each record and counts from one through six.
 #
-# {{< evidence P041 status >}}
-#
 # The summary keeps the count: one and six copies produce different totals that track the correct values, while the average stays shared.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P041 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P041 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -111,8 +131,6 @@
 # arithmetic. For learned hierarchy compression, the
 # [nested Attention case](attention-preserves-nested-cardinality.html) tests a
 # route that retains cardinality information through attention instead.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -253,6 +271,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

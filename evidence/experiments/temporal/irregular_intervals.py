@@ -3,13 +3,7 @@
 # title: Can a forecast use irregular elapsed time?
 # categories:
 # - Temporal
-# description: An observation sequence supplies elapsed times and numeric values, and a hidden future value is
-#   requested.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
+# description: An observation sequence supplies elapsed times and numeric values, and a hidden future value is requested.
 # evidence-readout:
 # - label: Elapsed-time model
 #   metric:
@@ -24,6 +18,41 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Temporal
+# evidence-diagram:
+#   caption: Visible inputs and the hidden prediction target for this controlled task.
+#   alt: An observation sequence supplies elapsed times and numeric values, and a hidden future value is requested.
+# evidence-review:
+#   question: Can a forecast use irregular elapsed time?
+#   modeling: Generate four noisy measurements of a straight line at irregular elapsed times, then hide a future value.
+#     Compare a model given actual elapsed times with a separately trained control given only ordinal positions and
+#     a fixed next-position query.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Positions only
+#       path:
+#       - position_only
+#       - familiar
+#       - normalized_rmse
+#       format: number
+#     - label: Actual elapsed times
+#       path:
+#       - elapsed
+#       - familiar
+#       - normalized_rmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: Elapsed times are prepared numeric inputs here, not calendar Period parts. Larger gaps and longer forecast
+#     horizons receive separate gates.
+# evidence-plot:
+#   mode: regression
+#   target: answer
+#   focus: Does elapsed time matter beyond event position?
+#   comparison: Compare irregular-time predictions with position-only and explicit least-squares references.
+#   limit: A reordered or retimed history is labeled according to whether it changes the generating answer.
 # ---
 #
 # Four noisy observations follow one unknown linear rate. Elapsed times are measured relative to the last
@@ -43,10 +72,7 @@
 # answer: 1.25
 # ```
 #
-# ```{typst}
-# //| label: fig-evidence-p093
-# //| fig-cap: "Visible inputs and the hidden prediction target for this controlled task."
-# //| fig-alt: "An observation sequence supplies elapsed times and numeric values, and a hidden future value is requested."
+# ```typst
 # #tree(node("trajectory", kind: "root", children: (node("observations", kind: "branch", children: (node("elapsed", type: "Number"), node("value", type: "Number"))), node("forecast_at", type: "Number"), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
@@ -60,21 +86,12 @@
 #
 # ## Result
 #
-# {{< evidence P093 status >}}
-#
 # These checks define a new experiment. A full recorded run is required before claiming that the model
 # meets them. Lower normalized error is better; a value of one matches the stated constant reference. The
 # numerical gates are provisional and must be calibrated on separate validation seeds rather than adjusted
 # after seeing acceptance-test outcomes.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P093 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P093 script >}}
+# ## Method
 #
 # ### Process, controls, and held-out evaluation
 #
@@ -89,7 +106,6 @@
 # Exact elapsed time belongs in preprocessing and Number fields; calendar Period components are not treated
 # as durations.
 #
-# ### Complete experiment code
 
 # %%
 # /// script
@@ -296,6 +312,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

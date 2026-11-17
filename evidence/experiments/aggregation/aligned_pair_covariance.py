@@ -4,11 +4,6 @@
 # categories:
 # - Distribution statistics
 # description: 'Predict covariance: whether paired measurements tend to rise together or move in opposite directions.'
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Correct pairs
 #   metric:
@@ -21,6 +16,42 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, x, y, covariance. Amber cards are hidden prediction targets. Repeated collections
+#     keep their fields together.
+# evidence-review:
+#   question: Can relflow learn how two measurements vary together?
+#   modeling: 'Generate eight paired x and y measurements with varying means, spreads, and correlation. Hide their
+#     covariance: the average product of their centered values. Compare correct pairs with a test copy that shifts
+#     y between items while retaining the original answers. Both copies contain exactly the same individual x and
+#     y values.'
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Broken pairs
+#       path:
+#       - corrupted
+#       - rmse
+#       format: number
+#     - label: Correct pairs
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The shuffled-pair condition tests whether the model uses pairing. The target is covariance, not correlation.
+# evidence-plot:
+#   mode: regression
+#   target: covariance
+#   focus: Does covariance depend on which values occur together?
+#   comparison: Shuffle only the y coordinates while retaining the original answers.
+#   limit: The corruption removes pair alignment while preserving each coordinate's marginal values.
+# evidence-cost:
+#   baseline: 95
+#   candidate: 94
 # ---
 #
 # Each item contains two measurements, x and y, that belong together. The hidden answer describes
@@ -49,10 +80,7 @@
 # Swapping only the y values can change that answer even though neither field gains or loses any
 # values.
 #
-# ```{typst}
-# //| label: fig-evidence-aligned-pair-covariance
-# //| fig-cap: "Amber cards are hidden prediction targets. Repeated collections keep their fields together."
-# //| fig-alt: "Model tree with record, items, x, y, covariance. Amber cards are hidden prediction targets. Repeated collections keep their fields together."
+# ```typst
 # #tree(node("record", kind: "root", width: 120pt, children: (
 #   node("items", kind: "branch", repeated: true, width: 120pt, children: (
 #     node("x", type: "Number"),
@@ -75,25 +103,15 @@
 #
 # ## Result
 #
-# {{< evidence P006 status >}}
-#
 # Accuracy depends on keeping each pair together. This tests covariance, not correlation, which also
 # accounts for each measurement’s spread.
-#
 #
 # Both error percentages use the same constant-guess baseline because the labels remain unchanged.
 # Low intact error plus a rise after breaking pairs supports sensitivity to alignment; the corrupted
 # score is not a measure of accuracy on newly labeled shuffled data. This is population covariance,
 # which keeps scale information, rather than scale-normalized correlation.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P006 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P006 script >}}
+# ## Method
 #
 # ### How it works
 #
@@ -117,8 +135,6 @@
 #
 # The family’s promotion target is at least three core seeds and ten lightweight
 # calibration seeds.
-#
-# ### Complete experiment code
 #
 
 # %%
@@ -297,6 +313,3 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

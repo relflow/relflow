@@ -5,11 +5,6 @@
 # - Representation
 # description: Reconstruct noisy financial views, fit four clusters on complete training embeddings, and keep those
 #   clusters fixed while removing a view or replacing unrelated noise in independent records.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Complete evidence ARI
 #   metric:
@@ -33,6 +28,67 @@
 #   - ari_mean
 #   format: number
 # evidence-group: Representation
+# evidence-diagram:
+#   caption: Reconstruct visible financial measurements; export one frozen record embedding. Hidden styles are not
+#     fields.
+#   alt: Record embedding with channel Enum, amount Number, frequency Number, and an independent nuisance Vector.
+#     All four fields use sampled reconstruction.
+# evidence-review:
+#   question: Do frozen financial embeddings retain their groups with missing evidence?
+#   modeling: Generate financial records with noisy amount, frequency, and channel clues to four hidden styles, plus
+#     unrelated noise. Fit four clusters on complete training embeddings, then freeze both encoder and centroids.
+#     Compare group agreement on the same test records with complete evidence, channel missing, and all useful views
+#     missing.
+#   comparison:
+#     metric: Adjusted Rand index
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Complete evidence
+#       path:
+#       - summary
+#       - trained
+#       - complete
+#       - ari_mean
+#       format: number
+#     - label: Channel missing
+#       path:
+#       - summary
+#       - trained
+#       - one_view_missing
+#       - ari_mean
+#       format: number
+#     - label: All useful views missing
+#       path:
+#       - summary
+#       - trained
+#       - all_semantic_views_missing
+#       - ari_mean
+#       format: number
+#     definition: Agreement with the true groups, ignoring group names. One is exact agreement; independent groupings
+#       average around zero and can score below zero.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Every condition reuses the same fitted centers. Refitting clusters after removing evidence would ask a different
+#     question.
+# evidence-plot:
+#   target: class
+#   focus: Which semantic changes survive in the exported geometry?
+#   comparison: Pair clean, equivalent, missing-view, and contradictory conditions under each declared control and
+#     seed.
+#   limit: A visually appealing projection cannot substitute for the original-space robustness measurements.
+#   trained: trained
+#   geometry:
+#   - trained
+#   - untrained
+#   supplements:
+#     geometry:
+#       mode: representation-geometry
+#   renderer: plot
+# evidence-cost:
+#   baseline: 119
+#   candidate: 123
 # ---
 #
 # A record may contain several clues about the same hidden pattern. Can a frozen
@@ -64,10 +120,7 @@
 # those two measurements with null, leaving only unrelated noise. Neither change
 # supplies the hidden style as a field or label to the model.
 #
-# ```{typst}
-# //| label: fig-evidence-semantic-robustness
-# //| fig-cap: "Reconstruct visible financial measurements; export one frozen record embedding. Hidden styles are not fields."
-# //| fig-alt: "Record embedding with channel Enum, amount Number, frequency Number, and an independent nuisance Vector. All four fields use sampled reconstruction."
+# ```typst
 # #tree(node("record", kind: "root", body: [Frozen embedding], children: (
 #   node("channel", type: "Enum", body: [Noisy style clue]),
 #   node("amount", type: "Number", body: [Low or high amount]),
@@ -90,7 +143,6 @@
 # conditions. ARI near one means matching hidden groups; chance-level agreement
 # is near zero, independently of the cluster numbers.
 #
-#
 # Compare reconstruction training, the same untrained encoder, and standardized
 # raw fields. Fit each set of four clusters on complete training records only.
 # Keep the encoder, preprocessing, and centroids fixed for complete test records,
@@ -98,22 +150,13 @@
 #
 # ## Result
 #
-# {{< evidence P081 status >}}
-#
 # The checks distinguish complete evidence, partial evidence, and the no-signal
 # control. The same known concepts and vocabulary appear across independent
 # records, and the number of clusters is supplied. A later successful result
 # would establish robustness in this setup, rather than discovery of new customer
 # concepts or superiority to every raw representation.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P081 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P081 script >}}
+# ## Method
 #
 # ### Generator and information boundary
 #
@@ -158,13 +201,11 @@
 # Report each seed and paired differences; do not choose seeds or thresholds
 # after inspecting test results.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -543,8 +584,49 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     return metrics, checks
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    trials = m["trials"]
+    trained = spec["trained"]
+    arms = list(trials[0]["arms"])
+    conditions = list(trials[0]["arms"][trained]["conditions"])
+    rows = [(arm, condition) for condition in conditions for arm in arms]
+    fig.set_size_inches(11, max(6, len(rows) * 0.58))
+    dots(
+        axes[0],
+        [human(condition) + "\n" + human(arm) for arm, condition in rows],
+        {
+            f"Seed {trial['seed']}": [trial["arms"][arm]["conditions"][condition]["ari"] for arm, condition in rows]
+            for trial in trials
+        },
+        xlabel="Original-space held-out ARI",
+        reference=(0, "Chance-adjusted zero"),
+    )
+    dots(
+        axes[1],
+        [human(condition) for condition in conditions],
+        {
+            f"Seed {trial['seed']}": [
+                trial["arms"][trained]["conditions"][condition]["ari"]
+                - trial["arms"]["raw"]["conditions"][condition]["ari"]
+                for condition in conditions
+            ]
+            for trial in trials
+        },
+        xlabel="Trained minus prepared-raw ARI",
+        reference=(0, "Equal grouping quality"),
+    )
+    return (
+        fig,
+        "Every declared seed, intervention, and representation arm remains visible. Paired gains compare the same seed and condition. Original-space ARI remains authoritative even when a projection looks separated.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

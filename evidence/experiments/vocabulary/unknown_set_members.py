@@ -4,11 +4,6 @@
 # categories:
 # - Vocabulary
 # description: Train a Set field on known members without ever teaching it how unavailable members should affect prediction.
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: Prediction for empty input
 #   metric:
@@ -21,6 +16,41 @@
 #   - all_unknown
 #   format: number
 # evidence-group: Vocabulary
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, tags, labels, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: What does an untrained Set fallback do with entirely new members?
+#   modeling: Train on known set members, empty sets, and nulls, without simulating unavailable members. Predict a
+#     numeric function of membership. Then compare an empty input with an input containing only unseen member names.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Predicted value
+#     conditions:
+#     - label: Prediction for empty input
+#       path:
+#       - boundary_predictions
+#       - empty
+#       format: number
+#     - label: Prediction for all-unknown input
+#       path:
+#       - boundary_predictions
+#       - all_unknown
+#       format: number
+#     definition: Model output for each input condition, in target units. These are predictions, not prediction errors.
+#     direction: Task-specific interpretation
+#   note: 'The checks deliberately expose the untrained fallback: empty and all-unknown inputs can receive the same
+#     prediction, although null is distinct. P064 trains that fallback explicitly.'
+# evidence-plot:
+#   target: labels
+#   focus: How do unknown and duplicate set members affect the result?
+#   comparison: Inspect numeric predictions and reconstructed sets alongside boundary probes and shuffled labels.
+#   limit: Unknown-member fallback and exact set recovery are separate behaviors.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 18
+#   candidate: 18
 # ---
 #
 # A Set carries membership rather than order or repetition count. This experiment first teaches a
@@ -38,10 +68,7 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```{typst}
-# //| label: fig-evidence-unknown-set-members
-# //| fig-cap: "Amber cards are hidden prediction targets. Other fields provide the input."
-# //| fig-alt: "Model tree with record, tags, labels, target. Amber cards are hidden prediction targets. Other fields provide the input."
+# ```typst
 # #tree(node("record", kind: "root", children: (
 #   node("tags", type: "Set"),
 #   node("labels", kind: "target", type: "Set"),
@@ -65,8 +92,6 @@
 #
 # ## Result
 #
-# {{< evidence P058 status >}}
-#
 # The untrained fallback treats all-unknown input like empty input here. Unknown output members also cannot be named. The next fallback test shows how training can distinguish nonempty input.
 #
 # Exact-set accuracy requires the entire predicted membership set to match, rather than rewarding a
@@ -75,14 +100,7 @@
 # all-unknown predictions describes this untrained boundary; it does not establish a useful fallback
 # for every deployment.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence P058 evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence P058 script >}}
+# ## Method
 #
 # ### Data and model
 #
@@ -102,13 +120,11 @@
 # target must have the same encoded membership bits, without learning labels
 # from evaluation. Null versus empty predictions must remain well separated.
 #
-# ### Complete experiment code
-#
 
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = [
+# dependencies = ["matplotlib>=3.10",
 #     "lightning",
 #     "numpy",
 #     "polars",
@@ -267,8 +283,82 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     }
 
 
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, MARKERS, axes_pair, dots, finite
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair()
+    keys = sorted(
+        [key for key in m if key.startswith("known_") and key.split("_")[-1].isdigit()],
+        key=lambda key: -int(key.split("_")[1]),
+    )
+    if keys:
+        x = finite([m[key]["coverage.content"] for key in keys])
+        for index, (key, label) in enumerate(
+            [("accuracy.content", "Accuracy on known answers"), ("accuracy.all", "Accuracy on all answers")]
+        ):
+            values = [m[k].get(key) for k in keys]
+            present = [i for i, value in enumerate(values) if value is not None]
+            axes[0].plot(
+                x[present], [values[i] for i in present], marker=MARKERS[index], color=COLORS[index], label=label
+            )
+        axes[0].plot(x, x, ls=":", color="gray", label="Coverage ceiling for perfect known answers")
+        axes[0].set(
+            title="Coverage and conditional accuracy differ",
+            xlabel="Fraction of targets in the vocabulary",
+            ylabel="Observed accuracy",
+            xlim=(-0.03, 1.03),
+            ylim=(-0.03, 1.03),
+        )
+        axes[0].xaxis.set_major_formatter(PercentFormatter(1))
+        axes[0].yaxis.set_major_formatter(PercentFormatter(1))
+        axes[0].legend(fontsize=8)
+        known = finite([m[key]["targets.known"] for key in keys])
+        unknown = finite([m[key]["targets.unavailable"] for key in keys])
+        axes[1].barh(range(len(keys)), known, color=COLORS[0], label="Known answers")
+        axes[1].barh(range(len(keys)), unknown, left=known, color=COLORS[1], label="Unavailable answers")
+        axes[1].set(
+            yticks=range(len(keys)),
+            yticklabels=[f"{value:.0%} coverage" for value in x],
+            xlabel="Selected target count",
+            title="Which answers contribute to each score?",
+        )
+        axes[1].invert_yaxis()
+        axes[1].legend(fontsize=8)
+        return (
+            fig,
+            "Undefined conditional accuracy at zero coverage is omitted, rather than replaced by zero. Counts come from the proof's selected-target measurements.",
+            {},
+        )
+    dots(
+        axes[0],
+        ["Intact membership", "Shuffled membership"],
+        {"Normalized RMSE": [m["nrmse"], m["shuffled_nrmse"]]},
+        xlabel="Numeric prediction RMSE / baseline RMSE",
+        reference=(1, "Constant guess"),
+    )
+    names = ["empty", "all_unknown", "null", "partial_unknown"]
+    run = next((frame for frame in reversed(bundle.frames) if frame["function"] == "run"))
+    probes = bundle.value(run["values"]["probes"])
+    dots(
+        axes[1],
+        [human(name) for name in names],
+        {
+            "Prediction": [m["boundary_predictions"][name] for name in names],
+            "Declared probe target": [row["target"] for row in probes],
+        },
+        xlabel="Numeric answer for the fixed membership probes",
+    )
+    return (
+        fig,
+        f"Known-valued sets have {m['known_exact_set_accuracy']:.1%} exact reconstruction accuracy. Boundary probes distinguish null from valued empty content. An unavailable target label has no decoder row, even when its input produces a valid numeric answer.",
+        {},
+    )
+
+
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

@@ -81,7 +81,7 @@ def suite_identity(root: Path) -> str:
 
 
 def runtime_inputs(root: Path) -> dict:
-    """Bind experiment code and shared runtime files, excluding publication and test tooling."""
+    """Bind every experiment and shared runtime file, excluding publication tooling."""
     inputs = {}
     paths = list((root / "experiments").rglob("*"))
     for path in sorted(paths):
@@ -122,7 +122,8 @@ def baseline_catalog(revision: str) -> set[str]:
                 stream = archive.extractfile(member)
                 if stream is None:
                     raise ValueError(f"Cannot read baseline experiment: {member.name}")
-                identifier = describe(stream.read().decode())["evidence-id"]
+                source = stream.read().decode()
+                identifier = describe(source)["evidence-id"]
                 if identifier in entries:
                     raise ValueError(f"Duplicate baseline experiment: {identifier}")
                 entries.add(identifier)
