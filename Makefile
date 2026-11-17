@@ -51,4 +51,4 @@ clean: ## Remove generated site output and tool caches.
 	rm -rf docs/.pytest_cache docs/.ruff_cache
 	rm -rf docs/__pycache__ docs/tests/__pycache__ evidence/__pycache__
 	rm -rf evidence/tests/__pycache__ evidence/tests/runtime/__pycache__
-	rm -rf evidence/experiments/__pycache__ evidence/experiments/*/__pycache__
+	rm -rf evidence/experiments/__pycache__

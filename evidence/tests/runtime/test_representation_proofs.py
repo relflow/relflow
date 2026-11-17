@@ -15,16 +15,14 @@ sys.path.insert(0, str(ROOT / "experiments"))
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(
-        f"representation_proof_{name}", ROOT / "experiments/representation" / f"{name}.py"
-    )
+    spec = importlib.util.spec_from_file_location(f"representation_proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def test_reconstruction_labels_never_enter_training_records_or_schema():
-    proof = load("reconstruction_transfer")
+    proof = load("P073")
     rows, labels = proof.sample(rows=128, seed=11)
     assert rows == proof.sample(rows=128, seed=11)[0]
     assert rows != proof.sample(rows=128, seed=12)[0]
@@ -40,7 +38,7 @@ def test_reconstruction_labels_never_enter_training_records_or_schema():
 
 
 def test_permuted_reconstruction_views_preserve_marginals_and_destroy_common_signal():
-    proof = load("reconstruction_transfer")
+    proof = load("P073")
     original, labels = proof.sample(rows=8192, seed=11)
     shuffled, shuffled_labels = proof.sample(rows=8192, seed=11, permuted=True)
     np.testing.assert_array_equal(labels, shuffled_labels)
@@ -58,7 +56,7 @@ def test_permuted_reconstruction_views_preserve_marginals_and_destroy_common_sig
 
 
 def test_frozen_probe_has_a_small_balanced_fit_set_and_uses_all_raw_coordinates():
-    proof = load("reconstruction_transfer")
+    proof = load("P073")
     rows, labels = proof.sample(rows=4 * proof.LABELS_PER_CLASS, seed=21)
     np.testing.assert_array_equal(np.bincount(labels), np.full(4, 8))
     raw = proof.raw_features(rows)
@@ -70,7 +68,7 @@ def test_frozen_probe_has_a_small_balanced_fit_set_and_uses_all_raw_coordinates(
 
 
 def test_sensor_missingness_is_independent_of_values_and_holds_out_one_pattern():
-    proof = load("incomplete_evidence")
+    proof = load("P074")
     natural = list(proof.records(rows=8192, seed=31))
     training = list(proof.records(rows=8192, seed=31, training=True))
     patterns = {tuple(row[f"hide_{name}"] for name in proof.SENSORS) for row in training}
@@ -89,7 +87,7 @@ def test_sensor_missingness_is_independent_of_values_and_holds_out_one_pattern()
 
 
 def test_gaussian_oracle_matches_empirical_conditional_error_for_all_patterns():
-    proof = load("incomplete_evidence")
+    proof = load("P074")
     rows = list(proof.records(rows=16384, seed=41))
     targets = np.asarray([row["target"] for row in rows])
     for pattern in proof.PATTERNS:
@@ -101,7 +99,7 @@ def test_gaussian_oracle_matches_empirical_conditional_error_for_all_patterns():
 
 
 def test_sensor_schema_hides_target_and_respects_each_explicit_selector():
-    proof = load("incomplete_evidence")
+    proof = load("P074")
     model = proof.build()
     for name in proof.SENSORS:
         mask = model.schema.requests[rf.Address(name)].mask
@@ -118,7 +116,7 @@ def test_sensor_schema_hides_target_and_respects_each_explicit_selector():
 
 @pytest.mark.parametrize("outputs", (1, 3))
 def test_frozen_probe_reads_every_root_representation_and_excludes_leaf_embeddings(outputs):
-    proof = load("reconstruction_transfer")
+    proof = load("P073")
     model = rf.Model(
         d_model=16,
         n_layers=1,
@@ -142,7 +140,7 @@ def test_frozen_probe_reads_every_root_representation_and_excludes_leaf_embeddin
     [("multiplicative", {"price", "rate", "ltv"}), ("additive", {"left", "right", "total"})],
 )
 def test_number_lanes_generators_restart_and_expose_only_visible_fields(generator, keys):
-    proof = load("number_lanes")
+    proof = load("P079")
     records = getattr(proof, generator)
     rows = list(records(rows=64, seed=11))
     assert rows == list(records(rows=64, seed=11))
@@ -152,7 +150,7 @@ def test_number_lanes_generators_restart_and_expose_only_visible_fields(generato
 
 
 def test_number_lanes_multiplicative_oracle_is_the_conditional_median_of_heavy_tails():
-    proof = load("number_lanes")
+    proof = load("P079")
     rows = list(proof.multiplicative(rows=16384, seed=21))
     price = np.asarray([row["price"] for row in rows])
     rate = np.asarray([row["rate"] for row in rows])
@@ -170,7 +168,7 @@ def test_number_lanes_multiplicative_oracle_is_the_conditional_median_of_heavy_t
 
 
 def test_number_lanes_additive_oracle_residual_has_the_declared_noise():
-    proof = load("number_lanes")
+    proof = load("P079")
     rows = list(proof.additive(rows=16384, seed=31))
     residual = np.asarray([row["total"] for row in rows]) - proof.median("additive", rows)
     assert abs(residual.mean()) < 0.1
@@ -181,7 +179,7 @@ def test_number_lanes_additive_oracle_residual_has_the_declared_noise():
 @pytest.mark.parametrize("inputs", ["number", "rank"])
 @pytest.mark.parametrize("target", ["number", "rank"])
 def test_number_lanes_arms_change_only_the_numeric_datatype(inputs, target):
-    proof = load("number_lanes")
+    proof = load("P079")
     model = proof.build("heavy", inputs, target)
     requests = model.schema.requests
     assert set(requests) == {rf.Address("price"), rf.Address("rate"), rf.Address("ltv")}
@@ -195,7 +193,7 @@ def test_number_lanes_arms_change_only_the_numeric_datatype(inputs, target):
 
 
 def test_number_lanes_narrow_task_is_the_additive_task_moved_away_from_zero():
-    proof = load("number_lanes")
+    proof = load("P079")
     centered = list(proof.RECORDS["additive"](rows=256, seed=5))
     moved = list(proof.RECORDS["narrow"](rows=256, seed=5))
     assert [row["left"] for row in centered] == [row["left"] for row in moved]

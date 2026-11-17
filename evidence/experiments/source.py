@@ -307,8 +307,11 @@ def registry(
     )
     entries = {}
     seen = set()
-    pages = set()
-    for script in sorted((root / "experiments").glob("*/*.py")):
+    directory = root / "experiments"
+    nested = list(directory.glob("*/*.py"))
+    if nested:
+        raise ValueError(f"Experiment {nested[0]} must live directly in experiments/ as its P identifier")
+    for script in sorted(directory.glob("P*.py")):
         if script.is_symlink() or script.parent.is_symlink() or script.parent.parent.is_symlink():
             raise ValueError("Canonical experiment sources must be regular files")
         source = script.read_text()
@@ -318,10 +321,8 @@ def registry(
         if identifier in seen:
             raise ValueError(f"Invalid or duplicate evidence ID: {identifier}")
         seen.add(identifier)
-        page = f"docs/evidence/{script.parent.name}/{script.stem.replace('_', '-')}.py"
-        if page in pages:
-            raise ValueError(f"{identifier}: another experiment already uses page {page}")
-        pages.add(page)
+        if script.name != f"{identifier}.py":
+            raise ValueError(f"Experiment {identifier}: filename must be {identifier}.py, got {script.name}")
         requirements = header.get("evidence-requires", [])
         if not isinstance(requirements, list) or any(
             not isinstance(item, str) or not item.strip() for item in requirements
@@ -329,7 +330,7 @@ def registry(
             raise ValueError(f"{identifier}: evidence-requires must be a list of nonempty resource descriptions")
         entries[identifier] = {
             "script": script.relative_to(root).as_posix(),
-            "page": page,
+            "page": f"docs/evidence/{identifier}.py",
             "header": header,
             "run": recorded["results"].get(identifier),
             "report": recorded["report"],

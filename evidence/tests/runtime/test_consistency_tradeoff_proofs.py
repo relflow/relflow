@@ -11,15 +11,15 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
 
 
-def load(family, name):
-    spec = importlib.util.spec_from_file_location(f"proof_{name}", ROOT / "experiments" / family / f"{name}.py")
+def load(name):
+    spec = importlib.util.spec_from_file_location(f"proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def test_anomalies_preserve_marginals_and_change_only_the_relationship():
-    proof = load("anomaly", "contextual_consistency")
+    proof = load("P076")
     clean = list(proof.records(rows=4096, seed=11))
     broken = list(proof.records(rows=4096, seed=11, shuffled=True))
     assert clean == list(proof.records(rows=4096, seed=11))
@@ -40,7 +40,7 @@ def test_anomalies_preserve_marginals_and_change_only_the_relationship():
 
 
 def test_valid_tail_control_stays_inside_support_and_preserves_the_rule():
-    proof = load("anomaly", "contextual_consistency")
+    proof = load("P076")
     tail = list(proof.records(rows=2048, seed=11, tail=True))
     assert all(1.8 <= abs(row["x"]) <= 2 for row in tail)
     errors = [
@@ -54,12 +54,12 @@ def test_valid_tail_control_stays_inside_support_and_preserves_the_rule():
 
 @pytest.mark.parametrize("anomaly, expected", [([3, 4], 1.0), ([0, 0], 0.0), ([1, 2], 0.5)])
 def test_anomaly_auc_handles_ties(anomaly, expected):
-    proof = load("anomaly", "contextual_consistency")
+    proof = load("P076")
     assert proof.auc(np.array([1, 2]), np.array(anomaly)) == expected
 
 
 def test_measurement_contamination_keeps_targets_and_clean_splits_paired():
-    proof = load("quantile", "representation_tradeoffs")
+    proof = load("P077")
     clean = list(proof.records(rows=8192, seed=11))
     corrupt = list(proof.records(rows=8192, seed=11, contaminated=True))
     assert clean == list(proof.records(rows=8192, seed=11))
@@ -72,7 +72,7 @@ def test_measurement_contamination_keeps_targets_and_clean_splits_paired():
 
 
 def test_population_percentile_and_source_unit_optima_are_distinct():
-    proof = load("quantile", "representation_tradeoffs")
+    proof = load("P077")
     rows = list(proof.noisy_records(rows=49152, seed=11))
     targets = proof.optima()
     for group, name in enumerate(proof.GROUPS):

@@ -10,7 +10,7 @@ import { record } from './fixtures/evidence.mjs';
 const site = fileURLToPath(new URL('../', import.meta.url));
 const adapter = new URL('../src/evidence/data.ts', import.meta.url).href;
 const source = readFileSync(
-  new URL('../../../evidence/experiments/aggregation/attention_sum_in_range.py', import.meta.url),
+  new URL('../../../evidence/experiments/P001.py', import.meta.url),
   'utf8',
 );
 const snapshot = {
@@ -134,7 +134,7 @@ test('without a publication every current declaration remains pending', () => {
 test('every current source belongs to one catalog and preserves plain Markdown presentation', () => {
   const actual = loaded();
   for (const entry of actual.entries) {
-    assert.match(entry.sourcePath, /^evidence\/experiments\/[^/]+\/[^/]+\.py$/);
+    assert.match(entry.sourcePath, /^evidence\/experiments\/P\d+\.py$/);
     assert.equal('lane' in entry, false);
     assert.ok(entry.diagram.caption.trim(), `${entry.id}: keep the figure caption`);
     assert.ok(entry.diagram.alt.trim(), `${entry.id}: keep alternative text`);
@@ -415,9 +415,9 @@ function sourceFixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'rock-docs-evidence-source-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const workspace = join(directory, 'docs/starlight');
-  const sourcePath = 'evidence/experiments/fixtures/source.py';
+  const sourcePath = 'evidence/experiments/P001.py';
   mkdirSync(join(workspace, 'src/data'), { recursive: true });
-  mkdirSync(join(directory, 'evidence/experiments/fixtures'), { recursive: true });
+  mkdirSync(join(directory, 'evidence/experiments'), { recursive: true });
   mkdirSync(join(directory, 'evidence/research'), { recursive: true });
   const source = `# %% [markdown]
 # ---
@@ -480,6 +480,15 @@ def run():
   }
   return { directory, workspace, sourcePath, source, record, document, read };
 }
+
+test('a current experiment filename must match its declared ID', (t) => {
+  const input = sourceFixture(t);
+  writeFileSync(
+    join(input.directory, input.sourcePath),
+    input.source.replace('@experiment("P001",', '@experiment("P999",'),
+  );
+  assert.throws(() => input.read(), /must use filename P999\.py/);
+});
 
 test('a matching current source is shown with its exact digest and derived readout', (t) => {
   const input = sourceFixture(t);

@@ -1,0 +1,394 @@
+# %% [markdown]
+# ---
+# title: Can one prediction target be reset and relearned?
+# categories:
+# - Schema mutation
+# description: Reset the learned predictor for u while preserving its sibling target v.
+# evidence-readout:
+# - label: Reset target, before retraining
+#   metric:
+#   - arms
+#   - selective_reset
+#   - before
+#   - u
+#   - nrmse
+#   format: error
+# - label: Sibling immediately after reset
+#   metric:
+#   - arms
+#   - selective_reset
+#   - before
+#   - v
+#   - nrmse
+#   format: error
+# - label: Reset target, after retraining
+#   metric:
+#   - arms
+#   - selective_reset
+#   - after
+#   - u
+#   - nrmse
+#   format: error
+# evidence-group: Mutations
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with record, a, b, u, v. Amber cards are hidden prediction targets. Other fields provide the input.
+# evidence-review:
+#   question: Can one prediction target be reset and relearned?
+#   modeling: Train two hidden numeric targets, then reset only the learned head for u. Continue training both targets
+#     on the same task. Compare u’s RMSE immediately after reset with its error after retraining.
+#   comparison:
+#     kind: Before and after
+#     metric: RMSE
+#     conditions:
+#     - label: Before continued training
+#       path:
+#       - arms
+#       - selective_reset
+#       - before
+#       - u
+#       - rmse
+#       format: number
+#     - label: After continued training
+#       path:
+#       - arms
+#       - selective_reset
+#       - after
+#       - u
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The sibling v must retain its state and immediate predictions. A complete-reset control checks that erasing
+#     both heads actually removes both learned skills.
+# evidence-plot:
+#   mode: mutation
+#   target: u
+#   focus: What is lost immediately after selectively resetting a target?
+#   comparison: Keep the reset target and sibling target separate during continuation and matched reset controls.
+#   limit: Both labels remain in continued training, so sibling retention is not a frozen-head experiment.
+#   targets:
+#   - u
+#   - v
+# evidence-cost:
+#   baseline: 69
+#   candidate: 70
+# ---
+#
+# ## Example
+#
+# The visible inputs are `a` and `b`; both `u` and `v` remain hidden targets. Their rules are `u = a + 2b`
+# and `v = 2a - b`, giving `1.0` and `0.75` for the illustrative inputs. After learning both rules, the
+# experiment resets only the target at `/u`. This should erase that target's trained predictor while leaving
+# the sibling's learned state available, before any additional optimization can obscure the immediate
+# effect.
+#
+# ```yaml
+# a: 0.5
+# b: 0.25
+# u: 1.0
+# v: 0.75
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```typst
+# #tree(node("record", kind: "root", children: (
+#   node("a", type: "Number"),
+#   node("b", type: "Number"),
+#   node("u", type: "Number", kind: "target", body: [Reset, then relearned]),
+#   node("v", type: "Number", kind: "target", body: [Unselected, always hidden]),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Three checkpoint copies undergo selective reset, unchanged continuation, or complete reset. The experiment
+# first measures predictions immediately after each operation, then gives each copy the same additional
+# training budget and data. Both labels are rehearsed during adaptation; the sibling is not frozen
+# throughout that phase. State comparisons check that the selective operation changed only the selected
+# target, and checkpoint checks test whether the relearned model can be saved and restored.
+#
+# Measure both immediately after reset and after further training on both targets. Compare unchanged and completely reset models.
+#
+# ## Result
+#
+# The three headline errors answer different questions: did the reset target lose its skill, did the sibling
+# survive immediately, and could the reset target learn again? Normalization uses the source-training
+# constant guesses for final test comparisons. Recorded curves show separate validation checkpoints during
+# adaptation. A preserved sibling immediately after reset is not a claim that its predictions remain fixed
+# during later joint training, nor that resetting a shared ancestor would have the same local effect.
+#
+# The selected target loses its learned prediction and then relearns; its sibling survives the reset. Resetting a shared branch is a different case.
+#
+# ## Method
+#
+# ### Remaining work
+#
+# Three GPU seeds support this case; calibrate gates on ten separate seeds. Resetting a
+# context-producing branch, resetting descendants, and relearning without
+# sibling labels require their own experiments. Localized loss here depends
+# on the selected field being hidden from the shared context.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "training"
+# types = []
+# conditions = ["training-updates"]
+# ///
+
+"""P048: localize loss of learned behavior after reset and demonstrate relearning."""
+
+import sys
+from collections.abc import Iterator
+from copy import deepcopy
+from functools import partial
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+TARGETS = ("u", "v")
+
+
+def records(*, rows: int, seed: int) -> Iterator[dict]:
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        a, b = map(float, rng.uniform(-1, 1, size=2))
+        yield {"a": a, "b": b, "u": a + 2 * b, "v": 2 * a - b}
+
+
+def prediction(model: rf.Model, rows: list[dict], *, corrupt: bool = False) -> dict:
+    inputs = [{"a": row["a"], "b": row["b"]} for row in rows]
+    if corrupt:
+        for row in inputs:
+            row.update({name: 1000.0 for name in TARGETS})
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
+    return {name: np.asarray([row[name]["content"] for row in output], dtype=np.float64) for name in TARGETS}
+
+
+def scores(rows: list[dict], predicted: dict, means: dict) -> dict:
+    measured = {}
+    for name, values in predicted.items():
+        actual = np.asarray([row[name] for row in rows])
+        baseline = float(np.sqrt(np.mean((actual - means[name]) ** 2)))
+        rmse = float(np.sqrt(np.mean((actual - values) ** 2)))
+        measured[name] = {"rmse": rmse, "baseline_rmse": baseline, "nrmse": rmse / baseline}
+    return measured
+
+
+def equal(first, second) -> bool:
+    """Compare tensor and extension-owned state, including normalization."""
+    if isinstance(first, torch.Tensor):
+        return isinstance(second, torch.Tensor) and torch.equal(first, second)
+    if isinstance(first, dict):
+        return (
+            isinstance(second, dict)
+            and first.keys() == second.keys()
+            and all(equal(value, second[name]) for name, value in first.items())
+        )
+    if isinstance(first, (tuple, list)):
+        return (
+            type(first) is type(second)
+            and len(first) == len(second)
+            and all(equal(a, b) for a, b in zip(first, second, strict=True))
+        )
+    return type(first) is type(second) and first == second
+
+
+class Curve(lit.Callback):
+    """Observe fixed validation checkpoints without restarting the optimizer."""
+
+    def __init__(self, rows: list[dict], means: dict, budget: int):
+        self.rows, self.means = rows, means
+        self.checkpoints = {32, 128, budget}
+        self.measurements = []
+
+    def on_train_start(self, trainer, pl_module):
+        self.measurements.append(
+            {
+                "step": 0,
+                "scores": scores(self.rows, prediction(pl_module, self.rows), self.means),
+            }
+        )
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if trainer.global_step in self.checkpoints:
+            self.measurements.append(
+                {
+                    "step": trainer.global_step,
+                    "scores": scores(self.rows, prediction(pl_module, self.rows), self.means),
+                }
+            )
+
+
+def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str) -> dict:
+    lit.seed_everything(seed, workers=True)
+    training = list(records(rows=2048, seed=split))
+    means = {name: float(np.mean([row[name] for row in training])) for name in TARGETS}
+    curve = Curve(list(records(rows=512, seed=split + 1)), means, budget)
+    data = rf.SyntheticDataModule(
+        train=partial(records, rows=2048, seed=split),
+        validate=partial(records, rows=512, seed=split + 1),
+        seed=seed,
+    )
+    model.fit(
+        data,
+        batch_size=128,
+        learning_rate=0.003,
+        fused=False,
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_epochs=-1,
+        max_steps=budget,
+        callbacks=[curve],
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    trainer = model.trainer
+    model.eval()
+    optimized = {id(p) for group in trainer.optimizers[0].param_groups for p in group["params"]}
+    current = {id(p) for p in model.parameters() if p.requires_grad}
+    return {
+        "steps": trainer.global_step,
+        "optimizer_covers_current_parameters": current == optimized,
+        "validation_curve": curve.measurements,
+    }
+
+
+class PredictionModel(rf.Model):
+    a = rf.Number
+    b = rf.Number
+    u = rf.Number(mask=True, objective="mse")
+    v = rf.Number(mask=True, objective="mse")
+
+
+@experiment("P048", seed=4801)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    source_budget = 512 if steps is None else min(steps, 512)
+    adapt_budget = 256 if steps is None else min(steps, 256)
+    lit.seed_everything(seed, workers=True)
+    training = list(records(rows=2048, seed=seed + 1))
+    test = list(records(rows=1024, seed=seed + 3))
+    means = {name: float(np.mean([row[name] for row in training])) for name in TARGETS}
+    scales = {name: float(np.std([row[name] for row in training])) for name in TARGETS}
+    source = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
+    source_fit = fit(source, seed=seed, split=seed + 1, budget=source_budget, accelerator=accelerator)
+    reference = prediction(source, test)
+    initial = scores(test, reference, means)
+    learned = all(value["nrmse"] < 0.25 for value in initial.values())
+    checks = {"Source learns both targets below 0.25 nRMSE": learned}
+    state = deepcopy(source.state_dict())
+    arms = {}
+
+    with TemporaryDirectory(prefix="relflow-mutation-") as directory:
+        checkpoint = Path(directory) / "source.ckpt"
+        source.save(checkpoint)
+        for index, arm in enumerate(("selective_reset", "continuation", "complete_reset")):
+            lit.seed_everything(seed + 100 + index, workers=True)
+            model = rf.Model.load(checkpoint).to(source.device)
+            if arm == "selective_reset":
+                model.reset(rf.where("address") == "/u")
+            elif arm == "complete_reset":
+                model.reset(rf.where("address") == "/", descendants=True)
+            model.eval()
+            current = model.state_dict()
+            changes = [name for name, value in state.items() if name not in current or not equal(value, current[name])]
+            before = prediction(model, test)
+            immediate = scores(test, before, means)
+            if arm == "selective_reset":
+                checks["Reset changes selected learned state"] = any(name.startswith("nodes./u.") for name in changes)
+                checks["Reset preserves every unselected state entry"] = all(
+                    name.startswith("nodes./u.") for name in changes
+                )
+                checks["Reset preserves the schema"] = model.schema.model_dump() == source.schema.model_dump()
+                checks["Selected target immediately loses its skill"] = (
+                    immediate["u"]["nrmse"] > 0.8 and immediate["u"]["nrmse"] > 3 * initial["u"]["nrmse"]
+                )
+                checks["Unselected target immediately preserves predictions"] = bool(
+                    np.allclose(reference["v"], before["v"], rtol=1e-5, atol=1e-6 * scales["v"])
+                )
+                head = {name: p.detach().clone() for name, p in model.nodes["/u"].named_parameters()}
+            if arm == "complete_reset":
+                checks["Complete reset loses both learned tasks"] = all(
+                    immediate[name]["nrmse"] > 0.8 and immediate[name]["nrmse"] > 3 * initial[name]["nrmse"]
+                    for name in TARGETS
+                )
+            fitting = fit(model, seed=seed + 200, split=seed + 11, budget=adapt_budget, accelerator=accelerator)
+            after = prediction(model, test)
+            final = scores(test, after, means)
+            arms[arm] = {
+                "before": immediate,
+                "after": final,
+                "changed_state_entries": changes,
+                "initial_prediction_drift": {
+                    name: float(np.max(np.abs(reference[name] - before[name]))) for name in TARGETS
+                },
+                **fitting,
+            }
+            checks[f"{arm}: fresh optimizer covers current parameters"] = fitting["optimizer_covers_current_parameters"]
+            checks[f"{arm}: both final targets below 0.25 nRMSE"] = all(
+                value["nrmse"] < 0.25 for value in final.values()
+            )
+            if arm == "selective_reset":
+                changed = [name for name, p in model.nodes["/u"].named_parameters() if not torch.equal(head[name], p)]
+                arms[arm]["reset_head_updated_parameters"] = changed
+                checks["Reset head parameters actually relearn"] = bool(changed)
+                corrupted = prediction(model, test, corrupt=True)
+                checks["Hidden target placeholders cannot affect predictions"] = all(
+                    np.allclose(after[name], corrupted[name], rtol=1e-5, atol=1e-6 * scales[name]) for name in TARGETS
+                )
+                path = Path(directory) / "relearned.ckpt"
+                model.save(path)
+                loaded = rf.Model.load(path).to(model.device).eval()
+                restored = prediction(loaded, test)
+                checks["Relearned checkpoint preserves schema and state"] = (
+                    loaded.schema.model_dump() == model.schema.model_dump()
+                    and equal(model.state_dict(), loaded.state_dict())
+                )
+                checks["Relearned checkpoint preserves predictions"] = all(
+                    np.allclose(after[name], restored[name], rtol=1e-5, atol=1e-6 * scales[name]) for name in TARGETS
+                )
+    return {
+        "source": initial,
+        "source_fit": source_fit,
+        "source_prerequisite_met": learned,
+        "downstream_interpretable": learned,
+        "arms": arms,
+        "test_rows": len(test),
+        "baseline": "Source-training mean for test comparisons; phase-training mean for validation curves",
+        "optimizer_policy": "New AdamW factory and Trainer for every fit; both hidden labels rehearsed",
+        "mutation": "reset /u; complete-reset control resets record with descendants=True",
+    }, checks
+
+
+if __name__ == "__main__":
+    report(run)

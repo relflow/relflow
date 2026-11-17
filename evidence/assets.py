@@ -147,7 +147,10 @@ def sources(selected: dict, release: dict, destination: Path) -> None:
                 if not member.name.startswith("source/"):
                     continue
                 if (
-                    not re.fullmatch(r"source/(?:experiments|research)/[a-z0-9_]+/[a-z0-9_]+\.py", member.name)
+                    not re.fullmatch(
+                        r"source/(?:experiments/P\d+|(?:experiments|research)/[a-z0-9_]+/[a-z0-9_]+)\.py",
+                        member.name,
+                    )
                     or not member.isfile()
                 ):
                     # Shared runner modules and non-source report files are not documentation inputs.
@@ -165,7 +168,7 @@ def sources(selected: dict, release: dict, destination: Path) -> None:
                 assert stream is not None
                 target.write_bytes(stream.read())
         entries = {}
-        for source in sorted(staging.glob("*/*/*.py")):
+        for source in sorted(staging.rglob("*.py")):
             identifier = describe(source.read_text())["evidence-id"]
             if identifier in entries:
                 raise ValueError(f"Duplicate publication source identifier: {identifier}")

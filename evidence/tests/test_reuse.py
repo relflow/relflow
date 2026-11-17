@@ -98,7 +98,7 @@ def bundle(tmp_path):
     root.mkdir()
     git(root, "init", "-q", "-b", "main")
     for identifier in ("P021", "P025", "P038"):
-        path = root / "evidence/experiments/example" / (identifier.lower() + ".py")
+        path = root / "evidence/experiments" / (identifier + ".py")
         path.parent.mkdir(parents=True, exist_ok=True)
         source = ARCHIVED_SCRIPT.format(identifier=identifier)
         header = metadata(source)
@@ -264,7 +264,7 @@ def test_input_equivalence_fails_closed_except_exact_measured_selection(bundle, 
         (root / "src/model.py").write_text("prediction = 999\n")
         requested["baseline"] = commit(root, "a different actual baseline")
     else:
-        script = root / "evidence/experiments/example/p021.py"
+        script = root / "evidence/experiments/P021.py"
         if fault == "candidate":
             (root / "src/model.py").write_text("prediction = 999\n")
         elif fault == "suite":
@@ -319,7 +319,7 @@ def test_selection_normalization_requires_exact_values_types_and_retained_report
     root, reports, _, _, requested = bundle
     original = requested["candidate"]
     legacy_selection(root, reports)
-    script = root / "evidence/experiments/example/p021.py"
+    script = root / "evidence/experiments/P021.py"
     header = metadata(script.read_text())
     if fault == "check-type":
         header["evidence-result"]["checks"]["bounded passing check"] = 1

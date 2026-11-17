@@ -1,7 +1,7 @@
 # %% [markdown]
 # ---
 # title: ${title}
-# categories: [${category}]
+# categories: [${group}]
 # description: "TODO: State the information boundary and held-out comparison."
 # evidence-readout:
 # - label: "TODO: Name the measurement"
@@ -90,7 +90,7 @@ import sys
 from pathlib import Path
 
 # Shared reporting and frozen policies travel with the evidence checkout.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from reporting import experiment, report
 

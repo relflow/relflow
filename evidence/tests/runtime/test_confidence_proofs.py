@@ -13,33 +13,33 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
 
 
-def load(family, name):
-    spec = importlib.util.spec_from_file_location(f"confidence_{name}", ROOT / "experiments" / family / f"{name}.py")
+def load(name):
+    spec = importlib.util.spec_from_file_location(f"confidence_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 @pytest.mark.parametrize(
-    "family,name",
+    "name",
     [
-        ("calibration", "categorical_prior"),
-        ("vocabulary", "cold_start_confidence"),
-        ("vocabulary", "pretraining_coverage"),
-        ("vocabulary", "set_reconstruction_coverage"),
-        ("vocabulary", "set_unavailable_fallback"),
-        ("vocabulary", "rolling_input_admission"),
+        "P060",
+        "P061",
+        "P062",
+        "P063",
+        "P064",
+        "P066",
     ],
 )
-def test_confidence_generators_have_independent_restartable_streams(family, name):
-    proof = load(family, name)
+def test_confidence_generators_have_independent_restartable_streams(name):
+    proof = load(name)
     rows = list(proof.records(rows=32, seed=11))
     assert rows == list(proof.records(rows=32, seed=11))
     assert rows != list(proof.records(rows=32, seed=12))
 
 
 def test_entity_disjoint_split_changes_only_identity_spelling():
-    proof = load("vocabulary", "cold_start_confidence")
+    proof = load("P061")
     known = list(proof.records(rows=2048, seed=11))
     novel = list(proof.records(rows=2048, seed=11, novel=True))
     assert not {row["entity"] for row in known} & {row["entity"] for row in novel}
@@ -55,7 +55,7 @@ def test_entity_disjoint_split_changes_only_identity_spelling():
 
 
 def test_cold_start_oracle_distinguishes_ambiguous_and_decisive_context():
-    proof = load("vocabulary", "cold_start_confidence")
+    proof = load("P061")
     rows = list(proof.records(rows=8192, seed=11, novel=True))
     x = np.asarray([row["x"] for row in rows])
     oracle = (1 / (1 + np.exp(-(2 * x - 2.5))) + 1 / (1 + np.exp(-(2 * x + 2.5)))) / 2
@@ -66,7 +66,7 @@ def test_cold_start_oracle_distinguishes_ambiguous_and_decisive_context():
 
 
 def test_rolling_admission_keeps_future_identities_unknown_and_masks_fixed():
-    proof = load("vocabulary", "rolling_input_admission")
+    proof = load("P066")
     module = proof.build()
     training = list(proof.records(rows=1024, seed=11, cohort=0))
     future = list(proof.records(rows=1024, seed=12, cohort=1))
@@ -82,8 +82,8 @@ def test_rolling_admission_keeps_future_identities_unknown_and_masks_fixed():
 
 
 def test_pretraining_queries_fix_selected_targets_across_validation_calls():
-    name = "pretraining_coverage"
-    proof = load("vocabulary", name)
+    name = "P062"
+    proof = load(name)
     module = proof.build()
     source = pa.Table.from_pylist(list(proof.records(rows=128, seed=11)))
     module.encode(source, strata="train")
@@ -95,7 +95,7 @@ def test_pretraining_queries_fix_selected_targets_across_validation_calls():
 
 
 def test_set_fallback_split_changes_names_without_changing_observability():
-    proof = load("vocabulary", "set_unavailable_fallback")
+    proof = load("P064")
     known = list(proof.records(rows=256, seed=11))
     novel = list(proof.records(rows=256, seed=11, novel=True))
     assert not {label for row in known for label in row["tags"]} & {label for row in novel for label in row["tags"]}

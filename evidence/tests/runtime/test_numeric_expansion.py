@@ -22,7 +22,7 @@ def load(relative):
 
 
 def test_large_offsets_and_centering_keep_the_same_observable_residuals():
-    proof = load("experiments/representation/large_numeric_offsets.py")
+    proof = load("experiments/P087.py")
     wide = list(proof.records(rows=1024, seed=11, arm="wide"))
     centered = list(proof.records(rows=1024, seed=11, arm="centered"))
     collapsed = list(proof.records(rows=1024, seed=11, arm="float32"))
@@ -35,7 +35,7 @@ def test_large_offsets_and_centering_keep_the_same_observable_residuals():
 
 
 def test_zero_null_and_nan_have_three_different_arrow_observations():
-    proof = load("experiments/state/zero_null_invalid.py")
+    proof = load("experiments/P088.py")
     rows = list(proof.records(rows=300, seed=21))
     intact = proof.table(rows)["measurement"]
     assert intact.null_count == 100
@@ -52,7 +52,7 @@ def test_zero_null_and_nan_have_three_different_arrow_observations():
 def test_visibility_oracle_integrates_hidden_values_instead_of_leaking_them():
     from policies import CONTROL
 
-    proof = load("experiments/calibration/evidence_availability.py")
+    proof = load("experiments/P089.py")
     hidden = [{"group": "rare", "signal": float(value), "hide_signal": True} for value in (-1, 0, 1)]
     expected = proof.PROBABILITY[1].mean()
     np.testing.assert_allclose(proof.oracle(hidden, "training"), expected)
@@ -78,7 +78,7 @@ def test_visibility_oracle_integrates_hidden_values_instead_of_leaking_them():
 
 
 def test_jitter_stress_changes_only_observations_and_keeps_pristine_targets():
-    proof = load("experiments/representation/jitter_generalization.py")
+    proof = load("experiments/P090.py")
     rows = list(proof.records(rows=4096, seed=41))
     clean = proof.perturb(rows, seed=42, scale=0)
     changed = proof.perturb(rows, seed=42, scale=0.25)
@@ -91,7 +91,7 @@ def test_jitter_stress_changes_only_observations_and_keeps_pristine_targets():
 
 
 def test_duration_generator_matches_fixed_elapsed_arithmetic_and_static_endpoint():
-    proof = load("experiments/temporal/duration_equivalence.py")
+    proof = load("experiments/P099.py")
     pair = list(proof.records(rows=128, seed=51))
     static = list(proof.records(rows=128, seed=51, static=True))
     assert all(row["started_at"] == proof.ANCHOR for row in static)
@@ -108,7 +108,7 @@ def test_duration_generator_matches_fixed_elapsed_arithmetic_and_static_endpoint
 
 
 def test_ordinal_protocol_withholds_ranks_without_extrapolating_the_range():
-    proof = load("experiments/representation/ordinal_generalization.py")
+    proof = load("experiments/P100.py")
     for domain in ("integer", "labels"):
         for arm in ("ordinal", "number", "category"):
             seen = list(proof.records(rows=1024, seed=61, domain=domain, novel=False, arm=arm))

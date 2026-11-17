@@ -1,0 +1,240 @@
+# %% [markdown]
+# ---
+# title: Can it add six numbers?
+# categories:
+# - Hierarchical statistics
+# description: Predict the total of six independently chosen amounts.
+# evidence-readout:
+# - label: Total prediction
+#   metric:
+#   - test_nrmse
+#   format: error
+# evidence-group: Structure
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, transactions, amount, global_total. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow add six numbers?
+#   modeling: Generate independent records containing exactly six amounts sampled between −1 and 1. Put the amounts
+#     in a repeated branch and hide their sum as a Number target. Score held-out totals with RMSE and compare with
+#     a predictor that always returns the training-set average total.
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - test_rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: ''
+# evidence-plot:
+#   mode: regression
+#   target: global_total
+#   focus: Can attention learn a total at the declared fixed collection width?
+#   comparison: Inspect validation and independent test errors against the training-mean baseline.
+#   limit: Fixed-width success does not establish arbitrary-length arithmetic.
+# evidence-cost:
+#   baseline: 26
+#   candidate: 26
+# ---
+#
+# ## Example
+#
+# The input contains exactly six visible amounts and one hidden total. For the illustrative record, `0.8 -
+# 0.4 + 0.2 + 0.5 - 0.5 + 0.9 = 1.5`. The mixed signs matter: returning the largest amount, counting
+# positive values, or ignoring negative entries would give a different answer. Each amount is independently
+# drawn between `-1` and `1`; no extra subtotal or count field is supplied to simplify the target.
+#
+# ```yaml
+# transactions:
+#   - amount: 0.8
+#   - amount: -0.4
+#   - amount: 0.2
+#   - amount: 0.5
+#   - amount: -0.5
+#   - amount: 0.9
+# global_total: 1.5
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```typst
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("amount", type: "Number"),
+#   )),
+#   node("global_total", kind: "target", type: "Number",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Training, validation, and test sets contain independently generated six-item records. The reference
+# predictor ignores every visible amount and always returns the mean total from the training set. Beating it
+# shows that the model uses information beyond the typical answer. This experiment establishes that basic
+# comparison without separately scrambling inputs, changing the number of items, or testing whether the
+# prediction is invariant to their order.
+#
+# Compare test error with a simple predictor that always returns the training-set average total.
+#
+# ## Result
+#
+# The readout is test RMSE divided by the constant predictor's RMSE. For example, a ratio of `0.1` would
+# mean one tenth of that baseline error, not a guarantee that nine out of ten sums are exact. Detailed
+# metrics retain validation and test errors alongside the reference scale. Because every example has six
+# items, the model could learn a fixed-width strategy that would not carry over to an arbitrary-length
+# collection.
+#
+# The model learns this small sum. This baseline does not test item reordering, varying lengths, deeper nesting, or exact addition.
+#
+# ## Method
+#
+# ### How it works
+#
+# Both the transaction branch and the root use `rf.Attention` reduction.
+# The model must transform the visible amounts into a summary from which a
+# numerical decoder can approximate their sum. Fixed length makes this a
+# simpler control than inferring totals through several variable-size groups.
+#
+# Training, validation, and test draw 512, 128, and 256 independent observations.
+# Each amount is sampled uniformly from −1 to 1. After 400 deterministic
+# steps, the model predicts totals from the transaction inputs alone.
+#
+# ### Remaining work
+#
+# Add the nested, regrouping-invariant `global_total` case: the present control
+# has only one collection level. The family also calls for a
+# `largest_session_average` target, broader value patterns, multiple Attention
+# output counts, and nested capacity ranges, followed by repeated-seed gates.
+#
+# The [nested-cardinality evidence](attention-preserves-nested-cardinality.html)
+# tests a statistic whose answer changes when those same amounts are regrouped.
+# Use [preprocessing](/advanced/data-modules/) when a sum must be exact.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "computation"
+# types = ["Number"]
+# conditions = ["fresh-records"]
+# ///
+
+"""P039: learn a fixed-width sum through Attention reduction.
+
+All six independent values must contribute. Test RMSE is compared with the
+constant training-mean predictor; learned sums remain approximations.
+"""
+
+import sys
+from collections.abc import Iterator
+from functools import partial
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+
+def records(*, rows: int, seed: int) -> Iterator[dict]:
+    """Yield six transactions and their total."""
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        amounts = rng.uniform(-1.0, 1.0, size=6)
+        yield {
+            "transactions": [{"amount": float(amount)} for amount in amounts],
+            "global_total": float(amounts.sum()),
+        }
+
+
+def prediction(model: rf.Model, rows: list[dict], source: str, target: str) -> np.ndarray:
+    """Predict one hidden scalar from its visible repeated context."""
+    inputs = [{source: row[source]} for row in rows]
+    output = pl.DataFrame(model.predict(inputs)).to_dicts()
+    return np.asarray([row["predictions"][target]["content"] for row in output], dtype=np.float64)
+
+
+def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
+    return float(np.sqrt(np.mean(np.square(actual - predicted))))
+
+
+class Transaction(rf.Branch):
+    amount = rf.Number
+
+
+class PredictionModel(rf.Model):
+    transactions = Transaction(length=6, n_layers=2, reduction=rf.Attention(n_layers=2))
+    global_total = rf.Number(mask=True, objective="mse")
+
+
+@experiment("P039", seed=2600)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    data_seed = (seed - 2600) % (2**32)
+    train = partial(records, rows=512, seed=data_seed + 11)
+    validate = partial(records, rows=128, seed=data_seed + 22)
+    test = list(records(rows=256, seed=data_seed + 33))
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
+    data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)
+    model.fit(
+        data,
+        batch_size=64,
+        optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="ddp" if accelerator in ("gpu", "auto") and torch.cuda.device_count() > 1 else "auto",
+        accelerator=accelerator,
+        max_epochs=-1,
+        max_steps=steps if steps is not None else 400,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+    )
+    trainer = model.trainer
+
+    train_target = np.asarray([row["global_total"] for row in train()])
+    validate_rows = list(validate())
+    validate_target = np.asarray([row["global_total"] for row in validate_rows])
+    test_target = np.asarray([row["global_total"] for row in test])
+    baseline = rmse(test_target, float(train_target.mean()))
+    validate_rmse = rmse(validate_target, prediction(model, validate_rows, "transactions", "global_total"))
+    test_rmse = rmse(test_target, prediction(model, test, "transactions", "global_total"))
+    nrmse = test_rmse / baseline
+    return {
+        "steps": trainer.global_step,
+        "baseline_rmse": baseline,
+        "validate_rmse": validate_rmse,
+        "test_rmse": test_rmse,
+        "test_nrmse": nrmse,
+        "target_std": float(test_target.std()),
+    }, {"Test normalized RMSE is below 0.25": nrmse < 0.25}
+
+
+if __name__ == "__main__":
+    report(run)

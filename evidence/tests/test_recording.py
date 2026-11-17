@@ -29,7 +29,7 @@ def test_nonfinite_metrics_are_rejected(tmp_path, metric):
 def test_recorded_source_identity_binds_shared_policy_bytes_without_importing_them(tmp_path, monkeypatch):
     root = tmp_path / "suite"
     helpers = root / "experiments"
-    script = helpers / "family/signal.py"
+    script = helpers / "P001.py"
     script.parent.mkdir(parents=True)
     script.write_text("def run(seed, steps, accelerator):\n    return {}, {'signal': True}\n")
     for name in ("reporting.py", "source.py", "run.py"):

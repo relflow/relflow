@@ -90,7 +90,7 @@ def selection_changes(before: dict[str, str], after: dict[str, str]) -> bool:
             if path == "README.md":
                 if outside_results(old) != outside_results(new):
                     return False
-            elif re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", path):
+            elif re.fullmatch(r"evidence/experiments/(?:P\d+|[^/]+/[^/]+)\.py", path):
                 left, right = metadata(old), metadata(new)
                 if describe(old)["evidence-id"] != describe(new)["evidence-id"]:
                     return False
@@ -131,7 +131,7 @@ def compatible(root: Path, tested: str, checkout: str) -> None:
         .split("\0")
     )
     for name in filter(None, changed):
-        if not re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", name):
+        if not re.fullmatch(r"evidence/experiments/(?:P\d+|[^/]+/[^/]+)\.py", name):
             raise ValueError(f"Bootstrap checkout changes tested runtime input: {name}")
         old = subprocess.check_output(["git", "show", f"{tested}:{name}"], cwd=root, text=True)
         new = (root / name).read_text()

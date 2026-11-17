@@ -94,51 +94,67 @@ def test_static_declaration_rejects_nested_async_and_class_entrypoints(source):
 
 
 def test_catalog_discovers_new_files_on_each_call_and_supplies_presentation_id(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    first = family / "first.py"
+    first = family / "P901.py"
     first.write_text(script())
     entries = registry(tmp_path, measurements=False)
     assert list(entries) == ["P901"]
     assert entries["P901"]["header"]["evidence-id"] == "P901"
-    assert entries["P901"]["script"] == "experiments/family/first.py"
-    (family / "second.py").write_text(script('@experiment("P902", seed=456)'))
+    assert entries["P901"]["script"] == "experiments/P901.py"
+    (family / "P902.py").write_text(script('@experiment("P902", seed=456)'))
     assert list(registry(tmp_path, measurements=False)) == ["P901", "P902"]
 
 
 def test_catalog_rejects_duplicate_decorated_ids(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    for name in ("first", "second"):
+    for name in ("P901", "P902"):
         (family / f"{name}.py").write_text(script())
     with pytest.raises(ValueError, match="duplicate evidence ID"):
         registry(tmp_path, measurements=False)
 
 
 def test_catalog_rejects_disagreeing_header_and_decorator(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    (family / "first.py").write_text(script().replace("# title:", "# evidence-id: P902\n# title:"))
+    (family / "P901.py").write_text(script().replace("# title:", "# evidence-id: P902\n# title:"))
     with pytest.raises(ValueError, match="differs from @experiment"):
         registry(tmp_path, measurements=False)
 
 
+def test_catalog_requires_filename_to_match_declared_id(tmp_path):
+    directory = tmp_path / "experiments"
+    directory.mkdir()
+    (directory / "P902.py").write_text(script())
+    with pytest.raises(ValueError, match="filename must be P901.py"):
+        registry(tmp_path, measurements=False)
+
+
+def test_catalog_rejects_nested_experiments(tmp_path):
+    directory = tmp_path / "experiments/structure"
+    directory.mkdir(parents=True)
+    (directory / "P901.py").write_text(script())
+    with pytest.raises(ValueError, match="must live directly"):
+        registry(tmp_path, measurements=False)
+
+
 def test_malformed_declaration_cannot_fall_back_to_archived_header(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    (family / "first.py").write_text(script("@experiment").replace("# title:", "# evidence-id: P901\n# title:"))
+    (family / "P901.py").write_text(script("@experiment").replace("# title:", "# evidence-id: P901\n# title:"))
     with pytest.raises(ValueError, match="Declare @experiment"):
         registry(tmp_path, measurements=False)
 
 
 def test_archived_catalog_can_still_be_read_without_importing_it(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    (family / "archive.py").write_text(
+    (family / "P901.py").write_text(
         "# %% [markdown]\n# ---\n# evidence-id: P901\n# ---\n# %%\n"
         "raise RuntimeError('must not execute')\nreport(PROOF_ID, run, seed=123)\n"
     )
-    assert declaration((family / "archive.py").read_text()) is None
+    assert declaration((family / "P901.py").read_text()) is None
     assert list(registry(tmp_path, measurements=False)) == ["P901"]
 
 

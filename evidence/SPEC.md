@@ -12,7 +12,7 @@ without executing models.
 ## Experimental contract
 
 Each experiment is a self-contained annotated script under
-`experiments/<category>/`. It owns its generator, model, training budget,
+`experiments/Pxxx.py`. It owns its generator, model, training budget,
 held-out evaluation, matched controls, measured metrics, and named Boolean
 checks. Preserve those semantics when changing packaging or presentation.
 Share reporting and CLI plumbing, not generators, datasets, or model helpers.
@@ -52,10 +52,11 @@ internal seed panels already implemented by an experiment.
 
 ## Authoring scaffold
 
-`experiments/run.py --new <category>/<name>` creates a new annotated Python file
+`experiments/run.py --new --title "A new question?"` creates a new annotated Python file
 from `templates/experiment.py.txt`. It allocates an ID above the current maximum
-without reusing retired gaps and writes a literal default seed of `0`. Optional
-title, group, ID, and seed arguments configure the declaration and presentation.
+without reusing retired gaps and writes a literal default seed of `0`. The title
+is required; optional group, ID, and seed arguments configure presentation and execution.
+The filename must match the declared ID. Tags and frontmatter own categorization.
 Discovery remains static, and creation imports no experiments or model packages.
 Existing files, unsafe paths, and duplicate explicit IDs are rejected.
 
@@ -91,7 +92,7 @@ fallbacks for authoring them.
 
 ## Execution
 
-Every current study lives under `experiments/<category>/` and is part of the
+Every current study lives directly in `experiments/` as `Pxxx.py` and is part of the
 required hosted catalog. There are no lanes or optional experiment exclusions.
 The runner defaults to all declarations; passing IDs selects an explicit local
 run, and `--list` lists the same catalog. Dependency environments remain owned

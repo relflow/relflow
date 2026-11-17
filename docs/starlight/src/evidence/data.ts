@@ -2,7 +2,7 @@ import { metricAt } from './metrics.ts';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { parse } from 'yaml';
 import { tags, type Tags } from './catalog.ts';
 import { readReview, type Review } from './metadata.ts';
@@ -326,29 +326,32 @@ function declarations(directory = join(root, 'evidence'), required = true): Decl
   const entries: Declaration[] = [];
   const parent = join(directory, 'experiments');
   if (!existsSync(parent)) return [];
-  for (const family of readdirSync(parent, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+  for (const file of readdirSync(parent, { withFileTypes: true, recursive: !required })
+    .filter(
+      (entry) =>
+        entry.isFile() && (required ? /^P.*\.py$/.test(entry.name) : entry.name.endsWith('.py')),
+    )
     .sort((a, b) => a.name.localeCompare(b.name))) {
-    for (const file of readdirSync(join(parent, family.name), { withFileTypes: true })
-      .filter((entry) => entry.isFile() && entry.name.endsWith('.py'))
-      .sort((a, b) => a.name.localeCompare(b.name))) {
-      const sourcePath = `evidence/experiments/${family.name}/${file.name}`;
-      const source = readFileSync(join(parent, family.name, file.name), 'utf8');
-      const metadata = header(source);
-      const id = identify(source, metadata);
-      const classified = tags(source, sourcePath);
-      if (required && classified === null)
-        throw new Error(
-          `${sourcePath}: declare [tool.relflow.evidence] capability, types, and conditions.`,
-        );
-      entries.push({
-        id,
-        tags: classified,
-        header: metadata,
-        source,
-        sourcePath,
-      });
-    }
+    const filename = join(file.parentPath, file.name);
+    const sourcePath = `evidence/experiments/${relative(parent, filename)}`;
+    const source = readFileSync(filename, 'utf8');
+    if (!required && !/^@experiment\b|^# evidence-id:/m.test(source)) continue;
+    const metadata = header(source);
+    const id = identify(source, metadata);
+    if (required && file.name !== `${id}.py`)
+      throw new Error(`${sourcePath}: experiment ${id} must use filename ${id}.py.`);
+    const classified = tags(source, sourcePath);
+    if (required && classified === null)
+      throw new Error(
+        `${sourcePath}: declare [tool.relflow.evidence] capability, types, and conditions.`,
+      );
+    entries.push({
+      id,
+      tags: classified,
+      header: metadata,
+      source,
+      sourcePath,
+    });
   }
   if (new Set(entries.map((entry) => entry.id)).size !== entries.length)
     throw new Error('Evidence declarations contain duplicate P identifiers.');
@@ -359,7 +362,7 @@ const declared = declarations();
 const frozen = explicit ? declarations(join(dirname(publicationPath), 'source'), false) : [];
 
 function page(sourcePath: string): string {
-  return `docs/evidence/${basename(dirname(sourcePath))}/${basename(sourcePath, '.py').replaceAll('_', '-')}`;
+  return `docs/evidence/${basename(sourcePath, '.py')}`;
 }
 
 const pages = new Map(declared.map((entry) => [page(entry.sourcePath), entry.id]));

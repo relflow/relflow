@@ -1,0 +1,315 @@
+# %% [markdown]
+# ---
+# title: Can it learn how two measurements vary together?
+# categories:
+# - Distribution statistics
+# description: 'Predict covariance: whether paired measurements tend to rise together or move in opposite directions.'
+# evidence-readout:
+# - label: Correct pairs
+#   metric:
+#   - intact
+#   - nrmse
+#   format: error
+# - label: Broken pairs
+#   metric:
+#   - corrupted
+#   - nrmse
+#   format: error
+# evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, x, y, covariance. Amber cards are hidden prediction targets. Repeated collections
+#     keep their fields together.
+# evidence-review:
+#   question: Can relflow learn how two measurements vary together?
+#   modeling: 'Generate eight paired x and y measurements with varying means, spreads, and correlation. Hide their
+#     covariance: the average product of their centered values. Compare correct pairs with a test copy that shifts
+#     y between items while retaining the original answers. Both copies contain exactly the same individual x and
+#     y values.'
+#   comparison:
+#     kind: Controlled comparison
+#     metric: RMSE
+#     conditions:
+#     - label: Broken pairs
+#       path:
+#       - corrupted
+#       - rmse
+#       format: number
+#     - label: Correct pairs
+#       path:
+#       - intact
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: The shuffled-pair condition tests whether the model uses pairing. The target is covariance, not correlation.
+# evidence-plot:
+#   mode: regression
+#   target: covariance
+#   focus: Does covariance depend on which values occur together?
+#   comparison: Shuffle only the y coordinates while retaining the original answers.
+#   limit: The corruption removes pair alignment while preserving each coordinate's marginal values.
+# evidence-cost:
+#   baseline: 95
+#   candidate: 94
+# ---
+#
+# Each item contains two measurements, x and y, that belong together. The hidden answer describes
+# whether above-average x values tend to accompany above-average y values. Knowing the two separate
+# distributions is insufficient; which x is paired with which y matters.
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {x: -1, y: -1.4}
+#   - {x: 1, y: 0.2}
+#   - {x: -1, y: -0.2}
+#   - {x: 1, y: 1.4}
+#   - {x: -1, y: -1.4}
+#   - {x: 1, y: 0.2}
+#   - {x: -1, y: -0.2}
+#   - {x: 1, y: 1.4}
+# covariance: 0.8
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# In the illustration, both field means are zero. Multiply each x by its paired y, then average the
+# eight products: the answer is 0.8. A positive answer means the measurements tend to move together.
+# Swapping only the y values can change that answer even though neither field gains or loses any
+# values.
+#
+# ```typst
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("x", type: "Number"),
+#     node("y", type: "Number"),
+#   )),
+#   node("covariance", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare correct pairs with pairs whose second measurements are shuffled, keeping the original
+# answers. The separate values stay the same.
+#
+# The generator independently varies locations, spreads, and the relationship between the fields
+# across records. The corruption control circularly shifts y within each list while leaving x and
+# the original target untouched. It therefore removes the original pairing without changing either
+# set of values. Higher error against the old answer is expected if the model was using the
+# relationship between siblings.
+#
+# ## Result
+#
+# Accuracy depends on keeping each pair together. This tests covariance, not correlation, which also
+# accounts for each measurement’s spread.
+#
+# Both error percentages use the same constant-guess baseline because the labels remain unchanged.
+# Low intact error plus a rise after breaking pairs supports sensitivity to alignment; the corrupted
+# score is not a measure of accuracy on newly labeled shuffled data. This is population covariance,
+# which keeps scale information, rather than scale-normalized correlation.
+#
+# ## Method
+#
+# ### How it works
+#
+# The repeated branch keeps `x` and `y` together and uses `reduction=None`
+# to preserve their encoded coordinates. Learned root attention can combine that
+# evidence before scalar decoding. Independent locations, scales, and a random
+# correlation coefficient prevent either marginal alone from supplying covariance.
+#
+# The negative control circularly shifts only `y`, preserving the exact values in
+# both fields but breaking their alignment. Labels stay unchanged, so error must
+# increase when the model responds to the changed pairs. The target is population
+# covariance, the mean centered product; Pearson correlation is not tested here.
+# [Supplied cross-deviations](supplied-cross-deviations.html) isolate its reduction.
+#
+# ### Remaining work
+#
+# Repeat across seeds and check complete-pair permutation. Variable lengths,
+# missing values, zero variance, and correlation normalization remain separate
+# questions. Coordinate-mixing ablations would distinguish which mechanisms are
+# necessary for the observed result.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "computation"
+# types = ["Number"]
+# conditions = ["changed-associations"]
+# ///
+
+"""Aligned sibling fields should support covariance.
+
+Learn the centered cross-moment and respond to pairing corruption.
+
+Run: uv run evidence/experiments/run.py P006 --wheel /path/to/relflow-0.5.0-py3-none-any.whl"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Iterator
+from copy import deepcopy
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+ITEMS = 8
+
+
+def covariance_records(*, rows: int, seed: int) -> Iterator[dict]:
+    """Draw paired fields with controlled means, scales, and covariance."""
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        x_basis = rng.normal(size=ITEMS)
+        x_basis -= x_basis.mean()
+        x_basis /= np.sqrt(np.mean(np.square(x_basis)))
+        orthogonal = rng.normal(size=ITEMS)
+        orthogonal -= orthogonal.mean()
+        orthogonal -= np.mean(orthogonal * x_basis) * x_basis
+        orthogonal /= np.sqrt(np.mean(np.square(orthogonal)))
+        correlation = float(rng.uniform(-0.88, 0.88))
+        y_basis = correlation * x_basis + np.sqrt(1.0 - correlation * correlation) * orthogonal
+        x_scale = float(rng.uniform(0.35, 1.45))
+        y_scale = float(rng.uniform(0.35, 1.45))
+        x_location = float(rng.uniform(-0.8, 0.8))
+        y_location = float(rng.uniform(-0.8, 0.8))
+        x_values = x_location + x_scale * x_basis
+        y_values = y_location + y_scale * y_basis
+        yield {
+            "items": [{"x": float(x), "y": float(y)} for x, y in zip(x_values, y_values, strict=True)],
+            "covariance": correlation * x_scale * y_scale,
+            "correlation": correlation,
+        }
+
+
+def shuffle_y(observations: list[dict], *, seed: int) -> list[dict]:
+    """Break within-row pairing while preserving every marginal value."""
+    rng = np.random.default_rng(seed)
+    rows = deepcopy(observations)
+    changed = 0
+    for row in rows:
+        items = row["items"]
+        offset = int(rng.integers(1, len(items)))
+        shifted = np.roll([item["y"] for item in items], offset)
+        changed += sum((item["y"] != y for item, y in zip(items, shifted, strict=True)))
+        row["items"] = [{"x": item["x"], "y": float(y)} for item, y in zip(items, shifted, strict=True)]
+    if changed == 0:
+        raise ValueError("pair shuffle did not change any item-local associations")
+    return rows
+
+
+def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
+    inputs = [{"items": row["items"]} for row in observations]
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
+    return np.asarray([row["covariance"]["content"] for row in output], dtype=np.float64)
+
+
+def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
+    return float(np.sqrt(np.mean(np.square(actual - predicted))))
+
+
+def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict[str, float]:
+    """Compare held-out RMSE with the constant training-target mean."""
+    actual = np.asarray([row["covariance"] for row in test], dtype=np.float64)
+    baseline = rmse(actual, float(np.asarray([row["covariance"] for row in train], dtype=np.float64).mean()))
+    measured = rmse(actual, predicted)
+    return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
+
+
+class Item(rf.Branch):
+    x = rf.Number
+    y = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, n_layers=2, reduction=None)
+    covariance = rf.Number(mask=True, objective="mse")
+
+
+@experiment("P006", seed=3508)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    # Split seeds are independent; rerunning a generator reproduces the same records.
+    train = list(covariance_records(rows=1536, seed=seed + 1))
+    test = list(covariance_records(rows=768, seed=seed + 3))
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
+    datamodule = rf.SyntheticDataModule(
+        train=lambda: covariance_records(rows=1536, seed=seed + 1),
+        validate=lambda: covariance_records(rows=384, seed=seed + 2),
+        seed=seed,
+    )
+    model.fit(
+        datamodule,
+        batch_size=64,
+        optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_epochs=-1,
+        max_steps=1100 if steps is None else min(steps, 1100),
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    trainer = model.trainer
+
+    # Evaluate held-out answers and retain their original labels in corruption controls.
+    intact = score(train=train, test=test, predicted=prediction(model, test))
+    shuffled = shuffle_y(test, seed=seed + 4)
+    corrupted = score(train=train, test=shuffled, predicted=prediction(model, shuffled))
+    calibration = np.asarray(
+        [
+            intact["rmse"],
+            intact["baseline_rmse"],
+            intact["nrmse"],
+            corrupted["rmse"],
+            corrupted["baseline_rmse"],
+            corrupted["nrmse"],
+        ]
+    )
+    metrics = {"intact": intact, "corrupted": corrupted, "steps": trainer.global_step}
+    checks = {
+        "All measurements finite": bool(np.isfinite(calibration).all()),
+        "Baseline RMSE above 0.35": bool(intact["baseline_rmse"] > 0.35),
+        "Corruption preserves baseline": bool(
+            np.isclose(intact["baseline_rmse"], corrupted["baseline_rmse"], atol=1e-12, rtol=0.0)
+        ),
+        "Covariance nRMSE below 0.35": bool(intact["nrmse"] < 0.35),
+        "Shuffled pairing raises nRMSE by at least 0.35": bool(corrupted["nrmse"] >= intact["nrmse"] + 0.35),
+    }
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)

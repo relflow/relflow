@@ -22,7 +22,7 @@ def load(relative):
 
 
 def test_label_efficiency_has_balanced_disjoint_unlabeled_streams_and_matched_raw_width():
-    experiment = load("experiments/representation/label_efficiency.py")
+    experiment = load("experiments/P085.py")
     rows, labels = experiment.sample(512, 11)
     held_out, _ = experiment.sample(512, 12)
     assert np.bincount(labels).tolist() == [128] * 4
@@ -35,7 +35,7 @@ def test_label_efficiency_has_balanced_disjoint_unlabeled_streams_and_matched_ra
 
 
 def test_cohort_targets_have_stable_compatible_rules_and_independent_test_rows():
-    experiment = load("experiments/vocabulary/cohort_retention.py")
+    experiment = load("experiments/P086.py")
     for index, cohort in enumerate(experiment.COHORTS):
         rows = list(experiment.records(32, 11, cohort))
         held_out = list(experiment.records(32, 12, cohort))
@@ -46,7 +46,7 @@ def test_cohort_targets_have_stable_compatible_rules_and_independent_test_rows()
 
 
 def test_group_shuffling_preserves_response_and_identity_marginals():
-    experiment = load("experiments/group/predictive_tradeoff.py")
+    experiment = load("experiments/P112.py")
     rows = list(experiment.records(512, 11, 19, skew=True))
     shuffled = list(experiment.records(512, 11, 19, skew=True, shuffled=True))
     assert [row["answer"] for row in rows] == [row["answer"] for row in shuffled]
@@ -58,7 +58,7 @@ def test_group_shuffling_preserves_response_and_identity_marginals():
 
 
 def test_anomaly_marginal_baseline_is_exactly_chance_and_noise_is_heterogeneous():
-    experiment = load("experiments/anomaly/conditional_variance.py")
+    experiment = load("experiments/P096.py")
     rows = list(experiment.records(8192, 11))
     actual = np.asarray([row["answer"] for row in rows])
     shuffled = actual[np.random.default_rng(19).permutation(len(rows))]

@@ -1,0 +1,280 @@
+# %% [markdown]
+# ---
+# title: Can it average prepared contributions to covariance?
+# categories:
+# - Distribution statistics
+# description: Supply the centered products used to calculate covariance, then ask for their average.
+# evidence-readout:
+# - label: Average prediction
+#   metric:
+#   - measured
+#   - nrmse
+#   format: error
+# evidence-group: Aggregation
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
+#   alt: Model tree with record, items, cross_deviation, covariance. Amber cards are hidden prediction targets. Repeated
+#     collections keep their fields together.
+# evidence-review:
+#   question: Can relflow average prepared contributions to covariance?
+#   modeling: 'Calculate each item’s contribution to covariance upstream: (x − mean(x)) × (y − mean(y)). Give those
+#     eight prepared contributions to a Mean branch and hide their average. Compare the learned prediction with a
+#     constant predictor on fresh records.'
+#   comparison:
+#     kind: Baseline reference
+#     metric: RMSE
+#     conditions:
+#     - label: Constant-prediction baseline
+#       path:
+#       - measured
+#       - baseline_rmse
+#       format: number
+#     - label: Trained model
+#       path:
+#       - measured
+#       - rmse
+#       format: number
+#     definition: Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.
+#     direction: Lower error is better
+#   note: Centering and multiplication are already supplied. This diagnostic tests averaging and decoding, not learning
+#     covariance from raw pairs.
+# evidence-plot:
+#   mode: regression
+#   target: covariance
+#   focus: Can pooling combine supplied cross-deviations?
+#   comparison: Compare predicted covariance with targets computed from the supplied sufficient features.
+#   limit: The cross-deviations are prepared inputs; this does not demonstrate discovering them from raw pairs.
+# evidence-cost:
+#   baseline: 23
+#   candidate: 23
+# ---
+#
+# This diagnostic removes two steps from covariance calculation before data reaches the model. Each
+# cross_deviation is already a centered x value multiplied by its centered y partner. The model only
+# has to turn the eight prepared contributions into their average.
+#
+# ## Example
+#
+# ```yaml
+# items:
+#   - {cross_deviation: 1.4}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 1.4}
+#   - {cross_deviation: 1.4}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 0.2}
+#   - {cross_deviation: 1.4}
+# covariance: 0.8
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# The illustration contains four contributions of 1.4 and four of 0.2. Their total is 6.4; dividing
+# by eight gives the hidden covariance, 0.8. Positive and negative contributions are possible in the
+# generator, so the learned average must retain their signs rather than average absolute magnitudes.
+#
+# ```typst
+# #tree(node("record", kind: "root", width: 120pt, children: (
+#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
+#     node("cross_deviation", type: "Number"),
+#   )),
+#   node("covariance", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Compare the prediction with the correct average on new records.
+#
+# Train and test contain independently generated records with the same construction. Unlike the
+# raw-pair experiment, the inputs no longer require discovering which x and y belong together or
+# calculating their centers. The simpler representation helps localize a failure: trouble here would
+# concern interpreting and reducing prepared contributions, while success alone says nothing about
+# learning the omitted preparation steps.
+#
+# ## Result
+#
+# The final averaging step works here. Centering and multiplication were already done by the data
+# generator, so they were not learned in this test.
+#
+# The error percentage compares the predicted covariance with a constant guess based on training
+# targets. Lower is better; 100% means no improvement over that guess. These are learned numerical
+# readouts from a Mean branch, not an explicit arithmetic average wired into the prediction output.
+# Eight-item performance does not establish arbitrary-length covariance calculation.
+#
+# ## Method
+#
+# ### How it works
+#
+# The generator supplies `(x - mean(x)) * (y - mean(y))` for every item.
+# The model sees these eight centered products, not raw `x` and `y` values. The
+# item branch has `attention=None` and `rf.Mean()`, followed by learned root
+# attention and a covariance decoder.
+#
+# This tests whether an encoded average can be decoded into the population
+# cross-moment. It bypasses centering and pairwise multiplication. Compare it with
+# [aligned-pair covariance](aligned-pair-covariance.html) to localize a failure in
+# sibling interaction rather than in the final reduction.
+#
+# ### Remaining work
+#
+# Repeat across seeds and broaden lengths, missing-value behavior, and
+# outliers. This sufficient-statistic diagnostic should remain easier than the raw
+# pairing task; it cannot establish that the model learned the supplied operation.
+#
+# The family’s promotion target is at least three core seeds and ten lightweight
+# calibration seeds.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "computation"
+# types = ["Number"]
+# conditions = ["fresh-records"]
+# ///
+
+"""Supplied centered products isolate covariance reduction.
+
+Mean learns covariance once centered products are supplied.
+
+Run: uv run evidence/experiments/run.py P008 --wheel /path/to/relflow-0.5.0-py3-none-any.whl"""
+
+from __future__ import annotations
+
+import sys
+from collections.abc import Iterator
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+ITEMS = 8
+
+
+def covariance_records(*, rows: int, seed: int) -> Iterator[dict]:
+    """Draw paired fields with controlled means, scales, and covariance."""
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        x_basis = rng.normal(size=ITEMS)
+        x_basis -= x_basis.mean()
+        x_basis /= np.sqrt(np.mean(np.square(x_basis)))
+        orthogonal = rng.normal(size=ITEMS)
+        orthogonal -= orthogonal.mean()
+        orthogonal -= np.mean(orthogonal * x_basis) * x_basis
+        orthogonal /= np.sqrt(np.mean(np.square(orthogonal)))
+        correlation = float(rng.uniform(-0.88, 0.88))
+        y_basis = correlation * x_basis + np.sqrt(1.0 - correlation * correlation) * orthogonal
+        x_scale = float(rng.uniform(0.35, 1.45))
+        y_scale = float(rng.uniform(0.35, 1.45))
+        x_location = float(rng.uniform(-0.8, 0.8))
+        y_location = float(rng.uniform(-0.8, 0.8))
+        x_values = x_location + x_scale * x_basis
+        y_values = y_location + y_scale * y_basis
+        yield {
+            "items": [{"x": float(x), "y": float(y)} for x, y in zip(x_values, y_values, strict=True)],
+            "covariance": correlation * x_scale * y_scale,
+            "correlation": correlation,
+        }
+
+
+def covariance_sufficient_records(*, rows: int, seed: int) -> Iterator[dict]:
+    """Expose per-item centered products while retaining the same targets."""
+    rows_with_pairs = covariance_records(rows=rows, seed=seed)
+    for row in rows_with_pairs:
+        x = np.asarray([item["x"] for item in row["items"]], dtype=np.float64)
+        y = np.asarray([item["y"] for item in row["items"]], dtype=np.float64)
+        cross_deviation = (x - x.mean()) * (y - y.mean())
+        yield {
+            "items": [{"cross_deviation": float(value)} for value in cross_deviation],
+            "covariance": row["covariance"],
+        }
+
+
+def prediction(model: rf.Model, observations: list[dict]) -> np.ndarray:
+    inputs = [{"items": row["items"]} for row in observations]
+    output = pl.DataFrame(model.predict(inputs))["predictions"].to_list()
+    return np.asarray([row["covariance"]["content"] for row in output], dtype=np.float64)
+
+
+def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
+    return float(np.sqrt(np.mean(np.square(actual - predicted))))
+
+
+def score(*, train: list[dict], test: list[dict], predicted: np.ndarray) -> dict[str, float]:
+    """Compare held-out RMSE with the constant training-target mean."""
+    actual = np.asarray([row["covariance"] for row in test], dtype=np.float64)
+    baseline = rmse(actual, float(np.asarray([row["covariance"] for row in train], dtype=np.float64).mean()))
+    measured = rmse(actual, predicted)
+    return {"rmse": measured, "baseline_rmse": baseline, "nrmse": measured / baseline}
+
+
+class Item(rf.Branch):
+    cross_deviation = rf.Number
+
+
+class PredictionModel(rf.Model):
+    items = Item(length=ITEMS, n_layers=2, attention=None, reduction=rf.Mean())
+    covariance = rf.Number(mask=True, objective="mse")
+
+
+@experiment("P008", seed=3513)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    # Split seeds are independent; rerunning a generator reproduces the same records.
+    train = list(covariance_sufficient_records(rows=768, seed=seed + 1))
+    test = list(covariance_sufficient_records(rows=384, seed=seed + 3))
+    model = PredictionModel(d_model=32, n_layers=2, n_heads=4, reduction=rf.Attention(n_layers=2))
+    datamodule = rf.SyntheticDataModule(
+        train=lambda: covariance_sufficient_records(rows=768, seed=seed + 1),
+        validate=lambda: covariance_sufficient_records(rows=192, seed=seed + 2),
+        seed=seed,
+    )
+    model.fit(
+        datamodule,
+        batch_size=64,
+        optimizer=lambda module: torch.optim.Adam(module.parameters(), lr=0.001),
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_epochs=-1,
+        max_steps=350 if steps is None else min(steps, 350),
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    trainer = model.trainer
+
+    # Evaluate held-out answers and retain their original labels in corruption controls.
+    measured = score(train=train, test=test, predicted=prediction(model, test))
+    metrics = {"measured": measured, "steps": trainer.global_step}
+    checks = {"Covariance nRMSE below 0.20": bool(measured["nrmse"] < 0.2)}
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)

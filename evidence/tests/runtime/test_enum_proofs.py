@@ -15,13 +15,13 @@ sys.path.insert(0, str(ROOT / "experiments"))
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(f"enum_proof_{name}", ROOT / "experiments/enum" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(f"enum_proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-@pytest.mark.parametrize("name", ("fixed_class_learning", "declared_without_examples"))
+@pytest.mark.parametrize("name", ("P069", "P070"))
 def test_enum_generators_restart_and_use_independent_streams(name):
     proof = load(name)
     first = list(proof.records(rows=64, seed=11))
@@ -31,7 +31,7 @@ def test_enum_generators_restart_and_use_independent_streams(name):
 
 
 def test_shuffled_context_preserves_marginals_but_removes_target_information():
-    proof = load("fixed_class_learning")
+    proof = load("P069")
     original = list(proof.records(rows=4096, seed=11))
     shuffled = list(proof.records(rows=4096, seed=11, shuffled=True))
     assert [row["label"] for row in original] == [row["label"] for row in shuffled]
@@ -52,7 +52,7 @@ def test_shuffled_context_preserves_marginals_but_removes_target_information():
 
 
 def test_omission_and_rehearsal_change_exposure_without_changing_declared_support():
-    proof = load("declared_without_examples")
+    proof = load("P070")
     initial = list(proof.records(rows=60, seed=11))
     withheld = list(proof.records(rows=60, seed=12, phase="withheld"))
     mixed = list(proof.records(rows=60, seed=13, phase="mixed"))

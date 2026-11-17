@@ -31,7 +31,7 @@ def wheel(path, *, payload=b"sdk", year=2020):
 
 
 def source(root):
-    script = root / "experiments/family/signal.py"
+    script = root / "experiments/P901.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(
         "# %% [markdown]\n# ---\n# title: Signal\n# ---\n# %%\n"
@@ -260,7 +260,7 @@ def test_invalid_source_or_reference_never_satisfies_gate(reuse_pair, fault):
             "log": next((retained / "logs").rglob("*.txt")),
             "record": next((retained / "results").rglob("*.json")),
             "wheel": next((retained / "artifacts").rglob("*.whl")),
-            "source": retained / "source/experiments/family/signal.py",
+            "source": retained / "source/experiments/P901.py",
         }[fault]
         path.write_bytes(b"tampered")
     summary = evaluate(manifest, records, root=suite, reports=current)
@@ -384,7 +384,7 @@ def test_one_experiment_change_preserves_other_baseline_execution_keys(tmp_path)
 
     suite = tmp_path / "suite"
     first = source(suite)
-    other = first.with_name("other.py")
+    other = first.with_name("P902.py")
     other.write_text(first.read_text().replace("P901", "P902"))
     before, execution = setup_report(tmp_path / "before", suite)
     first.write_text(first.read_text() + "check_threshold = 0.25\n")

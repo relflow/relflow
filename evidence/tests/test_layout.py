@@ -54,7 +54,7 @@ def test_every_experiment_declares_its_imported_dependencies_without_importing_m
         expected = imports - sys.stdlib_module_names - {"reporting", "policies", "evidence"}
         assert expected <= dependencies, f"{path}: missing dependencies {expected - dependencies}"
         assert {"pyyaml", "torch", "relflow"} <= dependencies, f"{path}: reporter dependencies are explicit"
-        assert 'Path(__file__).resolve().parents[2] / "experiments"' in source
+        assert "Path(__file__).resolve().parent" in source
         if "torchjd" in expected:
             assert "relflow[torchjd]>=0.5.0" in declared["dependencies"]
         if "transformers" in expected:
@@ -70,7 +70,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
     expected = {ROOT / path for path in paths}
     actual = set(PROOFS.rglob("*.py"))
     assert not (ROOT / "research").exists(), "keep canonical experiments together"
-    actual -= {PROOFS / name for name in ("policies.py", "reporting.py", "run.py", "source.py", "render.py")}
+    actual -= {PROOFS / name for name in ("policies.py", "reporting.py", "run.py", "source.py")}
     assert actual == expected, f"proof scripts and results registry disagree: {actual ^ expected}"
     assert not list(PROOFS.rglob("test_*.py")), "learning experiments belong in standalone scripts"
     pages = Counter(entry["page"] for entry in entries.values())
@@ -78,10 +78,9 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
 
     for identifier, entry in entries.items():
         path = ROOT / entry["script"]
-        assert path.parent.parent == PROOFS and path.is_file(), path
+        assert path.parent == PROOFS and path.name == f"{identifier}.py" and path.is_file(), path
         page = Path(entry["page"])
-        assert page.suffix == ".py" and page.parent.parent == Path("docs/evidence"), page
-        assert path.parent.name == page.parent.name, f"{path}: keep the script in its documented category"
+        assert page == Path(f"docs/evidence/{identifier}.py"), page
         module = ast.parse(path.read_text(), filename=str(path))
         declared = [
             ast.literal_eval(decorator.args[0])

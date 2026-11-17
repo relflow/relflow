@@ -1,0 +1,333 @@
+# %% [markdown]
+# ---
+# title: Can it recover when a whole branch is hidden?
+# categories:
+# - Masking
+# description: Provide two redundant measurements of the same signal and sometimes hide an entire branch.
+# evidence-readout:
+# - label: First view hidden
+#   metric:
+#   - patterns
+#   - hiddenvisible
+#   - nrmse
+#   format: error
+# - label: Second view hidden
+#   metric:
+#   - patterns
+#   - visiblehidden
+#   - nrmse
+#   format: error
+# - label: Both views hidden
+#   metric:
+#   - patterns
+#   - hiddenhidden
+#   - nrmse
+#   format: error
+# evidence-group: Masking
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. hidden skips a whole view and its descendants.
+#   alt: Model tree with record, views, reading, backup, target. Amber cards are hidden prediction targets. hidden
+#     skips a whole view and its descendants.
+# evidence-review:
+#   question: Can relflow recover when a whole branch is hidden?
+#   modeling: Create two branches carrying redundant measurements of one hidden signal. Randomly hide whole branches
+#     during fitting. On the same test records, measure error with both views, either view alone, and neither view
+#     available.
+#   comparison:
+#     metric: Normalized RMSE
+#     kind: Recorded conditions
+#     conditions:
+#     - label: Neither view available
+#       path:
+#       - patterns
+#       - hiddenhidden
+#       - nrmse
+#       format: number
+#     - label: Only first view available
+#       path:
+#       - patterns
+#       - visiblehidden
+#       - nrmse
+#       format: number
+#     - label: Only second view available
+#       path:
+#       - patterns
+#       - hiddenvisible
+#       - nrmse
+#       format: number
+#     - label: Both views available
+#       path:
+#       - patterns
+#       - visiblevisible
+#       - nrmse
+#       format: number
+#     definition: Root mean squared error divided by the reference scale defined in this experiment. Zero is exact;
+#       one equals that reference scale.
+#     direction: Lower error is better
+#   note: The target is identical in every condition. The no-view condition checks the information boundary; hidden
+#     descendants must never leak into the answer.
+#   criteria:
+#     prefixes:
+#       hiddenhidden: Both views hidden
+#       hiddenvisible: First view hidden
+#       visiblehidden: Second view hidden
+#       visiblevisible: Both views available
+# evidence-plot:
+#   mode: regression
+#   target: target
+#   focus: How much evidence remains when one or both redundant views are hidden?
+#   comparison: Compare both-view, single-view, no-view, and shuffled conditions on matched records.
+#   limit: Redundant views can preserve information after one is removed; this is not a causal attribution score.
+#   labels:
+#     test: Both views visible
+#     selected: Matched visibility condition
+#     shuffled: Visible values shuffled
+# evidence-cost:
+#   baseline: 34
+#   candidate: 34
+# ---
+#
+# ## Example
+#
+# Two views repeat the same underlying reading. Each backup is `2 × reading + 0.1`, and the hidden target is
+# `1.5 × reading - 0.2`. For the illustrated reading `0.4`, those values are `0.9` and `0.4`. The first view
+# is entirely hidden, so even its otherwise-allowed backup is unavailable. In the second view, the reading
+# remains visible while its backup is separately skipped. Either visible reading would provide enough
+# information for this target.
+#
+# ```yaml
+# views:
+#   - {reading: 0.4, backup: 0.9, hidden: true, hide_backup: false}
+#   - {reading: 0.4, backup: 0.9, hidden: false, hide_backup: true}
+# target: 0.4
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```typst
+# #tree(node("record", kind: "root", children: (
+#   node("views", kind: "branch", repeated: true, body: [Skip when `hidden`], children: (
+#     node("reading", type: "Number"),
+#     node("backup", type: "Number", body: [Also skip when `hide_backup`]),
+#   )),
+#   node("target", kind: "target", type: "Number"),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Evaluation fixes four visibility patterns: both views available, only the first, only the second, and
+# neither. Changing numbers inside a hidden branch must not alter the prediction, even when its descendant's
+# own flag would allow that number. The target value is also replaced to check that it remains hidden.
+# Shuffling available views between records removes their relationship to the original targets and provides
+# another information-removal control.
+#
+# Test each branch alone, both visible, and both hidden. Change hidden descendant values to check they cannot affect the answer.
+#
+# ## Result
+#
+# The readouts compare each single-view error with the both-hidden case using a constant training-target
+# baseline. Useful predictions from either view demonstrate redundancy, while baseline-level error without
+# either view is an expected information limit. The branch and leaf audits test which values were actually
+# made available. Because the views are deliberately duplicate, deterministic measurements, these
+# interventions do not establish causal importance, robustness to noisy sensors, or recovery from arbitrary
+# missing branches.
+#
+# Either view supports prediction. When both are hidden, the model falls back near the constant baseline; the test shows redundancy, rather than causal attribution.
+#
+# ## Method
+#
+# ### Data and model
+#
+# Each independent record draws a latent `z ~ Uniform(-1, 1)`. Both views expose
+# `reading = z` and `backup = 2*z + 0.1`; the hidden target is `1.5*z - 0.2`.
+# The latent variable is never a separate input. Independent branch selectors
+# produce all four visibility patterns, independently of `z`. Leaf selectors
+# also hide each backup with probability 0.5. Train/validation/test use
+# 4,096/512/2,048 independent records.
+#
+# ### Training and controls
+#
+# The model uses the frozen Evidence control architecture; its settings are shown in the code.
+#
+# Fit for 500 AdamW updates at learning rate 0.002. On the same test observations,
+# set each of the four branch-mask patterns deterministically. At least one
+# visible view must give nRMSE below 0.30; no visible views must give nRMSE above
+# 0.85. Poison all skipped descendants and the supervised target: prediction
+# drift must stay below 1e-5. Permuting visible views between records must remove
+# accuracy. The encoded presence bits must equal the union of ancestor and
+# local skip selectors. Unselected backups are explicitly left visible when
+# their branch is available.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyarrow",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "reliability"
+# types = []
+# conditions = ["missing-inputs", "changed-associations", "hidden-values"]
+# ///
+
+"""P053: redundant-view learning under composed branch and leaf skip policies."""
+
+import sys
+from collections.abc import Iterator
+from functools import partial
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import pyarrow as pa
+import relflow as rf
+from policies import CONTROL
+from reporting import experiment, report
+
+BUDGET = 500
+
+
+def records(*, rows: int, seed: int) -> Iterator[dict]:
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        value = float(rng.uniform(-1.0, 1.0))
+        yield {
+            "views": [
+                {
+                    "reading": value,
+                    "backup": 2 * value + 0.1,
+                    "hidden": bool(rng.random() < 0.5),
+                    "hide_backup": bool(rng.random() < 0.5),
+                }
+                for _ in range(2)
+            ],
+            "target": 1.5 * value - 0.2,
+        }
+
+
+class View(rf.Branch):
+    reading = rf.Number
+    backup = rf.Number(mask=rf.Mask(query="hide_backup", skip=True, dropout=False))
+
+
+class Model(rf.Model):
+    views = View(length=2, mask=rf.Mask(query="hidden", skip=True, dropout=False))
+    target = rf.Number(mask=True, objective="mse")
+
+
+def build() -> rf.Model:
+
+    model = Model(preset=CONTROL.name)
+    return model
+
+
+def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
+
+
+@experiment("P053", seed=5301)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    model = build()
+    data = rf.SyntheticDataModule(
+        train=partial(records, rows=4096, seed=seed + 1),
+        validate=partial(records, rows=512, seed=seed + 2),
+        seed=seed,
+    )
+    model.fit(
+        data,
+        batch_size=64,
+        learning_rate=0.002,
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_epochs=-1,
+        max_steps=BUDGET if steps is None else min(steps, BUDGET),
+        deterministic=True,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        num_sanity_val_steps=0,
+    )
+    trainer = model.trainer
+    model.eval()
+    train = list(records(rows=4096, seed=seed + 1))
+    test = list(records(rows=2048, seed=seed + 3))
+    actual = np.asarray([row["target"] for row in test])
+    baseline = float(np.sqrt(np.mean((actual - np.mean([row["target"] for row in train])) ** 2)))
+    metrics = {"steps": trainer.global_step, "baseline_rmse": baseline, "patterns": {}}
+    checks = {}
+    for pattern in ((False, False), (True, False), (False, True), (True, True)):
+        name = "".join("hidden" if hidden else "visible" for hidden in pattern)
+        selected = [
+            {
+                **row,
+                "views": [
+                    {**view, "hidden": hidden, "hide_backup": False}
+                    for view, hidden in zip(row["views"], pattern, strict=True)
+                ],
+            }
+            for row in test
+        ]
+        predicted = prediction(model, selected)
+        poisoned = [
+            {
+                "target": 1000.0,
+                "views": [
+                    {**view, "reading": 1000.0, "backup": -1000.0} if view["hidden"] else view for view in row["views"]
+                ],
+            }
+            for row in selected
+        ]
+        measured = {
+            "nrmse": float(np.sqrt(np.mean((predicted - actual) ** 2))) / baseline,
+            "hidden_value_drift": float(np.max(np.abs(predicted - prediction(model, poisoned)))),
+        }
+        metrics["patterns"][name] = measured
+        checks[f"{name}: expected information boundary"] = (
+            measured["nrmse"] > 0.85 if all(pattern) else measured["nrmse"] < 0.30
+        )
+        checks[f"{name}: skipped values cannot affect predictions"] = measured["hidden_value_drift"] < 1e-5
+    order = np.random.default_rng(seed + 4).permutation(len(test))
+    shuffled = [
+        {
+            "target": row["target"],
+            "views": [{**view, "hidden": False, "hide_backup": False} for view in test[index]["views"]],
+        }
+        for row, index in zip(test, order, strict=True)
+    ]
+    metrics["shuffled_nrmse"] = float(np.sqrt(np.mean((prediction(model, shuffled) - actual) ** 2))) / baseline
+    checks["Shuffling available evidence removes accuracy"] = metrics["shuffled_nrmse"] > 0.85
+    fields = model.encode(pa.Table.from_pylist(test), strata="predict")
+    for name in ("reading", "backup"):
+        expected = np.asarray(
+            [
+                [not (view["hidden"] or (name == "backup" and view["hide_backup"])) for view in row["views"]]
+                for row in test
+            ]
+        )
+        present = fields[f"/views/{name}"].present.cpu().numpy().reshape(expected.shape)
+        checks[f"{name}: ancestor and local skips compose"] = bool(np.array_equal(present, expected))
+    return metrics, checks
+
+
+if __name__ == "__main__":
+    report(run)

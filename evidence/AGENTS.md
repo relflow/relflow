@@ -24,8 +24,9 @@ with a fit preset. Do not track changing SDK architecture defaults.
 The internal name replaces the previous `xs` policy metadata in new executions;
 historical records retain their original names, sources, and measurements.
 Runtime input identities and isolated worker views include this shared module.
-The reporter hashes all top-level shared runtime Python files without importing
-them. Static discovery and documentation builds must not import `policies.py`.
+The reporter hashes shared runtime Python files without importing them; sibling
+`Pxxx.py` experiments never enter another study's provenance. Static discovery
+and documentation builds must not import `policies.py`.
 
 From the repository root, `make check` validates static docs and evidence tooling.
 Runtime tests under evidence/tests/runtime are explicit and require a separately
@@ -44,8 +45,8 @@ Include the reporter's `pyyaml` and `torch` requirements and the relevant relflo
 extra for optional features. Keep question metadata in the first Markdown/YAML cell and put the TOML block
 in the first code cell. Use plain Markdown sections and standard `typst` fences;
 put figure caption/alt text in `evidence-diagram`. Current sources must not
-contain Quarto execution options, shortcodes, or disclosure markup. Keep the shared import path
-relative to `__file__`, so direct `uv run <script>` works outside the checkout.
+contain Quarto execution options, shortcodes, or disclosure markup. Keep shared imports
+relative to the script directory, so direct `uv run <script>` works outside the checkout.
 Use `uv run evidence/experiments/run.py --wheel /path/to/relflow-<version>-py3-none-any.whl P001`
 to exercise an exact SDK wheel. The runner resolves all dependencies together,
 preserves extras, clears inherited import paths, and records the wheel digest.
@@ -84,8 +85,8 @@ container; module imports, schemas, generators, and training do not execute.
 Render captured observations only. Declare plotting dependencies in the script's
 uv block. Static documentation never loads or executes a renderer.
 
-All canonical studies live in `experiments/<category>/` and belong to the same
-required catalog. There are no execution lanes, opt-in study lists, or directory
+All canonical studies live directly in `experiments/` as `Pxxx.py` and belong to
+the same required catalog. There are no execution lanes, opt-in study lists, or directory
 classifications. Every script declares its uv dependencies and owns its tags;
 IDs are discovered from declarations without a central list. Static docs and
 authoring checks inspect the complete catalog without importing model resources.
@@ -104,7 +105,7 @@ from model outcomes. Static builds consume prepared SVG/JSON only; paired
 Evidence CI runs own model compute and capture already-computed readouts. See [diagnostics/README.md](diagnostics/README.md).
 Presentation changes never add measurements or alter scientific budgets and checks.
 
-Use `experiments/run.py --new <category>/<name>` for a new authoring file. The
+Use `experiments/run.py --new --title "A new question?"` for a new authoring file. The
 template lives in `templates/experiment.py.txt`, outside canonical discovery.
 Creation must remain static, reject unsafe paths and overwrites, allocate the
 next ID without reusing gaps, and preserve explicit ID/seed overrides. Keep the

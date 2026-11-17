@@ -115,7 +115,7 @@ def baseline_catalog(revision: str) -> set[str]:
         with tarfile.open(fileobj=io.BytesIO(data)) as archive:
             for member in archive:
                 parts = Path(member.name).parts
-                if len(parts) != 4 or parts[:2] != ("evidence", "experiments") or not parts[-1].endswith(".py"):
+                if len(parts) < 3 or parts[:2] != ("evidence", "experiments") or not parts[-1].endswith(".py"):
                     continue
                 if not member.isfile():
                     raise ValueError(f"Baseline experiment must be a regular file: {member.name}")
@@ -123,6 +123,8 @@ def baseline_catalog(revision: str) -> set[str]:
                 if stream is None:
                     raise ValueError(f"Cannot read baseline experiment: {member.name}")
                 source = stream.read().decode()
+                if declaration(source) is None and not re.search(r"^# evidence-id:", source, re.MULTILINE):
+                    continue
                 identifier = describe(source)["evidence-id"]
                 if identifier in entries:
                     raise ValueError(f"Duplicate baseline experiment: {identifier}")

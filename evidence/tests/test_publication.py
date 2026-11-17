@@ -53,7 +53,7 @@ def publication(tmp_path):
         target = root / entry["script"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-    for helper in sorted((ROOT / "experiments").glob("*.py")):
+    for helper in sorted((ROOT / "experiments").glob("[a-z]*.py")):
         shutil.copy2(helper, root / "experiments" / helper.name)
     (root / "results.json").write_text(
         json.dumps(
@@ -149,7 +149,7 @@ def test_selection_rejects_catalog_and_source_drift_before_writing(reports, publ
         original = source.read_text()
         added = original.replace('@experiment("P001",', '@experiment("P999",', 1)
         assert added != original, "the added experiment fixture must declare its own ID"
-        source.with_name("new_experiment.py").write_text(added)
+        source.with_name("P999.py").write_text(added)
         assert "P999" in registry(publication), "the fixture must add a valid catalog entry"
     before = {path: path.read_bytes() for path in publication.rglob("*.py")}
     with pytest.raises(ValueError, match="source|catalog"):

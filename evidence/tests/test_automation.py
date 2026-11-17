@@ -56,7 +56,7 @@ def repository(tmp_path):
     root.mkdir()
     subprocess.run(["git", "init", "-b", "main"], cwd=root, check=True, capture_output=True)
     for identifier in ("P021", "P025", "P038"):
-        path = root / f"evidence/experiments/example/{identifier.lower()}.py"
+        path = root / f"evidence/experiments/{identifier}.py"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(SCRIPT.format(identifier=identifier))
     (root / "README.md").write_text(README)
@@ -113,7 +113,7 @@ def test_run_boundary_accepts_only_successful_exact_main(event):
 
 def test_selection_classifier_preserves_program_other_headers_and_readme_boundaries(repository):
     root, _ = repository
-    path = root / "evidence/experiments/example/p021.py"
+    path = root / "evidence/experiments/P021.py"
     original = path.read_text()
     updated = frontmatter(
         original,
@@ -123,8 +123,8 @@ def test_selection_classifier_preserves_program_other_headers_and_readme_boundar
     (root / "README.md").write_text(README.replace("Old table", "New table"))
     commit(root, "selected result")
     assert selection_changes(
-        {"evidence/experiments/example/p021.py": original, "README.md": README},
-        {"evidence/experiments/example/p021.py": updated, "README.md": README.replace("Old table", "New table")},
+        {"evidence/experiments/P021.py": original, "README.md": README},
+        {"evidence/experiments/P021.py": updated, "README.md": README.replace("Old table", "New table")},
     )
     for invalid in [
         updated.replace("seed=7", "seed=8"),
@@ -132,7 +132,7 @@ def test_selection_classifier_preserves_program_other_headers_and_readme_boundar
         updated + "# unrelated prose\n",
     ]:
         assert not selection_changes(
-            {"evidence/experiments/example/p021.py": original}, {"evidence/experiments/example/p021.py": invalid}
+            {"evidence/experiments/P021.py": original}, {"evidence/experiments/P021.py": invalid}
         )
     assert not selection_changes(
         {"README.md": README}, {"README.md": README.replace("Introduction", "Different introduction")}
@@ -144,7 +144,7 @@ def test_selection_classifier_preserves_program_other_headers_and_readme_boundar
 def test_first_parent_merge_classification_and_bootstrap_runtime_guard(repository):
     root, base = repository
     subprocess.run(["git", "checkout", "-b", "publication"], cwd=root, check=True, capture_output=True)
-    path = root / "evidence/experiments/example/p021.py"
+    path = root / "evidence/experiments/P021.py"
     path.write_text(frontmatter(path.read_text(), metadata(path.read_text()) | {"evidence-result": {"mode": "full"}}))
     commit(root, "publication")
     subprocess.run(["git", "checkout", "main"], cwd=root, check=True, capture_output=True)

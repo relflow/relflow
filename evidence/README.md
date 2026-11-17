@@ -39,7 +39,7 @@ You can also invoke an experiment directly from any working directory using its
 absolute path:
 
 ```sh
-uv run /path/to/relflow/evidence/experiments/aggregation/attention_sum_in_range.py --steps 2
+uv run /path/to/relflow/evidence/experiments/P001.py --steps 2
 ```
 
 Keep the evidence checkout alongside the script: shared reporting and frozen
@@ -109,8 +109,8 @@ plan, optional publication highlights, and optional scheduling estimates. Custom
 Adding or removing it updates the catalog without editing any side list. See
 [SPEC.md](SPEC.md#self-contained-experiment-files).
 
-All studies live in `experiments/<category>/` and run in the required hosted
-catalog. There are no lanes or optional exclusions. Each script owns its uv
+All studies live directly in `experiments/` as `Pxxx.py` and run in the required
+hosted catalog. There are no lanes or optional exclusions. Each script owns its uv
 dependencies and classification tags. Use `--list` to inspect the full catalog,
 or pass IDs to run a local selection explicitly:
 
@@ -123,15 +123,15 @@ Create an authoring file from the repository root:
 
 ```sh
 uv run evidence/experiments/run.py \
-  --new aggregation/median --title "Can a model learn a median?"
+  --new --title "Can a model learn a median?" --group Aggregation
 ```
 
-This writes `evidence/experiments/aggregation/median.py` with the next stable
-ID, a literal default seed of `0`, presentation metadata, example sections, and
-the decorator and reporting entrypoint. The title defaults to words from the
-filename; the category comes from the first path segment. The display group
-reuses that category's existing group when unambiguous, otherwise its name.
-Use `--title`, `--group`, `--id`, or `--seed` to choose those values.
+This writes `evidence/experiments/Pxxx.py` using the next stable ID, with a
+literal default seed of `0`, presentation metadata, example sections, and the
+decorator and reporting entrypoint. The filename matches the declared ID.
+The title is required; `--group` defaults to an explicit `Unreviewed` placeholder.
+Use `--id` or `--seed` to override those values. Tags and frontmatter supply
+categorization independently of the file path.
 Creation reads declarations without importing experiments or model packages,
 and refuses to overwrite an existing file. IDs increase beyond the current
 maximum instead of filling gaps.

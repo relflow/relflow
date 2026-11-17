@@ -11,25 +11,17 @@ import relflow as rf
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
-SCRIPTS = {
-    "P083": "structure/ragged_hierarchy",
-    "P084": "temporal/retained_recent_history",
-    "P093": "temporal/irregular_intervals",
-    "P094": "composition/requests_and_cardinality",
-    "P097": "composition/context_extrapolation",
-    "P098": "relational/lookup_multiplicity",
-}
 
 
 def load(identifier):
-    path = ROOT / "experiments" / (SCRIPTS[identifier] + ".py")
+    path = ROOT / "experiments" / f"{identifier}.py"
     spec = importlib.util.spec_from_file_location(f"structure_expansion_{identifier}", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-@pytest.mark.parametrize("identifier", tuple(SCRIPTS))
+@pytest.mark.parametrize("identifier", ("P083", "P084", "P093", "P094", "P097", "P098"))
 def test_generators_restart_and_have_independent_streams(identifier):
     module = load(identifier)
     first = list(module.records(rows=64, seed=17))
@@ -155,7 +147,7 @@ def test_lookup_match_semantics_and_fresh_namespaces():
         assert 4 <= len(row["source"]) <= 8
 
 
-@pytest.mark.parametrize("identifier", tuple(SCRIPTS))
+@pytest.mark.parametrize("identifier", ("P083", "P084", "P093", "P094", "P097", "P098"))
 def test_model_constructors_accept_current_public_api(identifier):
     module = load(identifier)
     if identifier == "P084":

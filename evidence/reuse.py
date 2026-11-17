@@ -444,7 +444,7 @@ def equivalent(
         old_mode, old = before[name]
         if mode != old_mode:
             raise ValueError(f"Evidence input mode differs: {name}")
-        if re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", name):
+        if re.fullmatch(r"evidence/experiments/(?:P\d+|[^/]+/[^/]+)\.py", name):
             left, right = old.decode(), content.decode()
             header = describe(right)
             headers[header["evidence-id"]] = {

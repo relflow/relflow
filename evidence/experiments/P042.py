@@ -1,0 +1,307 @@
+# %% [markdown]
+# ---
+# title: Does it need both weekday and hour?
+# categories:
+# - Calendar reasoning
+# description: Predict whether a time lies in a weekday business-hours window.
+# evidence-readout:
+# - label: Weekday only
+#   metric:
+#   - day_only_accuracy
+#   format: percent
+# - label: Hour only
+#   metric:
+#   - hour_only_accuracy
+#   format: percent
+# - label: Both
+#   metric:
+#   - composed_accuracy
+#   format: percent
+# evidence-group: Temporal
+# evidence-diagram:
+#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
+#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
+#     the input.
+# evidence-review:
+#   question: Does relflow need both weekday and hour?
+#   modeling: 'Generate weekday business-hour observations and two kinds of near miss: weekdays outside the window,
+#     and weekends inside it. Hide whether the business is open. Train otherwise matched models with weekday only,
+#     hour only, or both, and compare accuracy on fresh dates.'
+#   comparison:
+#     metric: Accuracy
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Weekday only
+#       path:
+#       - day_only_accuracy
+#       format: percent
+#     - label: Hour only
+#       path:
+#       - hour_only_accuracy
+#       format: percent
+#     - label: Weekday and hour
+#       path:
+#       - composed_accuracy
+#       format: percent
+#     definition: Fraction of predictions matching the expected answer, over the population named in each condition.
+#     direction: Higher is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Each single coordinate leaves ambiguous cases. The comparison tests combining the two visible calendar parts.
+# evidence-plot:
+#   mode: temporal
+#   target: target
+#   focus: Why are both day and hour needed to identify the business window?
+#   comparison: Compare day-only, hour-only, and composed calendar evidence.
+#   limit: The held-out calendar stream is independent; no performance curve is inferred from the three accuracy values.
+#   conditions:
+#   - label: Day only
+#     metric: day_only_accuracy
+#   - label: Hour only
+#     metric: hour_only_accuracy
+#   - label: Day and hour
+#     metric: composed_accuracy
+# evidence-cost:
+#   baseline: 28
+#   candidate: 28
+# ---
+#
+# ## Example
+#
+# The hidden label follows a simple synthetic rule: open means Monday through Friday at an hour from 09:00
+# through 16:00 inclusive. The illustrated Monday at 09:00 is open. The same Monday at 20:00 would be
+# closed, as would Sunday at 09:00. Although each record contains a timestamp, each model sees only its
+# selected calendar coordinates, rather than every fact that a person could extract from the displayed date.
+#
+# ```yaml
+# observed_at: 2025-01-06T09:00:00
+# target: open
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ```typst
+# #tree(node("calendar", kind: "root", children: (
+#   node("observed_at", type: "DateParts", width: 150pt,),
+#   node("target", kind: "target", type: "Category", detail: "open or closed",),
+# )))
+# ```
+#
+# ## Comparison
+#
+# Three models receive weekday alone, hour alone, or both. Half the generated records are open, one quarter
+# are weekday/off-hour near misses, and one quarter are weekend/work-hour near misses. Either single
+# coordinate leaves genuinely ambiguous examples; the combined inputs distinguish both kinds of closed case.
+# Training, validation, and test use separate year ranges, so the comparison is evaluated on different dates
+# rather than the training records themselves.
+#
+# Train with only weekday, only hour, and both together. Each single coordinate leaves ambiguous cases.
+#
+# ## Result
+#
+# The percentages are held-out classification accuracies. The important comparison is whether the combined
+# model improves over both restricted-input models, not merely whether it beats a 50% guess. The task's
+# definition of open is intentionally narrow and supplied by the generator. There are no holiday exceptions,
+# time zones, varying local opening schedules, or daylight-saving transitions, so a high score is not a
+# deployed business-calendar service.
+#
+# Combining the coordinates resolves this constructed task. Holidays, time zones, and daylight-saving rules are not covered.
+#
+# ## Method
+#
+# ### How it works
+#
+# Half the observations are weekdays during 09:00–16:00. A quarter are
+# weekdays outside those hours, and a quarter are weekends during those hours.
+# Neither coordinate alone identifies every label; a combined representation
+# can distinguish the open window from both kinds of near miss.
+#
+# Three otherwise matched models expose `day_of_week`, `hour_of_day`, or both.
+# They train for 20 deterministic epochs. Training, validation, and test
+# use 1,024, 512, and 1,024 observations from separate periods beginning in
+# 2017, 2021, and 2025.
+#
+# ### Remaining work
+#
+# Repeat all three fits over three core seeds and at least ten calibration
+# seeds. Extend to further coordinate combinations and characterize timezone
+# and daylight-saving preprocessing independently of this naive-calendar test.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "lightning",
+#     "numpy",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "representation"
+# types = ["Period"]
+# conditions = ["limited-information", "representations"]
+# ///
+
+"""P042: combine weekday and hour to identify an open business window.
+
+Half the rows are open; the others are weekday/off-hour or weekend/work-hour
+near misses. Either coordinate alone has an optimal accuracy of 0.75.
+"""
+
+import sys
+from collections.abc import Callable, Iterator, Sequence
+from datetime import date, datetime, time, timedelta
+from functools import partial
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import relflow as rf
+import torch
+from reporting import experiment, report
+
+
+def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
+    """Yield balanced open windows and two single-coordinate near misses."""
+    if start.weekday() != 0:
+        raise ValueError(f"business-window start must be a Monday, got {start.isoformat()}")
+    if weeks < 1:
+        raise ValueError(f"business-window weeks must be positive, got {weeks}")
+    if rows % 4:
+        raise ValueError(f"business-window rows must be divisible by four, got {rows}")
+    business_hours = tuple(range(9, 17))
+    off_hours = (*range(0, 9), *range(17, 24))
+    observations = []
+    for index in range(rows // 2):
+        day = start + timedelta(weeks=index % weeks, days=index % 5)
+        hour = business_hours[index % len(business_hours)]
+        observations.append({"observed_at": datetime.combine(day, time(hour=hour)), "target": "open"})
+    for index in range(rows // 4):
+        day = start + timedelta(weeks=index % weeks, days=index % 5)
+        hour = off_hours[index % len(off_hours)]
+        observations.append({"observed_at": datetime.combine(day, time(hour=hour)), "target": "closed"})
+    for index in range(rows // 4):
+        day = start + timedelta(weeks=index % weeks, days=5 + index % 2)
+        hour = business_hours[index % len(business_hours)]
+        observations.append({"observed_at": datetime.combine(day, time(hour=hour)), "target": "closed"})
+    for index in np.random.default_rng(seed).permutation(len(observations)):
+        yield observations[index]
+
+
+def fit(
+    *,
+    dateparts: Sequence[str],
+    train: Callable[[], Iterator[dict]],
+    validate: Callable[[], Iterator[dict]],
+    epochs: int,
+    seed: int,
+    steps: int | None,
+    accelerator: str,
+) -> rf.Model:
+    """Train on the selected calendar coordinates with the remaining schema fixed."""
+    lit.seed_everything(seed, workers=True)
+
+    class PredictionModel(rf.Model):
+        observed_at = rf.DateParts(dateparts=list(dateparts))
+        target = rf.Category(mask=True, p_unavailable=0.0)
+
+    model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
+    data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)
+    model.fit(
+        data,
+        batch_size=128,
+        optimizer=lambda module: torch.optim.AdamW(module.parameters(), lr=0.003),
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="ddp" if accelerator in ("gpu", "auto") and torch.cuda.device_count() > 1 else "auto",
+        accelerator=accelerator,
+        max_epochs=epochs,
+        max_steps=steps if steps is not None else -1,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    return model
+
+
+def accuracy(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: str) -> float:
+    """Evaluate held-out labels without updating the Category vocabulary."""
+    data = rf.SyntheticDataModule(test=records)
+    metrics = model.test(
+        data,
+        accelerator=accelerator,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        verbose=False,
+        batch_size=128,
+        precision="32-true",
+        strategy="ddp" if accelerator in ("gpu", "auto") and torch.cuda.device_count() > 1 else "auto",
+    )[0]
+    return float(metrics[".target/test.accuracy.content"])
+
+
+@experiment("P042", seed=59)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    train = partial(records, start=date(2017, 1, 2), weeks=52, rows=1024, seed=seed + 1)
+    validate = partial(records, start=date(2021, 1, 4), weeks=26, rows=512, seed=seed + 2)
+    test = partial(records, start=date(2025, 1, 6), weeks=52, rows=1024, seed=seed + 3)
+    day_only = fit(
+        dateparts=("day_of_week",),
+        train=train,
+        validate=validate,
+        epochs=20,
+        seed=seed,
+        steps=steps,
+        accelerator=accelerator,
+    )
+    day_accuracy = accuracy(day_only, test, accelerator)
+    hour_only = fit(
+        dateparts=("hour_of_day",),
+        train=train,
+        validate=validate,
+        epochs=20,
+        seed=seed,
+        steps=steps,
+        accelerator=accelerator,
+    )
+    hour_accuracy = accuracy(hour_only, test, accelerator)
+    composed = fit(
+        dateparts=("day_of_week", "hour_of_day"),
+        train=train,
+        validate=validate,
+        epochs=20,
+        seed=seed,
+        steps=steps,
+        accelerator=accelerator,
+    )
+    composed_accuracy = accuracy(composed, test, accelerator)
+    gap = composed_accuracy - max(day_accuracy, hour_accuracy)
+    return {
+        "day_only_accuracy": day_accuracy,
+        "hour_only_accuracy": hour_accuracy,
+        "composed_accuracy": composed_accuracy,
+        "accuracy_gap": gap,
+    }, {
+        "Weekday-only accuracy is at most 0.82": day_accuracy <= 0.82,
+        "Hour-only accuracy is at most 0.82": hour_accuracy <= 0.82,
+        "Combined coordinates reach 0.95 accuracy": composed_accuracy >= 0.95,
+        "Composition improves over either coordinate by at least 0.15": gap >= 0.15,
+    }
+
+
+if __name__ == "__main__":
+    report(run)

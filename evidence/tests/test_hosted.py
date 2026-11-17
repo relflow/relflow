@@ -27,11 +27,11 @@ def wheel(path, content):
 
 
 def source(root, count=24):
-    family = root / "experiments/family"
+    family = root / "experiments"
     family.mkdir(parents=True)
     for index in range(count):
         identifier = f"P{901 + index}"
-        (family / f"proof_{index}.py").write_text(
+        (family / f"{identifier}.py").write_text(
             f"# %% [markdown]\n# ---\n# title: Signal {index}\n# ---\n"
             "# %%\nfrom reporting import experiment, report\n"
             f"@experiment({identifier!r}, seed={701 + index})\n"
@@ -200,8 +200,8 @@ def test_unknown_proofs_have_positive_costs_and_spread_across_twelve_shards(tmp_
 
 def test_adding_and_removing_a_script_updates_planning_without_side_lists(tmp_path):
     suite = source(tmp_path / "suite", count=1)
-    added = suite / "experiments/family/independent.py"
-    added.write_text((suite / "experiments/family/proof_0.py").read_text().replace("P901", "P999"))
+    added = suite / "experiments/P999.py"
+    added.write_text((suite / "experiments/P901.py").read_text().replace("P901", "P999"))
     hints(suite, {"P999": {"baseline": 12, "candidate": 14}})
     assert set(hosted.scheduling(suite)["costs"]) == {"P901", "P999"}
     assert hosted.scheduling(suite)["costs"]["P999"] == {"baseline": 12, "candidate": 14}
@@ -231,8 +231,9 @@ def test_missing_role_hints_use_the_registered_median_without_creating_unknown_t
 
 def test_measured_expensive_proof_is_balanced_and_scheduled_before_cheap_work(tmp_path):
     suite = source(tmp_path / "suite")
-    script = suite / "experiments/family/proof_0.py"
+    script = suite / "experiments/P901.py"
     script.write_text(script.read_text().replace("P901", "P082"))
+    script.rename(suite / "experiments/P082.py")
     manifest = plan(
         run_id="scheduled", candidate={}, baseline={}, evidence_sha="suite", executor_sha="executor", root=suite
     )

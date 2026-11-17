@@ -4,10 +4,10 @@ from evidence_ci import plan
 
 
 def test_planning_uses_trusted_parser_without_importing_suite_helpers(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
     (tmp_path / "experiments/source.py").write_text("raise RuntimeError('suite helper imported on host')\n")
-    (family / "signal.py").write_text(
+    (family / "P901.py").write_text(
         "# %% [markdown]\n# ---\n# title: Signal\n# ---\n"
         "# %%\nfrom reporting import experiment, report\n"
         "@experiment('P901', seed=123)\n"

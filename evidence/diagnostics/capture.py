@@ -260,7 +260,7 @@ def run(source: Path, output: Path, arguments: list[str]) -> dict:
     """Observe the canonical reporter, preserving its exact result and CLI policy."""
     source, output = source.resolve(), output.resolve()
     output.mkdir(parents=True, exist_ok=False)
-    sys.path.insert(0, str(source.parents[2] / "experiments"))
+    sys.path.insert(0, str(source.parent))
     import reporting
     from source import describe
 

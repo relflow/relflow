@@ -14,18 +14,16 @@ import torch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
 NAMES = (
-    "unknown_input_fallback",
-    "unknown_target_coverage",
-    "capacity_admission_order",
-    "unknown_set_members",
-    "admission_and_continued_training",
+    "P055",
+    "P056",
+    "P057",
+    "P058",
+    "P059",
 )
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(
-        f"vocabulary_proof_{name}", ROOT / "experiments/vocabulary" / f"{name}.py"
-    )
+    spec = importlib.util.spec_from_file_location(f"vocabulary_proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -41,7 +39,7 @@ def test_vocabulary_generators_are_restartable_with_independent_splits(name):
 
 
 def test_unknown_category_inputs_remain_valued_and_differ_from_null():
-    proof = load("unknown_input_fallback")
+    proof = load("P055")
     model = proof.build()
     model.encode(pa.Table.from_pylist(list(proof.records(rows=256, seed=11))), strata="train")
     rows = [{"x": 0.0, "code": code, "target": 0.0} for code in ("new-left", "new-right", None)]
@@ -52,7 +50,7 @@ def test_unknown_category_inputs_remain_valued_and_differ_from_null():
 
 
 def test_target_coverage_shift_preserves_inputs_and_field_local_vocabularies():
-    proof = load("unknown_target_coverage")
+    proof = load("P056")
     model = proof.build()
     train = list(proof.records(rows=256, seed=11))
     model.encode(pa.Table.from_pylist(train), strata="train")
@@ -69,7 +67,7 @@ def test_target_coverage_shift_preserves_inputs_and_field_local_vocabularies():
 
 
 def test_capacity_controls_reorder_identical_records_without_duplication():
-    proof = load("capacity_admission_order")
+    proof = load("P057")
     rare = list(proof.records(rows=64, seed=11))
     common = list(proof.records(rows=64, seed=11, common_first=True))
     assert Counter((row["code"], row["target"]) for row in rare) == Counter(
@@ -103,7 +101,7 @@ def test_capacity_controls_reorder_identical_records_without_duplication():
 
 
 def test_set_probes_distinguish_omitted_members_from_null_state():
-    proof = load("unknown_set_members")
+    proof = load("P058")
     model = proof.build()
     model.encode(pa.Table.from_pylist(list(proof.records(rows=256, seed=11))), strata="train")
     rows = [
@@ -132,7 +130,7 @@ def test_set_probes_distinguish_omitted_members_from_null_state():
 
 
 def test_lifecycle_empty_prediction_admission_and_checkpoint(tmp_path):
-    proof = load("admission_and_continued_training")
+    proof = load("P059")
     model = proof.build()
     rows = list(proof.records(rows=32, seed=11))
     cold = proof.prediction(model, rows)
@@ -162,7 +160,7 @@ def test_lifecycle_empty_prediction_admission_and_checkpoint(tmp_path):
 
 
 def test_continued_training_generator_rehearses_old_classes():
-    proof = load("admission_and_continued_training")
+    proof = load("P059")
     mixed = list(proof.records(rows=64, seed=11, phase="mixed"))
     assert Counter(row["label"] for row in mixed) == dict.fromkeys(proof.LABELS, 16)
     for row in mixed:
