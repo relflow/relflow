@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
@@ -15,22 +14,16 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
-from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope
+from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, member, parts, query, scope
 from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
 from relflow.structs.enums import Component, Overflow, Strata, Tokens
-from relflow.structs.tree import Address, Leaf
+from relflow.structs.tree import Address, Leaf, Operand
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
     from relflow.structs.tree import Mask
-
-
-def member(name: str) -> str:
-    """Render a schema name as one native query member."""
-
-    return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) else f"[{json.dumps(name)}]"
 
 
 @cache
@@ -127,7 +120,12 @@ def valid(values: pa.Array | pa.ChunkedArray) -> np.ndarray:
 
 @dataclass(frozen=True, slots=True)
 class Layout:
-    """Structurally present records and their positions in dense model geometry."""
+    """Structurally present records and their positions in dense model geometry.
+
+    ``pool`` holds the uncropped candidate records. For each retained record,
+    ``origin`` is its pool position and ``first`` is the pool position of its
+    collection's first item, so shifted operands can read across a crop.
+    """
 
     records: pa.Array | pa.ChunkedArray
     placement: np.ndarray
@@ -135,6 +133,9 @@ class Layout:
     lengths: np.ndarray
     present: np.ndarray
     valid: np.ndarray
+    pool: pa.Array | pa.ChunkedArray
+    origin: np.ndarray
+    first: np.ndarray
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,8 +337,8 @@ def referenced(branch: Branch) -> set[str]:
             branch_child = cast("Branch", child)
             names.add(head(branch_child.query) if branch_child.query is not None else cast(str, child.name))
         else:
-            for expression in queries(cast(Leaf, child)):
-                depth, path = scope(expression)
+            for operand in cast(Leaf, child).operands():
+                depth, path = scope(operand.query)
                 if not depth:
                     names.add(head(path))
         for mask in child.mask:
@@ -347,18 +348,11 @@ def referenced(branch: Branch) -> set[str]:
         if not isinstance(child, Leaf):
             continue
         owners = [node for node in child.path if node.type == "branch"]
-        for expression in queries(child):
-            depth, path = scope(expression)
+        for operand in child.operands():
+            depth, path = scope(operand.query)
             if depth and depth < len(owners) and owners[-1 - depth] is branch:
                 names.add(head(path))
     return names
-
-
-def queries(request: Leaf) -> tuple[str, ...]:
-    """Normalize one leaf's declared source paths without changing explicit empty inputs."""
-    if request.query is None:
-        return (member(cast(str, request.name)),)
-    return (request.query,) if isinstance(request.query, str) else request.query
 
 
 def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout:
@@ -383,6 +377,9 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
             lengths=np.ones(rows, dtype=np.int64),
             present=np.ones(rows, dtype=bool),
             valid=np.ones(rows, dtype=bool),
+            pool=records,
+            origin=np.arange(rows, dtype=np.int64),
+            first=np.arange(rows, dtype=np.int64),
         )
 
     selected = query(records, branch.query, address=str(branch.address))
@@ -391,13 +388,17 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
 
     present = boolean(selected.present)
     retained = present & valid(selected.values)
+    origin = np.flatnonzero(retained).astype(np.int64, copy=False)
     return Layout(
         records=retain(selected.values, retained),
-        placement=np.flatnonzero(retained).astype(np.int64, copy=False),
+        placement=origin,
         shape=(rows, 1),
         lengths=np.ones(rows, dtype=np.int64),
         present=np.ones(rows, dtype=bool),
         valid=np.ones(rows, dtype=bool),
+        pool=selected.values,
+        origin=origin,
+        first=origin,
     )
 
 
@@ -421,13 +422,17 @@ def descend(
     if selected is None or pa.types.is_null(selected.values.type):
         if selected is not None:
             collection_present[layout.placement] = boolean(selected.present)
+        empty = pa.array([], type=pa.struct([]))
         return Layout(
-            records=pa.array([], type=pa.struct([])),
+            records=empty,
             placement=np.empty(0, dtype=np.int64),
             shape=(*layout.shape, 0),
             lengths=retained_lengths.reshape(layout.shape),
             present=collection_present.reshape(layout.shape),
             valid=collection_valid.reshape(layout.shape),
+            pool=empty,
+            origin=np.empty(0, dtype=np.int64),
+            first=np.empty(0, dtype=np.int64),
         )
     if selected.present.type != pa.bool_():
         raise ValueError(f"branch query {expression!r} must select one list per parent")
@@ -437,7 +442,7 @@ def descend(
     present = boolean(selected.present)
     source = compact(selected.values)
     chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
-    retained: list[tuple[np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
+    retained: list[tuple[np.ndarray, np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
     randomized = branch.overflow == Overflow.random and strata == Strata.train
     ranges = np.zeros(parent_size, dtype=np.int64) if randomized else None
     tail = branch.overflow == Overflow.tail or (branch.overflow == Overflow.random and not randomized)
@@ -465,7 +470,7 @@ def descend(
         starts = list_offsets[:-1] + (lengths - counts if tail else 0)
         if ranges is not None:
             ranges[parent_placement] = np.where(available, lengths - counts, 0)
-        retained.append((starts, children, counts, parent_placement))
+        retained.append((list_offsets[:-1], starts, children, counts, parent_placement))
 
     shifts = None
     if ranges is not None:
@@ -478,13 +483,19 @@ def descend(
     shape = (*layout.shape, extent)
     record_chunks: list[pa.Array] = []
     placement_chunks: list[np.ndarray] = []
-    for starts, children, counts, parent_placement in retained:
+    origin_chunks: list[np.ndarray] = []
+    first_chunks: list[np.ndarray] = []
+    base = 0
+    for beginnings, starts, children, counts, parent_placement in retained:
         if shifts is not None:
             starts = starts + shifts[parent_placement]
         total = int(counts.sum())
         if total == 0:
             record_chunks.append(children.slice(0, 0))
             placement_chunks.append(np.empty(0, dtype=np.int64))
+            origin_chunks.append(np.empty(0, dtype=np.int64))
+            first_chunks.append(np.empty(0, dtype=np.int64))
+            base += len(children)
             continue
 
         parents = np.repeat(np.arange(len(counts), dtype=np.int64), counts)
@@ -497,23 +508,36 @@ def descend(
             records = pc.take(children, pa.array(indices, type=pa.int64()))
         valid_record = valid(records)
         placement = parent_placement[parents] * extent + slots
+        origin = base + indices
+        first = base + beginnings[parents]
+        base += len(children)
         if valid_record.all():
             record_chunks.append(records)
             placement_chunks.append(placement)
+            origin_chunks.append(origin)
+            first_chunks.append(first)
         else:
             record_chunks.append(pc.filter(records, pa.array(valid_record)))
             placement_chunks.append(placement[valid_record])
+            origin_chunks.append(origin[valid_record])
+            first_chunks.append(first[valid_record])
 
-    records = (
-        record_chunks[0] if len(record_chunks) == 1 else pa.chunked_array(record_chunks, type=source.type.value_type)
-    )
+    def combine(chunks: list[pa.Array]) -> pa.Array | pa.ChunkedArray:
+        return chunks[0] if len(chunks) == 1 else pa.chunked_array(chunks, type=source.type.value_type)
+
+    def join(chunks: list[np.ndarray]) -> np.ndarray:
+        return np.concatenate(chunks) if chunks else np.empty(0, dtype=np.int64)
+
     return Layout(
-        records=records,
-        placement=np.concatenate(placement_chunks) if placement_chunks else np.empty(0, dtype=np.int64),
+        records=combine(record_chunks),
+        placement=join(placement_chunks),
         shape=shape,
         lengths=retained_lengths.reshape(layout.shape),
         present=collection_present.reshape(layout.shape),
         valid=collection_valid.reshape(layout.shape),
+        pool=combine([children for _, _, children, _, _ in retained]),
+        origin=join(origin_chunks),
+        first=join(first_chunks),
     )
 
 
@@ -528,20 +552,32 @@ def vacancy(layout: Layout) -> RaggedField:
     )
 
 
+def earlier(layout: Layout, shift: int) -> pa.Array | pa.ChunkedArray:
+    """Return the pool record ``shift`` positions before each retained record, or a null record.
+
+    Positions before a collection's first item are null, so a lookup never
+    reaches another parent record; null items stay null rather than being skipped.
+    """
+    target = layout.origin - shift
+    reachable = target >= layout.first
+    return pc.take(layout.pool, pa.array(np.where(reachable, target, 0), mask=~reachable, type=pa.int64()))
+
+
 def source(
     layout: Layout,
-    expression: str,
+    item: Operand,
     *,
     ancestors: tuple[Layout, ...],
     address: Address,
 ) -> SourceProjection[pa.Array | pa.ChunkedArray]:
-    """Resolve a local source or gather an ancestor source by retained coordinates."""
-    depth, path = scope(expression)
+    """Resolve a local or earlier-record source, or gather an ancestor source by retained coordinates."""
+    depth, path = scope(item.query)
     if not depth:
-        return query(layout.records, path, address=str(address))
+        records = earlier(layout, item.shift) if item.shift else layout.records
+        return query(records, path, address=str(address))
     if depth > len(ancestors):
         raise ValueError(
-            f"source query {expression!r} at '{address}' ascends {depth} owner branches, "
+            f"source query {item.query!r} at '{address}' ascends {depth} owner branches, "
             f"but only {len(ancestors)} ancestor branches exist; keep the source within the model root"
         )
     owner = ancestors[-depth]
@@ -550,7 +586,7 @@ def source(
     positions = layout.placement // stride if stride else np.empty(0, dtype=np.int64)
     indices = np.searchsorted(owner.placement, positions)
     if np.any(indices >= len(owner.placement)) or not np.array_equal(owner.placement[indices], positions):
-        raise RuntimeError(f"source query {expression!r} at '{address}' has no retained ancestor coordinate")
+        raise RuntimeError(f"source query {item.query!r} at '{address}' has no retained ancestor coordinate")
     gather = pa.array(indices, type=pa.int64())
     return SourceProjection(values=pc.take(selected.values, gather), present=pc.take(selected.present, gather))
 
@@ -580,11 +616,9 @@ def pristine(layout: Layout, request: Leaf, *, ancestors: tuple[Layout, ...]) ->
     from relflow.tensorfields.base import TENSORFIELDS
 
     extension = TENSORFIELDS[request.type]
-    expressions = queries(request)
+    operands = request.operands()
     if Component.derive in extension.components:
-        inputs = tuple(
-            source(layout, expression, ancestors=ancestors, address=request.address) for expression in expressions
-        )
+        inputs = tuple(source(layout, item, ancestors=ancestors, address=request.address) for item in operands)
         selected = derived(
             extension.derive(inputs, request=request, address=request.address, rows=len(layout.records)),
             rows=len(layout.records),
@@ -596,7 +630,7 @@ def pristine(layout: Layout, request: Leaf, *, ancestors: tuple[Layout, ...]) ->
                 f"field '{request.address}' has multiple source queries but extension '{request.type}' has no "
                 "derive component; register Component.derive or use one query"
             )
-        selected = source(layout, expressions[0], ancestors=ancestors, address=request.address)
+        selected = source(layout, operands[0], ancestors=ancestors, address=request.address)
     present = (
         boolean(selected.present) if selected.present.type == pa.bool_() else boolean(pc.is_valid(selected.present))
     )

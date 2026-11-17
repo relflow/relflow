@@ -2,6 +2,7 @@
 
 import functools
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias, TypedDict, cast
 
 import pydantic
@@ -101,6 +102,28 @@ class Mask(pydantic.BaseModel):
 
 
 MaskInput: TypeAlias = Mask | float | bool | list[Mask] | tuple[Mask, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Operand:
+    """One leaf input: a node-relative query read ``shift`` records earlier.
+
+    ``shift=0`` reads the leaf's own record. A positive shift reads the record
+    that many positions earlier in source order within the same parent
+    collection, before branch cropping. Positions before the collection start
+    are structurally absent; a lookup never crosses into another parent record,
+    observation, or batch.
+    """
+
+    query: str
+    shift: int = 0
+
+    def __post_init__(self) -> None:
+        # Pool positions are int64, so a larger offset cannot address a record.
+        if not isinstance(self.shift, int) or isinstance(self.shift, bool) or not 0 <= self.shift < 2**63:
+            raise ValueError(
+                f"operand {self.query!r} shift must be a non-negative integer below 2**63, got {self.shift!r}"
+            )
 
 
 class FieldOptions(TypedDict, total=False):
@@ -316,26 +339,51 @@ class Leaf(Node):
             scope(expression)
         return self
 
+    def operands(self) -> tuple[Operand, ...]:
+        """Return the inputs this bound leaf reads, in the order ``derive`` receives them.
+
+        An omitted query reads the same-named member. A request overrides this
+        to read an input from an earlier record of its owner collection; it
+        keeps the declared query paths and changes only their shifts.
+        """
+        from relflow.data.query import member
+
+        if self.query is None:
+            return (Operand(member(cast(str, self.name))),)
+        expressions = (self.query,) if isinstance(self.query, str) else self.query
+        return tuple(Operand(expression) for expression in expressions)
+
     def post_bind_validate(self) -> None:
-        """Check scoped sources and derived-input capability against the live registry."""
+        """Check scoped operands and derived-input capability against the live registry."""
         from relflow.data.query import scope
         from relflow.structs.enums import Component
         from relflow.tensorfields.base import TENSORFIELDS
 
-        if isinstance(self.query, tuple) and Component.derive not in TENSORFIELDS[self.type].components:
+        operands = self.operands()
+        if (isinstance(self.query, tuple) or len(operands) != 1) and Component.derive not in TENSORFIELDS[
+            self.type
+        ].components:
             raise ValueError(
                 f"field '{self.address}' has multiple source queries but extension '{self.type}' has no "
                 "derive component; register Component.derive or use one query"
             )
-        if self.query is None:
-            return
         ancestors = sum(node.type == "branch" for node in self.path) - 1
-        for expression in (self.query,) if isinstance(self.query, str) else self.query:
-            depth, _ = scope(expression)
+        for operand in operands:
+            depth, _ = scope(operand.query)
             if depth > ancestors:
                 raise ValueError(
-                    f"source query {expression!r} at '{self.address}' ascends {depth} owner branches, "
+                    f"source query {operand.query!r} at '{self.address}' ascends {depth} owner branches, "
                     f"but only {ancestors} ancestor branches exist; keep the source within the model root"
+                )
+            if operand.shift and depth:
+                raise ValueError(
+                    f"source query {operand.query!r} at '{self.address}' has shift={operand.shift} on an "
+                    "ancestor branch; a shift reads the field's own collection, so use a local query"
+                )
+            if operand.shift and not ancestors:
+                raise ValueError(
+                    f"source query {operand.query!r} at '{self.address}' has shift={operand.shift}, but the "
+                    "model root holds one record per observation; declare the field inside a repeated Branch"
                 )
 
     @functools.cached_property

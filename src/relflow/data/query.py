@@ -228,6 +228,12 @@ class Parser:
         return Query(text=self.text, steps=tuple(steps))
 
 
+def member(name: str) -> str:
+    """Render a schema name as one native query member."""
+
+    return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) else f"[{json.dumps(name)}]"
+
+
 @cache
 def compile(expression: str) -> Query:
     """Parse one observation-relative structural query."""
