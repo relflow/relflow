@@ -447,6 +447,7 @@ class ArrowDataset(IterableDataset[Encoded]):
         epochs: dict[Strata, int],
         distributed_rank: int,
         distributed_world_size: int,
+        drift: bool = False,
         epoch: Any = None,
         epoch_snapshot: Any = None,
         epoch_barrier: Any = None,
@@ -463,6 +464,7 @@ class ArrowDataset(IterableDataset[Encoded]):
         self.epochs = epochs
         self.distributed_rank = distributed_rank
         self.distributed_world_size = distributed_world_size
+        self.drift = drift
         self.epoch = epoch
         self.epoch_snapshot = epoch_snapshot
         self.epoch_barrier = epoch_barrier
@@ -591,6 +593,7 @@ class ArrowDataset(IterableDataset[Encoded]):
                 epoch=epoch,
                 retain=self.options.retain,
                 ordinal=ordinal,
+                drift=self.drift,
             )
             yield ship(encoded) if shipped else encoded
 
@@ -633,6 +636,7 @@ def loader(
     schemas: Schemas,
     epochs: dict[Strata, int],
     multiprocessing_context: Any,
+    drift: bool = False,
     epoch: Any = None,
 ) -> DataLoader[Encoded]:
     """Build the shared Lightning DataLoader used by every data module."""
@@ -675,6 +679,7 @@ def loader(
             distributed_rank=distributed_rank,
             distributed_world_size=distributed_world_size,
             epoch=epoch,
+            drift=drift,
             epoch_snapshot=epoch_snapshot,
             epoch_barrier=epoch_barrier,
         ),
@@ -950,6 +955,7 @@ class ArrowDataModule(lit.LightningDataModule):
         return loader(
             source=self.sources[normalized],
             schema=self.schema,
+            drift=self.bound_model.drift,
             options=options,
             encoding_context=encoding_context,
             batch_size=self.batch_size,

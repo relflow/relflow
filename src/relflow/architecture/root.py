@@ -45,6 +45,7 @@ from relflow.architecture.runtime import (
 from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.processors import PostprocessorInput, PreprocessorInput, arrow, polars
+from relflow.distributions import Distributions
 from relflow.helpers.optimizers import adamw
 from relflow.logging import logger
 from relflow.logging.throughput import ThroughputLogger
@@ -157,6 +158,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        drift: bool = False,
         **field_kwargs: TreeFieldInput,
     ) -> None: ...
 
@@ -181,6 +183,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        drift: bool = False,
         **field_kwargs: TreeFieldInput,
     ) -> None: ...
 
@@ -194,6 +197,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        drift: bool = False,
     ) -> None: ...
 
     @beartype
@@ -218,6 +222,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: Any = None,  # Lightning validates custom schedulers at fit time.
         jacobian: bool = False,
+        drift: bool = False,
         **field_kwargs: Any,
     ) -> None:
         """Build a model from tree fields, or from an existing ``schema``.
@@ -250,6 +255,11 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         objectives during training and requires ``relflow[torchjd]``.
         Lightning retains automatic backward and optimization. This training
         policy is not saved in model checkpoints; select it before compiling.
+
+        ``drift=True`` enables input distribution profiling and drift warnings
+        for this model. It defaults to False; field ``drift`` policies apply
+        only after this model-wide opt-in. Set it before creating data loaders.
+        The setting and collected profiles are retained in checkpoints.
 
         A positional ``Schema`` or ``schema=...`` restores an existing
         architecture and cannot be combined with tree fields or dimensions.
@@ -309,6 +319,8 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         # internal integer state-dict revision; preserve the existing artifact contract.
         self._version: str = __version__  # pyrefly: ignore[bad-override-mutable-attribute]
         self.schema: Schema = schema
+        self.distributions = Distributions()
+        self.drift = drift
         self.preset: presets.Preset | None = profile
         self.batch_size = batch_size
         self.optimizer: OptimizerConfig | None
@@ -346,7 +358,9 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         validation, registered datatype options, and subclass construction.
         """
         options, profile = template.read(pathname, overrides)
-        runtime = {name: options.pop(name) for name in ("batch_size", "optimizer", "scheduler") if name in options}
+        runtime = {
+            name: options.pop(name) for name in ("batch_size", "optimizer", "scheduler", "drift") if name in options
+        }
         try:
             schema = Schema.from_tree(**options) if profile is None else resolve(profile, **options)
             model = cls(schema=schema, **runtime)
@@ -361,6 +375,17 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         return self._version
 
     @property
+    def drift(self) -> bool:
+        """Whether this model collects input distributions and checks for drift."""
+        return self._drift
+
+    @drift.setter
+    def drift(self, value: bool) -> None:
+        if not isinstance(value, bool):
+            raise TypeError(f"model drift must be a boolean, got {type(value).__name__}")
+        self._drift = value
+
+    @property
     def batch_size(self) -> int:
         """Current per-device batch size for model-owned data loaders."""
         return self._batch_size
@@ -372,6 +397,19 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         self._batch_size = value
 
     def reset_contracts(self) -> None:
+        if self.drift or self.distributions.profiles:
+            signatures: dict[str, object] = {
+                str(address): [
+                    node.model_dump(mode="json", exclude={"fields", "drift", "root"}) for node in request.path
+                ]
+                for address, request in self.schema.active_requests.items()
+            }
+            for address in self.distributions.profiles.keys() - signatures.keys():
+                self.distributions.clear(address=address)
+            for address, signature in signatures.items():
+                if self.distributions.signatures.get(address) != signature:
+                    self.distributions.clear(address=address)
+            self.distributions.signatures = signatures
         compiler.clear(self)
         self._contract_generation += 1
         self._contract_scheduler.reset()
@@ -1120,6 +1158,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
                 retain=batch.retain,
                 observations={address: transfer(value, device) for address, value in batch.observations.items()},
                 bindings=batch.bindings,
+                profiles=batch.profiles,
             )
         return super().transfer_batch_to_device(batch, device, dataloader_idx)
 

@@ -113,6 +113,7 @@ export default defineConfig({
           items: [
             { label: 'Overview', slug: 'advanced' },
             { label: 'Data modules', slug: 'advanced/data-modules' },
+            { label: 'Input distributions', slug: 'advanced/input-distributions' },
             { label: 'Training & learned state', slug: 'advanced/training' },
             { label: 'Regularization', slug: 'advanced/regularization' },
             { label: 'Custom data modules', slug: 'advanced/custom-data-modules' },

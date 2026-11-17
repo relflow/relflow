@@ -27,6 +27,7 @@ from relflow.tensorfields.base import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.shared.distributions import categorical as profile
 from relflow.tensorfields.shared.reconstruction import Metrics, Scores, Totals
 
 if TYPE_CHECKING:
@@ -335,3 +336,6 @@ def loss(
         decoder.metrics.record(module, strata, torch.stack((valued.sum(), correct)), objective.unsqueeze(0))
 
     return loss + objective / valued.sum().clamp_min(1)
+
+
+hashable.register(Component.profile, profile)

@@ -183,6 +183,18 @@ export const apiCatalog: ApiSection[] = [
       {
         "name": "rf.check",
         "guide": "/advanced/command-line/"
+      },
+      {
+        "name": "rf.Drift",
+        "guide": "/advanced/input-distributions/"
+      },
+      {
+        "name": "rf.Distribution",
+        "guide": "/advanced/input-distributions/"
+      },
+      {
+        "name": "rf.Distributions",
+        "guide": "/advanced/input-distributions/"
       }
     ]
   },

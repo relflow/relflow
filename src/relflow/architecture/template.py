@@ -33,6 +33,7 @@ class Options(TypedDict, total=False):
     n_heads: int
     ffnx: int
     batch_size: int
+    drift: bool
     query: str | None
     description: str | None
     embed: bool
