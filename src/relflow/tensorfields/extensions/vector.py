@@ -27,6 +27,7 @@ from relflow.tensorfields.base import (
     TensorInput,
 )
 from relflow.tensorfields.output import array, fixed, struct
+from relflow.tensorfields.shared.distributions import vector as profile
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
@@ -303,3 +304,6 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     content[non_valued] = 0.0
     values = fixed(array(content, pa.float32()), request.n_dim, datatype=datatype.field(TensorKey.content.name).type)
     return struct({TensorKey.content.name: values}, datatype)
+
+
+vector.register(Component.profile, profile)

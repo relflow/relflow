@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypeAlias, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeAlias, cast
 
 import numpy as np
 import pyarrow as pa
@@ -12,6 +12,9 @@ import torch
 from tensordict import TensorClass, TensorDict
 
 from relflow.structs.tree import Address
+
+if TYPE_CHECKING:
+    from relflow.distributions import Distribution
 
 Retain: TypeAlias = tuple[str, ...] | Literal["*"]
 
@@ -120,6 +123,7 @@ class Encoded:
     retain: Retain = ()
     observations: Mapping[Address, TensorDict] = field(default_factory=dict)
     bindings: Mapping[Address, object] = field(default_factory=dict)
+    profiles: Mapping[Address, Mapping[str, Distribution]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not isinstance(self.tensors, TensorDict):
@@ -143,6 +147,21 @@ class Encoded:
         if any(not isinstance(address, str) or not address for address in self.bindings):
             raise TypeError("Encoded binding addresses must be non-empty strings")
         object.__setattr__(self, "bindings", {Address(address): value for address, value in self.bindings.items()})
+        from relflow.distributions import Distribution
+
+        if not isinstance(self.profiles, Mapping):
+            raise TypeError("Encoded profiles must be a mapping of field addresses to distribution features")
+        profiles: dict[Address, dict[str, Distribution]] = {}
+        for address, features in self.profiles.items():
+            if not isinstance(address, str) or not address or not isinstance(features, Mapping):
+                raise TypeError("Encoded profiles require non-empty field addresses and feature mappings")
+            if any(
+                not isinstance(name, str) or not name or not isinstance(value, Distribution)
+                for name, value in features.items()
+            ):
+                raise TypeError(f"Encoded profiles at '{address}' require named Distribution features")
+            profiles[Address(address)] = dict(features)
+        object.__setattr__(self, "profiles", profiles)
         retention(self.retain, context="Encoded retain")
 
     def pin_memory(self) -> Encoded:
@@ -154,6 +173,7 @@ class Encoded:
             retain=self.retain,
             observations={address: value.pin_memory() for address, value in self.observations.items()},
             bindings=self.bindings,
+            profiles=self.profiles,
         )
 
 

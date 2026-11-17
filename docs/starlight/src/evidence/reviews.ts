@@ -15,7 +15,8 @@ export type Metric =
   | 'Adjusted Rand index'
   | 'Macro F1'
   | 'False positive rate'
-  | 'Probability RMSE';
+  | 'Probability RMSE'
+  | 'Checks met';
 export type ComparisonKind =
   | 'Controlled comparison'
   | 'Baseline reference'
@@ -2478,5 +2479,107 @@ export const reviews: Record<string, Review> = {
       ],
     },
     note: 'The true-group reference receives information hidden from the other models. Sparse and rare-identity gains are diagnostics; checks met does not imply Group always beats Category.',
+  },
+  P101: {
+    question: 'Which numeric shifts trigger distribution warnings?',
+    modeling:
+      'Train on Gaussian values and observe independent held-out populations with shifted location, scale, or shape. Compare those interventions with same-population controls and a correlation change that preserves the marginal distributions.',
+    comparison: {
+      kind: 'Recorded measurement',
+      metric: 'Proportion',
+      conditions: [
+        {
+          label: 'Declared shifts detected',
+          path: ['detection_rate'],
+          format: 'number',
+        },
+      ],
+    },
+    note: 'Three fixed seeds exercise a short real optimizer loop. These are rank-local marginal monitoring checks; they do not establish predictive accuracy, calibrated false-positive rates, or joint-distribution detection. Quiet controls and every predeclared check remain in the complete record.',
+  },
+  P102: {
+    question: 'Which typed input shifts trigger distribution warnings?',
+    modeling:
+      'Train on categories, Boolean values, sets, vectors, calendar parts, and nested numeric inputs. Change one declared feature at a time in matched held-out records and retain independent same-population controls.',
+    comparison: {
+      kind: 'Recorded measurement',
+      metric: 'Proportion',
+      conditions: [
+        {
+          label: 'Declared shifts detected',
+          path: ['detection_rate'],
+          format: 'number',
+        },
+      ],
+    },
+    note: 'Three fixed seeds exercise a short real optimizer loop. These are rank-local marginal monitoring checks; they do not establish predictive accuracy, calibrated false-positive rates, or joint-distribution detection. Quiet controls and every predeclared check remain in the complete record.',
+  },
+  P103: {
+    question: 'Do drift policies and checkpoints preserve monitoring state?',
+    modeling:
+      'Apply the same numeric shift to monitored, tolerant, and disabled inputs after training. Check minimum counts, warning suppression, clearing, and checkpoint restoration with three fixed seeds.',
+    comparison: {
+      kind: 'Recorded measurement',
+      metric: 'Checks met',
+      conditions: [
+        {
+          label: 'Monitoring contracts met',
+          path: ['contracts_met'],
+          format: 'number',
+        },
+      ],
+    },
+    note: 'Three fixed seeds exercise a short real optimizer loop. These are rank-local marginal monitoring checks; they do not establish predictive accuracy, calibrated false-positive rates, or joint-distribution detection. Quiet controls and every predeclared check remain in the complete record.',
+  },
+  P104: {
+    question: 'Does Enum detect changes among declared labels?',
+    modeling:
+      'Train with four declared labels and independent Boolean targets. Measure frequency and null-rate shifts across validation, test, and prediction, with same-population and folded-spelling controls. Check that undeclared labels remain rejected.',
+    comparison: {
+      kind: 'Recorded measurement',
+      metric: 'Proportion',
+      conditions: [
+        {
+          label: 'Declared shifts detected',
+          path: ['detection_rate'],
+          format: 'number',
+        },
+      ],
+    },
+    note: 'Three fixed seeds exercise a short real optimizer loop. These are rank-local marginal monitoring checks; they do not establish predictive accuracy, calibrated false-positive rates, or joint-distribution detection. Quiet controls and every predeclared check remain in the complete record.',
+  },
+  P105: {
+    question: 'Does Hash detect identity population changes?',
+    modeling:
+      'Train on recurring identifiers and independent Boolean targets. Change identity frequencies, introduce new identities, or change null rates across validation, test, and prediction. Retain matched controls and check that profiling remains independent of training salts.',
+    comparison: {
+      kind: 'Recorded measurement',
+      metric: 'Proportion',
+      conditions: [
+        {
+          label: 'Declared shifts detected',
+          path: ['detection_rate'],
+          format: 'number',
+        },
+      ],
+    },
+    note: 'Three fixed seeds exercise a short real optimizer loop. These are rank-local marginal monitoring checks; they do not establish predictive accuracy, calibrated false-positive rates, or joint-distribution detection. Quiet controls and every predeclared check remain in the complete record.',
+  },
+  P113: {
+    question: 'Does Group detect input drift while preserving assignments?',
+    modeling:
+      'Train Group inputs with an independent Boolean target, then change identity frequencies, introduce identities, or change null rates across validation, test, and prediction. Compare with matched controls and check that evaluation preserves learned vocabulary and assignments.',
+    comparison: {
+      kind: 'Recorded measurement',
+      metric: 'Proportion',
+      conditions: [
+        {
+          label: 'Declared shifts detected',
+          path: ['detection_rate'],
+          format: 'number',
+        },
+      ],
+    },
+    note: 'Three fixed seeds exercise a short real optimizer loop. These are rank-local marginal monitoring checks; they do not establish predictive accuracy, calibrated false-positive rates, or joint-distribution detection. Quiet controls and every predeclared check remain in the complete record.',
   },
 };

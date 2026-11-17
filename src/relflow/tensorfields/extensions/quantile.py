@@ -35,6 +35,7 @@ from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.digest import Digest
+from relflow.tensorfields.shared.distributions import numeric as profile
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
@@ -460,3 +461,6 @@ __all__ = [
     "output",
     "write",
 ]
+
+
+quantile.register(Component.profile, profile)

@@ -34,6 +34,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.distributions import boolean as profile
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -370,3 +371,6 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     probabilities = array(cast(torch.Tensor, prediction.payload[TensorKey.content]).sigmoid(), pa.float32())
     content = struct({TensorKey.probability.name: probabilities}, content_type)
     return struct({TensorKey.content.name: content}, datatype)
+
+
+boolean.register(Component.profile, profile)

@@ -14,6 +14,8 @@ export interface Comparison {
 }
 
 const definitions: Record<Metric, string> = {
+  'Checks met':
+    'Number of predeclared monitoring checks met. The complete record retains the total and each individual verdict.',
   RMSE: 'Root mean squared prediction error, in the target’s original units. Zero is an exact prediction.',
   MAE: 'Mean absolute prediction error, in the target’s original units. Zero is an exact prediction.',
   MSE: 'Mean squared prediction error, in squared target units. Zero is an exact prediction.',

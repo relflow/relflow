@@ -167,7 +167,7 @@ test('primary type tags are the same source used by the leaf reference tables', 
   assert.deepEqual(typesFor(entry('P100')), ['Number', 'Ordinal', 'Category']);
   assert.deepEqual(
     experimentsForType(evidenceEntries, 'Group').map((item) => item.id),
-    ['P108', 'P109', 'P110', 'P111', 'P112'],
+    ['P108', 'P109', 'P110', 'P111', 'P112', 'P113'],
   );
   assert.ok(
     !typesFor({ tags: null }).includes('Group'),

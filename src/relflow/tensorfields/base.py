@@ -49,6 +49,7 @@ from relflow.structs.tree import Address, Leaf
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.ragged import RaggedField
+    from relflow.distributions import Distribution
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
     from relflow.tensorfields.shared.resize import Resize
@@ -63,6 +64,12 @@ ArrowMatcher: TypeAlias = Callable[[pa.DataType], bool]
 ContentT = DefaultTypeVar(
     "ContentT", bound=torch.Tensor | TensorDict, default=torch.Tensor | TensorDict, covariant=True
 )
+
+
+class Profile(Protocol):
+    """Describe pristine inputs without accessing or changing learned resources."""
+
+    def __call__(self, field: RaggedField, *, request: RequestBase) -> Mapping[str, Distribution]: ...
 
 
 class Observe(Protocol):

@@ -107,32 +107,31 @@ class Digest:
 
         if len(means) > 2:
             cumulative = np.r_[np.int64(0), np.cumsum(weights, dtype=np.int64)]
-            merged_means = [float(means[0])]
-            merged_weights = [int(weights[0])]
-            merged_points = [bool(points[0])]
+            starts = [0]
             start = 1
             while start < len(means) - 1:
+                starts.append(start)
                 rank = float(cumulative[start]) / total
                 angle = math.asin(min(1.0, max(-1.0, 2 * rank - 1))) + 2 * math.pi / self.compression
                 limit = total if angle >= math.pi / 2 else total * (math.sin(angle) + 1) / 2
-                stop = int(np.searchsorted(cumulative, limit, side="right")) - 1
-                stop = min(len(means) - 1, max(start + 1, stop))
-                mass = int(cumulative[stop] - cumulative[start])
-                segment = means[start:stop]
-                # Per-centroid native reduction avoids cancellation from subtracting
-                # prefix moments and overflow from summing large raw magnitudes.
-                scale = max(abs(float(segment[0])), abs(float(segment[-1])))
-                mean = 0.0 if scale == 0 else float(np.dot(segment / scale, weights[start:stop] / mass)) * scale
-                merged_means.append(float(np.clip(mean, segment[0], segment[-1])))
-                merged_weights.append(mass)
-                merged_points.append(stop == start + 1 and bool(points[start]))
-                start = stop
-            merged_means.append(float(means[-1]))
-            merged_weights.append(int(weights[-1]))
-            merged_points.append(bool(points[-1]))
-            means = np.asarray(merged_means, dtype=np.float64)
-            weights = np.asarray(merged_weights, dtype=np.int64)
-            points = np.asarray(merged_points, dtype=bool)
+                stop = int(cumulative.searchsorted(limit, side="right")) - 1
+                start = min(len(means) - 1, max(start + 1, stop))
+            starts.append(len(means) - 1)
+            boundaries = np.asarray(starts, dtype=np.int64)
+            stops = np.r_[boundaries[1:], len(means)]
+            lengths = stops - boundaries
+            masses = cumulative[stops] - cumulative[boundaries]
+            scales = np.maximum(np.abs(means[boundaries]), np.abs(means[stops - 1]))
+            scale = np.repeat(scales, lengths)
+            # Local scaling preserves large offsets and opposite-sign extrema;
+            # grouped reductions avoid a Python/NumPy round trip per centroid.
+            normalized = np.divide(means, scale, out=np.zeros_like(means), where=scale != 0)
+            moments = np.add.reduceat(normalized * (weights / np.repeat(masses, lengths)), boundaries)
+            with np.errstate(over="ignore"):
+                merged = moments * scales
+            means = np.clip(merged, means[boundaries], means[stops - 1])
+            points = (lengths == 1) & points[boundaries]
+            weights = masses
 
         self.centroids = pa.Table.from_arrays([pa.array(means), pa.array(weights), pa.array(points)], schema=SCHEMA)
         self.count = total

@@ -43,6 +43,7 @@ from relflow.data.processors import (
 )
 from relflow.data.ragged import RaggedField
 from relflow.data.sources import source
+from relflow.distributions import Distribution, Distributions, Drift
 from relflow.helpers.optimizers import adamw
 from relflow.inference.callback import Writer
 from relflow.inspection import check, inspect
@@ -160,6 +161,9 @@ __all__ = [
     "Context",
     "CustomDataModule",
     "DuckDBDataModule",
+    "Distribution",
+    "Distributions",
+    "Drift",
     "DateParts",
     "Enum",
     "EarlyStopping",
