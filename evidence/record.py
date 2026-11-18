@@ -136,12 +136,6 @@ def readme_content(entries: dict, source: str) -> str:
     return source[: source.index(start) + len(start)] + "\n\n" + table + "\n\n" + source[source.index(end) :]
 
 
-def readme(root: Path, target: Path) -> None:
-    """Render an explicitly requested comparison table from the selected results."""
-    content = readme_content(registry(root), target.read_bytes().decode("utf-8"))
-    target.write_bytes(content.encode("utf-8"))
-
-
 def select(
     reports: Path,
     *,

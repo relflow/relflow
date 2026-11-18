@@ -1,27 +1,28 @@
 """Privileged publication accepts only complete, current, source-bound CI data."""
 
 import hashlib
+import io
 import json
 import os
 import shutil
+import stat
 import subprocess
+import zipfile
 from pathlib import Path
 
+import evidence_ci
 import publication
 import pytest
-import reuse
 import yaml
 from evidence_ci import collect, finish, plan, write_json
-from experiments.source import frontmatter, metadata
 from publication import (
     EXECUTOR,
+    HELPER,
     archive,
     check_run,
-    compatible,
     integrity,
     publish,
     retain,
-    selection_changes,
 )
 from releases import filenames
 
@@ -60,7 +61,7 @@ def repository(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(SCRIPT.format(identifier=identifier))
     (root / "README.md").write_text(README)
-    (root / "pyproject.toml").write_text('[project]\nname="example"\nversion="0.4.2"\n')
+    (root / "pyproject.toml").write_text('[project]\nname="example"\nversion="0.5.1"\n')
     return root, commit(root, "base")
 
 
@@ -79,8 +80,8 @@ def run(main):
         "html_url": "https://github.com/relflow/relflow/actions/runs/123",
         "referenced_workflows": [
             {
-                "path": "relflow/relflow/.github/workflows/evidence-lab.yml@" + "b" * 40,
-                "sha": "b" * 40,
+                "path": "relflow/relflow/.github/workflows/evidence-hosted.yml@" + HELPER,
+                "sha": HELPER,
             }
         ],
     }
@@ -111,68 +112,6 @@ def test_run_boundary_accepts_only_successful_exact_main(event):
     check_run(run("main") | {"event": event}, "main", 123)
 
 
-def test_selection_classifier_preserves_program_other_headers_and_readme_boundaries(repository):
-    root, _ = repository
-    path = root / "evidence/experiments/P021.py"
-    original = path.read_text()
-    updated = frontmatter(
-        original,
-        metadata(original) | {"evidence-result": {"metrics": {"score": 1}}, "evidence-report": {"run_id": "new"}},
-    )
-    path.write_text(updated)
-    (root / "README.md").write_text(README.replace("Old table", "New table"))
-    commit(root, "selected result")
-    assert selection_changes(
-        {"evidence/experiments/P021.py": original, "README.md": README},
-        {"evidence/experiments/P021.py": updated, "README.md": README.replace("Old table", "New table")},
-    )
-    for invalid in [
-        updated.replace("seed=7", "seed=8"),
-        updated.replace("An experiment", "Other question"),
-        updated + "# unrelated prose\n",
-    ]:
-        assert not selection_changes(
-            {"evidence/experiments/P021.py": original}, {"evidence/experiments/P021.py": invalid}
-        )
-    assert not selection_changes(
-        {"README.md": README}, {"README.md": README.replace("Introduction", "Different introduction")}
-    )
-    assert not selection_changes({"src/relflow/model.py": "x=1"}, {"src/relflow/model.py": "x=2"})
-    assert not selection_changes({"README.md": README}, {})
-
-
-def test_first_parent_merge_classification_and_bootstrap_runtime_guard(repository):
-    root, base = repository
-    subprocess.run(["git", "checkout", "-b", "publication"], cwd=root, check=True, capture_output=True)
-    path = root / "evidence/experiments/P021.py"
-    path.write_text(frontmatter(path.read_text(), metadata(path.read_text()) | {"evidence-result": {"mode": "full"}}))
-    commit(root, "publication")
-    subprocess.run(["git", "checkout", "main"], cwd=root, check=True, capture_output=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=Test",
-            "-c",
-            "user.email=test@example.com",
-            "merge",
-            "--no-ff",
-            "publication",
-            "-m",
-            "merge selection",
-        ],
-        cwd=root,
-        check=True,
-        capture_output=True,
-    )
-    head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
-    compatible(root, base, head)
-    (root / "pyproject.toml").write_text("changed runtime dependencies")
-    changed = commit(root, "runtime changed")
-    with pytest.raises(ValueError, match="runtime input"):
-        compatible(root, base, changed)
-
-
 def test_archive_bytes_ignore_download_times_and_reject_links(tmp_path):
     source = tmp_path / "reports"
     source.mkdir()
@@ -188,8 +127,86 @@ def test_archive_bytes_ignore_download_times_and_reject_links(tmp_path):
         archive(source, second)
 
 
+@pytest.mark.parametrize("fault", [None, "digest", "missing-digest", "expired", "duplicate"])
+def test_publication_authenticates_exact_attempt_artifacts_across_pages(tmp_path, monkeypatch, fault):
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as bundle:
+        bundle.writestr("report/summary.json", '{"passed":true}')
+    content = payload.getvalue()
+    row = {
+        "id": 17,
+        "name": "relflow-evidence-attempt-2",
+        "expired": fault == "expired",
+        "size_in_bytes": len(content),
+        "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+    }
+    if fault == "digest":
+        row["digest"] = "sha256:" + "0" * 64
+    elif fault == "missing-digest":
+        row.pop("digest")
+
+    def api(path):
+        if path.endswith("&page=2"):
+            return {"artifacts": [row, row] if fault == "duplicate" else [row]}
+        assert "/runs/123/artifacts?per_page=100" in path
+        return {"total_count": 101, "artifacts": [{**row, "name": "relflow-evidence-attempt-1"}]}
+
+    def download(command):
+        assert command == ["gh", "api", "repos/relflow/relflow/actions/artifacts/17/zip"]
+        return content
+
+    monkeypatch.setattr(publication, "api", api)
+    monkeypatch.setattr(publication.subprocess, "check_output", download)
+    target = tmp_path / "download"
+    if fault:
+        with pytest.raises(ValueError, match="digest|unexpired"):
+            publication.artifact(run("main"), "relflow-evidence", target)
+        assert not target.exists()
+    else:
+        receipt = publication.artifact(run("main"), "relflow-evidence", target)
+        assert receipt == {key: row[key] for key in ("id", "name", "digest")}
+        assert (target / "report/summary.json").read_text() == '{"passed":true}'
+
+
+@pytest.mark.parametrize("fault", ["../escape", "/absolute", "same\\windows", "duplicate", "link", "size"])
+def test_publication_rejects_unsafe_artifact_contents(tmp_path, monkeypatch, fault):
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as bundle:
+        entry = zipfile.ZipInfo("report.json" if fault in {"duplicate", "link", "size"} else fault)
+        if fault == "link":
+            entry.external_attr = (stat.S_IFLNK | 0o777) << 16
+        bundle.writestr(entry, "outside")
+        if fault == "duplicate":
+            with pytest.warns(UserWarning, match="Duplicate name"):
+                bundle.writestr("report.json", "second")
+    if fault == "size":
+        monkeypatch.setattr(publication, "LIMIT", 1)
+    with pytest.raises(ValueError, match="paths|special files|size bound"):
+        publication.unpack(payload.getvalue(), tmp_path / "download")
+    assert not (tmp_path / "escape").exists()
+
+
+@pytest.mark.parametrize("fault", [None, "missing", "duplicate", "mutable", "mismatched"])
+def test_publication_requires_one_immutable_hosted_helper_reference(fault):
+    execution = run("main")
+    reference = execution["referenced_workflows"][0]
+    if fault == "missing":
+        execution["referenced_workflows"] = []
+    elif fault == "duplicate":
+        execution["referenced_workflows"].append(reference.copy())
+    elif fault == "mutable":
+        reference["path"] = reference["path"].rsplit("@", 1)[0] + "@main"
+    elif fault == "mismatched":
+        reference["sha"] = "0" * 40
+    if fault:
+        with pytest.raises(ValueError, match="immutable trusted Evidence helper"):
+            publication.helper_sha(execution)
+    else:
+        assert publication.helper_sha(execution) == HELPER
+
+
 @pytest.fixture
-def artifacts(repository, tmp_path):
+def artifacts(repository, tmp_path, monkeypatch):
     root, main = repository
     inputs, reports = tmp_path / "inputs", tmp_path / "reports"
     identities = {}
@@ -218,6 +235,10 @@ def artifacts(repository, tmp_path):
         executor_sha=EXECUTOR,
         root=root / "evidence",
     )
+    manifest["backend"] = "github-hosted-docker"
+    manifest["comparison"] = {"event_base": main, "baseline": main}
+    monkeypatch.setattr(evidence_ci, "verify_execution", lambda *args, **kwargs: [])
+    monkeypatch.setattr(publication, "comparison", lambda *args, **kwargs: manifest["comparison"])
     manifest["requirements_sha256"] = hashlib.sha256((inputs / "requirements.txt").read_bytes()).hexdigest()
     write_json(reports / "manifest.json", manifest)
     for task in manifest["tasks"]:
@@ -245,6 +266,55 @@ def artifacts(repository, tmp_path):
         collect(reports, {"task": task, "error": None, "result": result, "log": "one bounded execution log"})
     finish(reports, root=root / "evidence")
     return reports, inputs
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [None, "shard-only", "failed", "running", "duplicate", "helper", "executor", "attempt", "request", "comparison"],
+)
+def test_publication_requires_current_inputs_and_successful_full_collector(repository, artifacts, monkeypatch, fault):
+    root, main = repository
+    reports, inputs = artifacts
+    manifest = json.loads((reports / "manifest.json").read_text())
+    request = json.loads((inputs / "request.json").read_text())
+    execution = run(main)
+    collector = {
+        "name": "Evidence / Run full paired suite on GitHub / Collect full paired suite",
+        "status": "in_progress" if fault == "running" else "completed",
+        "conclusion": "failure" if fault == "failed" else "success",
+    }
+    if fault == "helper":
+        reference = execution["referenced_workflows"][0]
+        reference["sha"] = "0" * 40
+        reference["path"] = reference["path"].rsplit("@", 1)[0] + "@" + reference["sha"]
+    elif fault == "executor":
+        manifest["executor_sha"] = "0" * 40
+    elif fault == "attempt":
+        manifest["run_id"] = "gh-123-1"
+    elif fault == "request":
+        request["run_attempt"] = 1
+    elif fault == "comparison":
+        monkeypatch.setattr(publication, "comparison", lambda *args, **kwargs: {"baseline": "different"})
+
+    def api(path):
+        assert "/runs/123/attempts/2/jobs?per_page=100" in path
+        if path.endswith("&page=2"):
+            return {
+                "jobs": [] if fault == "shard-only" else [collector, collector] if fault == "duplicate" else [collector]
+            }
+        return {
+            "total_count": 101,
+            "jobs": [{"name": "Evidence / Run proof shard", "status": "completed", "conclusion": "success"}],
+        }
+
+    monkeypatch.setattr(publication, "api", api)
+    if fault:
+        with pytest.raises(
+            ValueError, match="helper and executor|input request|baseline policy|successful Evidence collector"
+        ):
+            publication.trusted(execution, manifest, request, root)
+    else:
+        publication.trusted(execution, manifest, request, root)
 
 
 @pytest.mark.parametrize("fault", ["corrupt", "extra", "missing-log", "incomplete-inventory"])
@@ -275,8 +345,7 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
 ):
     root, main = repository
     reports, inputs = artifacts
-    (root / "guide.md").write_text("Trusted new static publisher tooling/prose.\n")
-    checkout = commit(root, "bootstrap")
+    checkout = main
     calls, retained = [], []
 
     def api(path, **kwargs):
@@ -288,7 +357,7 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
                 "jobs": [
                     {
                         "id": 91,
-                        "name": "Evidence / Run full paired suite on lab / Run full paired suite on lab",
+                        "name": "Evidence / Run full paired suite on GitHub / Collect full paired suite",
                         "status": "completed",
                         "conclusion": "success",
                     }
@@ -300,7 +369,6 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
             return dict(run(main), run_attempt=3 if retry else 2)
         return {"id": 42}
 
-    monkeypatch.setattr(reuse, "api", api)
     real_run = subprocess.run
 
     def execute(command, *args, **kwargs):
@@ -317,13 +385,13 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
     monkeypatch.setattr(publication, "api", api)
     monkeypatch.setattr(
         publication,
-        "verified_artifact",
-        lambda run_id, name, target: shutil.copytree(reports if name == "relflow-evidence" else inputs, target),
+        "artifact",
+        lambda run, name, target: shutil.copytree(reports if name == "relflow-evidence" else inputs, target),
     )
     monkeypatch.setattr(publication.subprocess, "run", execute)
     monkeypatch.setattr(publication, "retain", lambda *args: retained.append(args))
     output = tmp_path / "publication"
-    if failure:
+    if failure or retry:
         with pytest.raises((ValueError, subprocess.CalledProcessError)):
             publish(root, output, 123)
         assert not retained
@@ -331,20 +399,20 @@ def test_release_publication_creates_validated_assets_without_changing_sources(
         publish(root, output, 123)
         assert retained[0][1] == main
         assert (output / "docs-base.txt").read_text().strip() == checkout
-        selected = json.loads((output / filenames("0.4.2")["publication"]).read_text())
-        assert selected["version"] == "0.4.2"
+        selected = json.loads((output / filenames("0.5.1")["publication"]).read_text())
+        assert selected["version"] == "0.5.1"
         assert selected["report"]["github_run"]["run_attempt"] == 2
         assert selected["revision"] == main
-        assert selected["report"]["release"].endswith("/evidence-v0.4.2")
+        assert selected["report"]["release"].endswith("/evidence-v0.5.1")
         assert all(result["provenance"]["relflow_revision"] == main for result in selected["results"].values())
         assert not subprocess.check_output(["git", "diff", "--name-only"], cwd=root).strip()
-        assert filenames("0.4.2")["publication"] in retained[0][3]
-        assert filenames("0.4.2")["measurements"] in retained[0][3]
+        assert filenames("0.5.1")["publication"] in retained[0][3]
+        assert filenames("0.5.1")["measurements"] in retained[0][3]
         assert not (output / "evidence-update.patch").exists()
 
 
 @pytest.mark.parametrize("corrupt", [False, True])
-def test_existing_immutable_release_is_reused_or_rejected_without_overwrite(tmp_path, monkeypatch, corrupt):
+def test_existing_immutable_release_is_verified_without_overwrite(tmp_path, monkeypatch, corrupt):
     (tmp_path / "one.json").write_text("correct")
     writes = []
 
@@ -453,8 +521,8 @@ def test_report_cannot_relabel_other_attempts_revisions_or_failed_gates(fault):
 
 def test_published_version_never_reselects_results_or_creates_a_pull_request(repository, tmp_path, monkeypatch):
     root, _ = repository
-    monkeypatch.setattr(publication, "api", lambda *args, **kwargs: {"tag_name": "v0.4.2", "draft": False})
-    monkeypatch.setattr(publication, "verified_artifact", lambda *args: pytest.fail("A released version is frozen"))
+    monkeypatch.setattr(publication, "api", lambda *args, **kwargs: {"tag_name": "v0.5.1", "draft": False})
+    monkeypatch.setattr(publication, "artifact", lambda *args: pytest.fail("A released version is frozen"))
     monkeypatch.setattr(
         publication.subprocess, "run", lambda *args, **kwargs: pytest.fail("No external write is needed")
     )

@@ -47,9 +47,9 @@ Each experiment declares an isolated uv environment using standard PEP 723
 `# /// script` metadata, with `requires-python` and its direct dependencies.
 Include the reporter's `pyyaml` and `torch` requirements and the relevant relflow
 extra for optional features. Keep question metadata in the first Markdown/YAML cell and put the TOML block
-in the first code cell. Use plain Markdown sections and standard `typst` fences;
-put figure caption/alt text in `evidence-diagram`. Current sources must not
-contain Quarto execution options, shortcodes, or disclosure markup. Keep shared imports
+in the first code cell. Use plain Markdown sections and illustrative records.
+Do not add unused diagram sources or presentation metadata. Current sources must
+not contain Quarto execution options, shortcodes, or disclosure markup. Keep shared imports
 relative to the script directory, so direct `uv run <script>` works outside the checkout.
 Use `uv run evidence/experiments/run.py --wheel /path/to/relflow-<version>-py3-none-any.whl P001`
 to exercise an exact SDK wheel. The runner resolves all dependencies together,
@@ -99,7 +99,7 @@ Starlight reads the declarations, authored comment cells, and selected publicati
 through `docs/starlight/src/evidence/data.ts`. Keep visible behavioral criteria,
 structured nested metrics, the full raw record, reproduction details, provenance,
 and exact source downloads. Source commentary must remain distinct from measured
-checks. The site never generates a second Python page or executes diagram source.
+checks. The site never generates a second Python page.
 Preserve retained diagnostic plots alongside their readouts and tables. Retain actual
 paired predictions, scores, masks, coordinates, and other needed observations
 during the proof; do not limit figures to the latest released scalar metrics.
@@ -146,11 +146,9 @@ measurements until the first >=0.5.0 release. New release downloads use
 Keep generated publications and executed source bundles outside Git. Local builds without a selected
 publication show pending measurements. Hosted builds verify the public release
 asset's digest and source revision, without model dependencies or credentials.
-Equivalent requests may reuse that execution only through the trusted verifier
-and a separate receipt binding the current source, wheel payloads, comparison,
-and actual execution runtime. Hosted shards execute both roles freshly;
-dependency caches do not authorize measurement reuse. Historical baseline
-references retain their original immutable records and execution provenance.
+Hosted shards execute both roles freshly. Publication authenticates the exact
+successful CI attempt, current helper and executor, input request, and collector.
+Dependency caches never substitute learning results.
 The required gate verifies every logical slot and its actual shard host, image,
 and resource policy. A missing or failed shard cannot become a successful gate.
 A publication update must not relabel an older result as a fresh run.

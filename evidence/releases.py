@@ -17,7 +17,6 @@ LEGACY = {
     "plots": "proof-visualizations.zip",
     "measurements": "measurements.md",
     "checksums": "SHA256SUMS",
-    "reuse": "evidence-reuse.json",
 }
 
 
@@ -99,7 +98,6 @@ def filenames(version: str) -> dict[str, str]:
         "plots": f"{prefix}-plots.zip",
         "measurements": f"{prefix}-measurements.md",
         "checksums": f"{prefix}-checksums.txt",
-        "reuse": f"{prefix}-reuse.json",
     }
 
 

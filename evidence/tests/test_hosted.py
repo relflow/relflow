@@ -535,7 +535,7 @@ def test_full_collection_preserves_twelve_actual_hosts_and_all_original_measurem
     output = tmp_path / "collected"
     summary = collected(prepared, root, output)
     assert summary["passed"] and summary["complete"]
-    assert summary["fresh_tasks"] == 48 and summary["reused_baseline_tasks"] == 0
+    assert summary["received_tasks"] == 48
     assert len(state["launches"]) == 48
     execution = json.loads((output / "execution.json").read_text())
     assert "host" not in execution["identity"]
@@ -557,7 +557,7 @@ def test_introduced_proofs_collect_all_twelve_shards_with_distinct_roles(shards,
     execute()
     summary = collected(prepared, root, tmp_path / "migration-collected")
     assert summary["passed"] and summary["complete"]
-    assert summary["fresh_tasks"] == 53 and len(state["launches"]) == 53
+    assert summary["received_tasks"] == 53 and len(state["launches"]) == 53
     assert manifest["retired"] == ["P018"]
     assert summary["introduced_unmet_checks"] == []
 
@@ -629,7 +629,7 @@ def test_same_host_baseline_and_candidate_can_overlap_with_two_active_containers
         assert {role for identifier, role in overlapping} == {"baseline", "candidate"}
     summary = collected(prepared, root, tmp_path / "overlapping-roles")
     assert summary["passed"] and summary["complete"]
-    assert summary["fresh_tasks"] == len(manifest["tasks"]) == 24
+    assert summary["received_tasks"] == len(manifest["tasks"]) == 24
 
 
 def test_resealed_launch_times_cannot_exceed_two_active_containers(shards, tmp_path):

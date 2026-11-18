@@ -143,7 +143,7 @@ maximum instead of filling gaps.
 The generated scientific implementation raises `NotImplementedError`. Fill in
 the generator, model, independent training/validation/test splits, explicit
 budgets, matched control, held-out metrics, and Boolean checks. Update the
-example, model tree, and metric readout to match. The file joins discovery
+example and metric readout to match. The file joins discovery
 immediately, so it cannot satisfy the full gate until it is complete; it may
 also fail authoring checks while those sections are unfinished.
 
@@ -264,7 +264,6 @@ New immutable Evidence releases use versioned downloads. For relflow 0.5.0:
 - `relflow-0.5.0-evidence-plots.zip`: matched diagnostic plots, when available.
 - `relflow-0.5.0-evidence-provenance.json` and
   `relflow-0.5.0-evidence-checksums.txt`: execution identity and integrity.
-- `relflow-0.5.0-evidence-reuse.json`: a verified reuse receipt, when applicable.
 
 Previously published names and bytes remain unchanged.
 Publication never edits experiment headers or the source README, commits a
@@ -300,9 +299,9 @@ gh workflow run release.yml --repo relflow/relflow --ref main
 successful main CI run, source revision, and package version. It has no ordinary
 CI-completion trigger or standalone preview mode.
 Keep actual metrics, checks, seeds, environment, tested revisions, and source
-digests bound to the measured execution. A verified reused selection retains
-its original identity and separate current-request receipt. Source edits and
-reader changes do not establish fresh learning results.
+digests bound to the measured execution. Publication authenticates the exact
+successful main CI attempt. Source edits and reader changes do not establish
+fresh learning results.
 
 ## Runtime efficiency
 

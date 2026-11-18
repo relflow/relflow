@@ -64,8 +64,8 @@ The filename must match the declared ID. Tags and frontmatter own categorization
 Discovery remains static, and creation imports no experiments or model packages.
 Existing files, unsafe paths, and duplicate explicit IDs are rejected.
 
-The scaffold supplies the header, example/comparison/result sections, model-tree
-illustration, decorator, and reporting entrypoint. Its scientific body raises
+The scaffold supplies the header, example/comparison/result sections, decorator,
+and reporting entrypoint. Its scientific body raises
 `NotImplementedError`; it must never return fabricated passing measurements or
 checks. Authors own the generator, independent splits, model, budgets, controls,
 evaluation, and numerical criteria. A scaffold is not a recorded experiment.
@@ -103,9 +103,9 @@ run, and `--list` lists the same catalog. Dependency environments remain owned
 by each script. Missing execution or failed checks remain visible failures.
 
 Current scripts use plain Markdown Example, Comparison, Result, and Method
-sections. Use standard `typst` fences for model-tree source and keep its caption
-and alternative text in YAML `evidence-diagram`. The website supplies measured
-results, disclosures, and reproduction commands. Do not embed Quarto options or
+sections with illustrative records. The website supplies measured results,
+disclosures, and reproduction commands. Do not add unused diagram source or
+presentation metadata. Do not embed Quarto options or
 shortcodes in current sources. Retained sources remain immutable and readable.
 
 Each script exposes a decorated `run(seed, steps, accelerator)` and calls
@@ -113,8 +113,6 @@ Each script exposes a decorated `run(seed, steps, accelerator)` and calls
 returns the original function; it never runs the experiment. There is no mutable
 process-wide catalog. Static discovery rejects duplicate IDs, multiple decorated
 entrypoints, nonliteral IDs or seeds, and unsupported function signatures.
-Historical undecorated suites retain their frontmatter and reporter-call reader
-for archived execution and publication validation.
 Execution produces a new immutable JSON record,
 including failures. It never edits sources or a selected publication. A `--steps`
 cap always identifies a smoke run and cannot establish learning capability.
@@ -176,15 +174,6 @@ either side, changed check sets, missing or duplicate records, altered tasks,
 invalid provenance, cancellation, timeout, partial coverage, or a smoke budget
 must prevent a successful gate. Preserve the named numerical checks unchanged.
 
-Historical single-host reports may contain authenticated reuse after proving
-source, actual wheel payloads, comparison, and execution runtime equivalent.
-Their original records and measured revisions remain unchanged, with a separate
-receipt for the request and explicit role mapping. Retained baseline references
-carry the original immutable execution. These historical proofs remain
-verifiable; they do not authorize hosted shards to skip fresh measurements.
-Every logical slot still requires a validated full-budget execution, and
-publication must exactly match the archived candidate results and provenance.
-
 The hosted workflow assigns whole baseline/candidate experiment pairs to twelve
 GitHub-hosted CPU shards. Each shard runs at most two task containers at a time;
 each container retains its two-CPU ceiling, 4 GiB memory limit, 512 PIDs, and
@@ -212,10 +201,8 @@ GitHub-hosted execution workflow.
 
 Hosted measurements execute freshly for both roles. Dependency-image caches
 accelerate setup without substituting for any experiment. Preserve historical
-authenticated reports and their original runtime identities; a historical
-execution must not be relabeled as a hosted measurement. Any future hosted
-result reuse still requires the complete equivalence and authentication proof
-above.
+reports and their original runtime identities; an older execution must not be
+relabeled as a current measurement.
 
 Infrastructure setup and a container launch that produced no worker record may
 be retried within a fixed bound, retaining every launch receipt and log. A
@@ -244,7 +231,7 @@ integrity before rendering a review site from the selected data.
 
 The immutable `evidence-v<version>` Release retains the frozen publication,
 comparison table, complete report and input archives, execution provenance,
-checksums, plots, and the reuse receipt when applicable. New download names
+checksums, and plots. New download names
 share the prefix `relflow-<version>-evidence`; earlier published files retain
 their original names and bytes. The
 publication must exist before the package's `v<version>` tag can be published.
@@ -255,8 +242,8 @@ credential is required.
 Publication JSON uses schema 1 with `version`, `revision`, `report`, and
 `results` keyed by stable P identifiers. Keep metrics, checks, source
 fingerprints, package versions, and execution provenance bound to the selected
-execution. A reused report keeps its original measured revision and separate
-current-request receipt; `revision` identifies the verified release request.
+execution. Publication requires the exact successful main CI attempt and its
+input request; `revision` identifies that tested commit.
 Smoke, incomplete, or regressing reports cannot be selected. A source edit or
 output-reader update does not establish a fresh learning measurement.
 
@@ -265,10 +252,8 @@ output-reader update does not establish a fresh learning measurement.
 Author prose in `# %% [markdown]` comment cells and Python in `# %%` cells.
 Static discovery supplies `evidence-id` from the decorator; an explicitly
 supplied frontmatter ID must agree with it. The Starlight adapter reads these
-cells as static source data. Existing diagram source and presentation annotations
-remain part of the retained script bytes; the website extracts authored captions
-without executing diagram code. No Jupyter or model dependency belongs in the
-documentation build.
+cells as static source data. Retained release scripts remain immutable.
+No Jupyter or model dependency belongs in the documentation build.
 
 Each experiment asks one question and shows an Example, Comparison, and Result,
 with one YAML observation and a schema-faithful description of modeled records.
@@ -330,7 +315,7 @@ pages as a second source. `make check` validates static sources and tooling;
 Torch, or Lightning. `make clean` removes generated output and caches while
 retaining canonical sources and current measurements.
 
-## Execution equivalence
+## Execution identity
 
 The complete source snapshot retains its raw integrity hash. Separate runtime
 fingerprints bind each experiment and shared runtime files under `experiments/`;
@@ -341,7 +326,7 @@ file, including the policy module, without importing it during provenance
 collection. Static catalog discovery reads declarations without importing any
 experiment or shared model configuration.
 The installed wheel payload, dependency export, seed, budget, trusted executor,
-and actual resource/thread policy must also match before baseline reuse.
+and actual resource/thread policy remain bound to each fresh execution.
 
 Scheduling order and cached image layers never reduce budgets or remove seeds.
 Independent seed trials may execute in isolated processes when their original

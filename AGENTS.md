@@ -487,9 +487,8 @@ PRs and merge groups targeting `main` or `stage/**` run the same complete gate. 
 `docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
 for every event, including the shared package build, full matrix, static
 documentation checks, and complete paired evidence validation. Tests, Evidence,
-and release consume the same candidate wheel. Verified reuse must preserve
-original measurements and revisions and separately attest the current inputs;
-missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
+and release consume the same candidate wheel. Evidence executes both roles freshly;
+publication authenticates the exact successful CI attempt and its current inputs. Release, coverage, and evidence publication workflows consume
 successful main CI; do not add a second matrix invocation to publication.
 Version releases retain verified evidence reports and a frozen publication JSON
 asset before publishing the package tag. New public assets use versioned

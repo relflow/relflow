@@ -193,7 +193,6 @@ files = [
     "evidence/record.py",
     "evidence/releases.py",
     "evidence/resolve.py",
-    "evidence/reuse.py",
     "evidence/runtime.py",
     "evidence/templates/experiment.py.txt",
     "evidence/visuals.py",

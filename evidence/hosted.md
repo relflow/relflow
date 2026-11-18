@@ -119,10 +119,9 @@ archive digest and expected image identity. Wheels and source snapshots remain
 exact run inputs. Neither candidate wheels nor learning results enter the
 dependency cache; both measurement roles execute freshly.
 
-Historical authenticated reports remain valid descriptions of their original
-executions. They cannot become hosted measurements by replacing a host field or
-copying an old metric into a new record. Any future result reuse must preserve
-original records and prove the current request's full execution equivalence.
+Historical reports remain descriptions of their original executions. They
+cannot become current measurements by replacing a host field or copying an old
+metric into a new record. Publication requires the exact successful CI attempt.
 
 Only bounded infrastructure setup failures and eligible Docker launch failures
 before a worker record exists may retry. Retain every launch receipt and log.
