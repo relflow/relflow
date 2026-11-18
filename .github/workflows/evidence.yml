@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
-          ref: '5b24ec0390c567c9cab6f2ed58ab570b90225549'
+          ref: 'd465e1d059a51297a09c0c2dbe64a4dda5f338d5'
           path: executor
           persist-credentials: false
       - uses: astral-sh/setup-uv@v10.3.0
@@ -107,4 +107,4 @@ jobs:
     with:
       suite_ref: ${{ inputs.suite_ref }}
       baseline_sha: ${{ needs.wheels.outputs.baseline_sha }}
-    uses: relflow/relflow/.github/workflows/evidence-hosted.yml@5b24ec0390c567c9cab6f2ed58ab570b90225549
+    uses: relflow/relflow/.github/workflows/evidence-hosted.yml@d465e1d059a51297a09c0c2dbe64a4dda5f338d5
