@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn a weighted average?
-# categories:
-# - Weighted aggregation
 # description: Predict an average in which each value contributes according to its own positive weight.
 # evidence-readout:
 # - label: Correct pairs
@@ -16,10 +14,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, value, weight, weighted_mean. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow learn a weighted average?
 #   modeling: 'Generate lists of two to six value–weight pairs. Hide the weighted average: sum(value × weight) divided
@@ -74,16 +68,6 @@
 # The illustrated weighted contributions are 0.4, −0.5, and 0.4, totaling 0.3. The weights total
 # 3.75, so the answer is 0.3 ÷ 3.75 = 0.08. The ordinary unweighted average would be 0.2. A model
 # that ignores which weights accompany which values would miss that distinction.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("weight", type: "Number"),
-#   )),
-#   node("weighted_mean", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

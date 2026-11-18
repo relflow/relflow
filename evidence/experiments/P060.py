@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn a 90% probability without a useful input?
-# categories:
-# - Calibration
 # description: Generate yes answers 90% of the time, independently of the input. The right probability is therefore
 #   90%.
 # evidence-readout:
@@ -21,10 +19,6 @@
 #   - mean_probability
 #   format: percent
 # evidence-group: Calibration
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. The answer is sampled; its population probability is 90%.
-#   alt: Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The answer is sampled;
-#     its population probability is 90%.
 # evidence-review:
 #   question: Can relflow learn a 90% probability without a useful input?
 #   modeling: Generate yes/no answers independently of the input, with yes occurring 90% of the time. Train the model
@@ -90,13 +84,6 @@
 #
 # yes or no is a sampled hidden answer. A single answer does not determine the true probability.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", detail: "Constant"),
-#   node("entity", type: "Category", detail: "Independent identity"),
-#   node("label", kind: "target", type: "Category", detail: "90/10 prevalence"),
-# )))
-# ```
 #
 # The illustrated `yes` is one possible draw, not a deterministic answer implied by `x = 0` or
 # `id-12`. In an illustrative group of many such records, about nine in ten outcomes would be yes.

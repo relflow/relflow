@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can an inferred rule work beyond its examples?
-# categories:
-# - Composition
 # description: A set of numeric examples defines a fresh rule; the model predicts a hidden answer at a requested query.
 # evidence-readout:
 # - label: Four examples, outside range
@@ -18,9 +16,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Composition
-# evidence-diagram:
-#   caption: Visible inputs and the hidden prediction target for this controlled task.
-#   alt: A set of numeric examples defines a fresh rule; the model predicts a hidden answer at a requested query.
 # evidence-review:
 #   question: Can an inferred rule work beyond its examples?
 #   modeling: Give each record examples from a fresh straight-line rule and hide its answer at a query x. Train with
@@ -71,10 +66,6 @@
 #   - {x: 1.0, y: 2.5}
 # query: 1.75
 # answer: 4.0
-# ```
-#
-# ```typst
-# #tree(node("task", kind: "root", children: (node("examples", kind: "branch", children: (node("x", type: "Number"), node("y", type: "Number"))), node("query", type: "Number"), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
 # ## Comparison

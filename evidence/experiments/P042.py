@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does it need both weekday and hour?
-# categories:
-# - Calendar reasoning
 # description: Predict whether a time lies in a weekday business-hours window.
 # evidence-readout:
 # - label: Weekday only
@@ -18,10 +16,6 @@
 #   - composed_accuracy
 #   format: percent
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Does relflow need both weekday and hour?
 #   modeling: 'Generate weekday business-hour observations and two kinds of near miss: weekdays outside the window,
@@ -80,13 +74,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt,),
-#   node("target", kind: "target", type: "Category", detail: "open or closed",),
-# )))
-# ```
 #
 # ## Comparison
 #

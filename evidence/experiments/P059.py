@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does admitting a label teach it to predict that label?
-# categories:
-# - Vocabulary
 # description: Introduce new output labels to a model trained on an earlier pair of classes.
 # evidence-readout:
 # - label: New labels, just admitted
@@ -18,9 +16,6 @@
 #   - final_old_accuracy
 #   format: percent
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input.
 # evidence-review:
 #   question: Does admitting a label teach relflow to predict that label?
 #   modeling: Train a Category output on two numeric regions and their labels. Admit labels for two new regions without
@@ -71,12 +66,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [Four separated numerical regions]),
-#   node("label", kind: "target", type: "Category", body: [Two labels, growing to four]),
-# )))
-# ```
 #
 # The illustrated `x = −0.9` lies near the original negative class center of −1. The original positive
 # class is near +1; the added classes are near −3 and +3. Small independent deviations keep each

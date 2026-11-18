@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can lookup handle absent keys and several matches?
-# categories:
-# - Relational
 # description: A fresh query key selects zero or more source payloads, with hidden existence and mean-payload outputs.
 # evidence-readout:
 # - label: One-match error
@@ -18,9 +16,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Visible inputs and the hidden prediction target for this controlled task.
-#   alt: A fresh query key selects zero or more source payloads, with hidden existence and mean-payload outputs.
 # evidence-review:
 #   question: Can lookup handle absent keys and several matches?
 #   modeling: Create a fresh query ID with zero, one, two, or three matching source records. Hide both whether any
@@ -85,10 +80,6 @@
 # query_key: owl
 # found: true
 # answer: 0.5
-# ```
-#
-# ```typst
-# #tree(node("lookup", kind: "root", children: (node("source", kind: "branch", children: (node("entity_id", type: "Hash"), node("value", type: "Number"))), node("query_key", type: "Hash"), node("found", kind: "target", type: "Boolean"), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
 # ## Comparison

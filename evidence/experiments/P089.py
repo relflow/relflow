@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does confidence stay appropriate when useful readings disappear?
-# categories:
-# - Calibration
 # description: Measure written probabilities against an exact visible-information oracle while missingness rates and
 #   subgroup frequencies change.
 # evidence-readout:
@@ -25,11 +23,6 @@
 #   - probability_rmse
 #   format: number
 # evidence-group: Calibration
-# evidence-diagram:
-#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
-#     condition.
-#   alt: Does confidence stay appropriate when useful readings disappear? Visible inputs lead to one hidden prediction
-#     target.
 # evidence-review:
 #   question: Does confidence stay appropriate when useful readings disappear?
 #   modeling: Generate yes/no outcomes from a known table of group and signal probabilities. Randomly hide signals
@@ -85,10 +78,6 @@
 # A different selection policy hides low readings more often. Its missing-value probability is about
 # 0.224. That is a different statistical problem, and a model is not expected to infer a new observation
 # policy without evidence about it.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (node("group", type: "Enum"), node("signal", type: "Number", detail: "Hidden by selector"), node("target", kind: "target", type: "Boolean"),)))
-# ```
 #
 # ## Comparison
 #

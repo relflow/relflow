@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn classes declared in advance?
-# categories:
-# - Enum
 # description: Declare the allowed input and output classes with Enum, then learn which output belongs to each visible
 #   combination.
 # evidence-readout:
@@ -17,10 +15,6 @@
 #   - shuffled_test_accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, route, channel, label. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can relflow learn classes declared in advance?
 #   modeling: Declare four allowed input and output labels, then generate balanced route–channel combinations that
@@ -73,13 +67,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("route", type: "Enum", body: [Eight declared routes]),
-#   node("channel", type: "Enum", body: [Two declared channels]),
-#   node("label", kind: "target", type: "Enum", body: [Four declared answers]),
-# )))
-# ```
 #
 # The illustrated `bay` route has index 1 and `store` has index 1 in the fixed declarations. The
 # generator computes `(1 + 2 × 1) mod 4 = 3`, selecting `green`. For the same route with channel

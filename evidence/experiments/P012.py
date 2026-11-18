@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it find a requested value in an unsorted list?
-# categories:
-# - Order statistics
 # description: Ask for the smallest, largest, middle, or quarter-position value without sorting the input first.
 # evidence-readout:
 # - label: All requests
@@ -16,10 +14,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, rank, items, value, answer. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow find a requested value in an unsorted list?
 #   modeling: Give the model an unsorted list of nine numbers and a request for the minimum, lower quarter, median,
@@ -84,16 +78,6 @@
 # lower-quarter request selects the third, 0.3, and the upper-quarter request the seventh, 0.7.
 # These are actual observed values. With nine items, this experiment does not need a convention for
 # interpolating between neighboring values.
-#
-# ```typst
-# #tree(node("request", kind: "root", width: 120pt, children: (
-#   node("rank", type: "Category"),
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

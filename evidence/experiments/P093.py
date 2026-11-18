@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can a forecast use irregular elapsed time?
-# categories:
-# - Temporal
 # description: An observation sequence supplies elapsed times and numeric values, and a hidden future value is requested.
 # evidence-readout:
 # - label: Elapsed-time model
@@ -18,9 +16,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: Visible inputs and the hidden prediction target for this controlled task.
-#   alt: An observation sequence supplies elapsed times and numeric values, and a hidden future value is requested.
 # evidence-review:
 #   question: Can a forecast use irregular elapsed time?
 #   modeling: Generate four noisy measurements of a straight line at irregular elapsed times, then hide a future value.
@@ -70,10 +65,6 @@
 #   - {elapsed: 0.0, value: 1.0}
 # forecast_at: 1.0
 # answer: 1.25
-# ```
-#
-# ```typst
-# #tree(node("trajectory", kind: "root", children: (node("observations", kind: "branch", children: (node("elapsed", type: "Number"), node("value", type: "Number"))), node("forecast_at", type: "Number"), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
 # ## Comparison

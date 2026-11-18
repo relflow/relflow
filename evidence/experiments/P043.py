@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can day 60 reveal the month in a leap year?
-# categories:
-# - Calendar reasoning
 # description: Distinguish February 29 from March 1 when both can be day 60 of a year.
 # evidence-readout:
 # - label: Day number only
@@ -14,10 +12,6 @@
 #   - with_week_of_month_accuracy
 #   format: percent
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can day 60 reveal the month in a leap year?
 #   modeling: Choose dates where day 60 is either February 29 or March 1. With only day-of-year visible, the inputs
@@ -71,13 +65,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt,),
-#   node("target", kind: "target", type: "Category", detail: "month",),
-# )))
-# ```
 #
 # ## Comparison
 #

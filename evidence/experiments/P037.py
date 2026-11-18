@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can new IDs connect two lists?
-# categories:
-# - Sibling entity transfer
 # description: Transfer values between separately ordered lists using IDs that were absent from training.
 # evidence-readout:
 # - label: Items retained
@@ -18,10 +16,6 @@
 #   - preserved_broken_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with association, source, entity_id, value, target, entity_id, value. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can new IDs connect two lists?
 #   modeling: Give source IDs and values, and a separately shuffled list of queries. Use Hash IDs absent from training
@@ -72,19 +66,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("association", kind: "root", width: 120pt, children: (
-#   node("source", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("entity_id", type: "Hash"),
-#     node("value", type: "Number"),
-#   )),
-#   node("target", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("entity_id", type: "Hash"),
-#     node("value", kind: "target", type: "Number", width: 150pt,),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

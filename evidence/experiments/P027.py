@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it choose both a group and an operation?
-# categories:
-# - Category-conditioned reduction
 # description: Ask for a group’s minimum, maximum, average, or total from the same list.
 # evidence-readout:
 # - label: Group A, maximum
@@ -18,10 +16,6 @@
 #   - intact/sum/A/nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow answer all twelve group-and-operation requests?
 #   modeling: Give each item a group and value, then request one group’s minimum, maximum, average, or total. Hide
@@ -129,18 +123,6 @@
 # The illustrated B values are −0.1, 0.3, −0.9, and 1.3. Their maximum is 1.3, so that is the answer
 # to the shown request. On the same B values, sum would request 0.6, mean 0.15, and min −0.9.
 # Changing the instruction changes the answer without changing the list.
-#
-# ```typst
-# #tree(node("request", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("group", type: "Category"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt,),
-#   node("operation", type: "Category"),
-#   node("selected_group", type: "Category"),
-# )))
-# ```
 #
 # ## Comparison
 #

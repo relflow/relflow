@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it follow IDs through larger lists and a second lookup?
-# categories:
-# - Sibling entity transfer
 # description: Retrieve a source value by ID with increasing numbers of distractors, then add an intermediate ID link
 #   for a two-step lookup.
 # evidence-readout:
@@ -23,10 +21,6 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. The links collection is used only for the two-step lookup.
-#   alt: Model tree with lookup, source, entity_id, value, links, entity_id, source_id, target, entity_id, value.
-#     Amber cards are hidden prediction targets. The links collection is used only for the two-step lookup.
 # evidence-review:
 #   question: Can relflow follow IDs through larger lists and a second lookup?
 #   modeling: Create an ID-keyed source list and ask for a payload through either a direct match or an intermediate
@@ -89,22 +83,6 @@
 # Target values are hidden. This example shows a direct lookup; the two-step arm adds a separate links
 # collection.
 #
-# ```typst
-# #tree(node("lookup", kind: "root", children: (
-#   node("source", kind: "branch", repeated: true, children: (
-#     node("entity_id", type: "Hash"),
-#     node("value", type: "Number"),
-#   )),
-#   node("links", kind: "branch", repeated: true, detail: "Two-hop arm only", children: (
-#     node("entity_id", type: "Hash"),
-#     node("source_id", type: "Hash"),
-#   )),
-#   node("target", kind: "branch", repeated: true, children: (
-#     node("entity_id", type: "Hash"),
-#     node("value", kind: "target", type: "Number"),
-#   )),
-# )))
-# ```
 #
 # The illustrative direct request for `S1` should return −0.2 and the request for `S0` should return
 # 0.7. These names stand for fresh keys in the generator. In a two-step illustration, a target key

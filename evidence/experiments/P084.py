@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does recent history survive a real collection cap?
-# categories:
-# - Temporal
 # description: An event branch retains four recent amounts from an over-cap history and predicts their total.
 # evidence-readout:
 # - label: Tail model
@@ -18,9 +16,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: Visible inputs and the hidden prediction target for this controlled task.
-#   alt: An event branch retains four recent amounts from an over-cap history and predicts their total.
 # evidence-review:
 #   question: Does recent history survive a real collection cap?
 #   modeling: Generate histories of at least eight independent amounts and hide the total of the last four. Train
@@ -73,10 +68,6 @@
 #   - {amount: 0.5}
 #   - {amount: 0.4}
 # answer: 1.0
-# ```
-#
-# ```typst
-# #tree(node("history", kind: "root", children: (node("events", kind: "branch", detail: "Retain last four", children: (node("amount", type: "Number"),)), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
 # ## Comparison

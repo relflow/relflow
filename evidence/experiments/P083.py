@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can irregular hierarchies preserve which values belong together?
-# categories:
-# - Structure
 # description: Account records contain days, sessions, transactions, and a hidden largest-session total.
 # evidence-readout:
 # - label: Familiar structures
@@ -16,9 +14,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Structure
-# evidence-diagram:
-#   caption: Visible inputs and the hidden prediction target for this controlled task.
-#   alt: Account records contain days, sessions, transactions, and a hidden largest-session total.
 # evidence-review:
 #   question: Can irregular hierarchies preserve which values belong together?
 #   modeling: Generate accounts containing days, sessions, and transaction amounts. Pair accounts with the same amounts
@@ -65,10 +60,6 @@
 #       - transactions: [{amount: 2.0}, {amount: 3.0}]
 #       - transactions: [{amount: 5.0}, {amount: 7.0}]
 # answer: 12.0
-# ```
-#
-# ```typst
-# #tree(node("account", kind: "root", children: (node("days", kind: "branch", children: (node("sessions", kind: "branch", children: (node("transactions", kind: "branch", children: (node("amount", type: "Number"),)),)),)), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
 # ## Comparison

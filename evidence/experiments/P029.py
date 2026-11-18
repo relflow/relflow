@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it compare two unfamiliar IDs directly?
-# categories:
-# - Collection overlap
 # description: Ask whether two individual IDs match, as a simpler comparison beside the two-list overlap test.
 # evidence-readout:
 # - label: Original pairs
@@ -14,10 +12,6 @@
 #   - broken_auc
 #   format: auc
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with pair, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can relflow compare two unfamiliar IDs directly?
 #   modeling: Give two previously unseen IDs and hide whether they match. Use equal numbers of matching and nonmatching
@@ -70,14 +64,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("pair", kind: "root", width: 120pt, children: (
-#   node("left_id", type: "Hash"),
-#   node("right_id", type: "Hash"),
-#   node("equal", kind: "target", type: "Boolean", width: 150pt,),
-# )))
-# ```
 #
 # ## Comparison
 #

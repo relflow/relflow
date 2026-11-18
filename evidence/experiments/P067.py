@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can percentile-based predictions return useful original values?
-# categories:
-# - Quantile
 # description: Represent amounts and costs by their positions in the training distribution, then convert predicted
 #   costs back to their original units.
 # evidence-readout:
@@ -15,10 +13,6 @@
 #   - shuffled_normalized_rmse
 #   format: error
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: Can percentile-based predictions return useful original values?
 #   modeling: Generate skewed amounts and noisy costs following cost = 200 + 3 × amount. Represent both fields with
@@ -65,12 +59,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("order", kind: "root", children: (
-#   node("amount", type: "Quantile", detail: "Skewed numeric input"),
-#   node("cost", kind: "target", type: "Quantile", detail: "Original-unit prediction"),
-# )))
-# ```
 #
 # For the illustrative amount of 100, the generator's average cost is `200 + 3 × 100 = 500`. The
 # displayed 506 includes a possible +6 noise draw. Predicting exactly 506 is not implied by the

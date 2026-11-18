@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can Group recover nonlinear identity regimes?
-# categories:
-# - Group
 # description: Recover five nonlinear response regimes for repeated identities and compare held-out predictions with
 #   controls.
 # evidence-readout:
@@ -21,9 +19,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Visible identity and context predict a hidden numerical response.
-#   alt: A Group identity and Number context predict a hidden Number.
 # evidence-review:
 #   question: Can Group recover nonlinear identity regimes?
 #   modeling: Assign 100 recurring identities to five hidden nonlinear response curves. Give identity and x, hide
@@ -81,10 +76,6 @@
 # ```
 #
 # The answer is illustrative and hidden during prediction.
-#
-# ```typst
-# #tree(node("event", kind: "root", children: (node("entity", type: "Group"), node("x", type: "Number"), node("y", kind: "target", type: "Number"))))
-# ```
 #
 # ## Comparison
 #

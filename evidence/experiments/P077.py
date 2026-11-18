@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Should a number be represented by size or percentile?
-# categories:
-# - Quantile
 # description: Compare Number and Quantile on rank and amount tasks, with clean training and rare corrupt measurements.
 # evidence-readout:
 # - label: Corrupt training, Number
@@ -18,10 +16,6 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Separate models predict rank or amount.
-#   alt: Model tree with measurement, x, target. Amber cards are hidden prediction targets. Separate models predict
-#     rank or amount.
 # evidence-review:
 #   question: Should a number be represented by size or percentile?
 #   modeling: Give the same numeric tasks to Number and Quantile models. In the highlighted condition, corrupt 2%
@@ -99,13 +93,6 @@
 # For a concrete corruption, imagine recording that same x as 100 while keeping
 # its original answer. This creates a misleading input measurement. The test does
 # this to 2% of training inputs; its validation and test observations stay clean.
-#
-# ```typst
-# #tree(node("measurement", kind: "root", children: (
-#   node("x", type: "Number / Quantile", detail: "Matched input choice"),
-#   node("target", kind: "target", type: "Enum / Number", detail: "Separate task models"),
-# )))
-# ```
 #
 # ## Comparison
 #

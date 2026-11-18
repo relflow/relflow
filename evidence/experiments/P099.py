@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does Duration learn the same fixed-unit signal as a prepared Number?
-# categories:
-# - Temporal
 # description: Compare elapsed-time features derived from two timestamps or one configured endpoint with an equivalent
 #   numeric feature.
 # evidence-readout:
@@ -25,11 +23,6 @@
 #   - nrmse
 #   format: number
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
-#     condition.
-#   alt: Does Duration learn the same fixed-unit signal as a prepared Number? Visible inputs lead to one hidden prediction
-#     target.
 # evidence-review:
 #   question: Does Duration learn the same fixed-unit signal as a prepared Number?
 #   modeling: Generate explicit UTC timestamp endpoints and a numeric target determined by their signed fractional-day
@@ -89,10 +82,6 @@
 #
 # Days are fixed 86,400-second intervals here; months and years remain outside
 # this experiment.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (node("elapsed", type: "Duration", detail: "End minus start, days"), node("target", kind: "target", type: "Number"),)))
-# ```
 #
 # ## Comparison
 #

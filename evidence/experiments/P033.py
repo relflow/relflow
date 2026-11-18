@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can one summary support comparisons within groups?
-# categories:
-# - Peer-relative inference
 # description: Compress a list into one summary, then predict each item’s difference from its group average.
 # evidence-readout:
 # - label: Correct groups
@@ -14,10 +12,6 @@
 #   - corrupted_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with collection, items, value, group, deviation. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can one summary support comparisons within groups?
 #   modeling: Give each item a group and value, compress the collection into one learned summary, and hide each item’s
@@ -69,16 +63,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("collection", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("group", type: "Category"),
-#     node("deviation", kind: "target", type: "Number", width: 150pt,),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

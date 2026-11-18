@@ -78,7 +78,6 @@ const reproduce = `${runner} ${entry.id}`;
           <details class="illustrative-record">
             <summary>See an illustrative record</summary>
             <Prose text={entry.sections.example} />
-            {entry.diagram.alt && <p class="scope-note">{entry.diagram.alt}</p>}
           </details>
         </>
       ) : (

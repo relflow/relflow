@@ -55,7 +55,7 @@ def typography(output: Path, entries: dict) -> None:
 
 
 def package(output: Path, destination: Path) -> None:
-    """Archive only the complete checksum-bound static review, excluding PNGs."""
+    """Archive only the complete checksum-bound static review."""
     review = json.loads((output / "review.json").read_text())
     if review["errors"] or set(review["entries"]) != set(review["expected"]):
         raise ValueError("Only a complete diagnostic review can become a preview bundle")

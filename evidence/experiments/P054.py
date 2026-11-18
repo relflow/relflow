@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it predict the next value without seeing the future?
-# categories:
-# - Masking
 # description: Expose the beginning of a simple numeric sequence, hide its remaining events, and predict the next
 #   value.
 # evidence-readout:
@@ -18,10 +16,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Masking
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. future hides events; next chooses the answer.
-#   alt: Model tree with record, events, value. Selector notes identify hidden values. future hides events; next chooses
-#     the answer.
 # evidence-review:
 #   question: Can relflow predict the next value without seeing the future?
 #   modeling: Generate straight-line sequences with a fresh starting value and increment for every record. Show only
@@ -74,14 +68,6 @@
 # ```
 #
 # Events marked future are hidden. next selects the single value to predict.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("events", kind: "branch", repeated: true, body: [Skip when `future`; no reduction], children: (
-#     node("value", type: "Number", body: [Reconstruct when `next`]),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

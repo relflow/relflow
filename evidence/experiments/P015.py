@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it total contributions already calculated?
-# categories:
-# - Weighted aggregation
 # description: Supply each item’s contribution to a total, instead of its separate value and weight.
 # evidence-readout:
 # - label: Total prediction
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, contribution, weighted_sum. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow total contributions already calculated?
 #   modeling: Compute value × weight for each of six items before loading the record. Give only these contributions
@@ -71,15 +65,6 @@
 # In the illustration, 0.4 and −0.4 cancel. The remaining 0.3, 0.1, −0.2, and 0.3 sum to 0.5. A
 # contribution could have come from many different value–weight pairs; those original pairs are not
 # needed once their product is known.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("contribution", type: "Number"),
-#   )),
-#   node("weighted_sum", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

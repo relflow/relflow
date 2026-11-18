@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can familiar instructions work in new combinations?
-# categories:
-# - Compositional generalization
 # description: Train on group and operation requests, deliberately leaving out three combinations, such as coral’s
 #   maximum.
 # evidence-readout:
@@ -21,10 +19,6 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Composition
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, selected_group, operation, items, group, value, answer. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can familiar instructions work in new combinations?
 #   modeling: Generate lists containing three groups and ask for a group’s mean, minimum, or maximum. Leave three
@@ -85,16 +79,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("request", kind: "root", children: (
-#   node("selected_group", type: "Enum"),
-#   node("operation", type: "Enum"),
-#   node("items", kind: "branch", repeated: true, children: (
-#     node("group", type: "Enum"), node("value", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # In the illustrative bag, amber has values 0.2 and 0.8, so its mean is 0.5; the shown answer 0.51
 # includes a possible small noise draw. Asking for amber's maximum would instead give 0.8 before

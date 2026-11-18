@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can perfect accuracy hide answers it cannot name?
-# categories:
-# - Vocabulary
 # description: Ask a Category output to predict a mix of familiar and unfamiliar target labels.
 # evidence-readout:
 # - label: Known-label accuracy
@@ -18,10 +16,6 @@
 #   - coverage
 #   format: percent
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, x, hint, label. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: Can perfect accuracy hide answers relflow cannot name?
 #   modeling: Train a Category output to name two classes from numeric evidence. In half the test rows, replace the
@@ -72,13 +66,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number"),
-#   node("hint", type: "Category", body: [All four strings; independent]),
-#   node("label", kind: "target", type: "Category", body: [Only two populated labels]),
-# )))
-# ```
 #
 # In the illustrative row, positive `x = 0.7` supports `positive`. The hint `novel-negative` does not
 # override that rule: hints are drawn independently of the sign. In the shifted test set, half the

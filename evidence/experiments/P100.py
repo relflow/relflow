@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can ordered outputs fill ranks never shown during training?
-# categories:
-# - Representation
 # description: Compare Ordinal, rounded Number, and Category targets when integer ranks or declared intermediate labels
 #   are withheld from training.
 # evidence-readout:
@@ -31,11 +29,6 @@
 #   - exact_accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
-#     condition.
-#   alt: Can ordered outputs fill ranks never shown during training? Visible inputs lead to one hidden prediction
-#     target.
 # evidence-review:
 #   question: Can ordered outputs fill ranks never shown during training?
 #   modeling: Give a noisy numeric clue to an ordered answer and withhold intermediate target ranks during training.
@@ -101,10 +94,6 @@
 # The second task declares five ordered labels but trains only on positions zero, two, and four.
 # Positions one and three are held out. Merely declaring an order does not guarantee
 # the model will learn to interpolate it.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (node("signal", type: "Number"), node("rank", kind: "target", type: "Ordinal"),)))
-# ```
 #
 # ## Comparison
 #

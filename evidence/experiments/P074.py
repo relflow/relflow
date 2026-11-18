@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it combine noisy measurements with missing readings?
-# categories:
-# - Representation
 # description: Predict a signal from three noisy sensors, sometimes hiding one or more readings. An extra sensor carries
 #   no useful information.
 # evidence-readout:
@@ -17,10 +15,6 @@
 #   - corrupted_first_sensor_mse
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, first, second, third, nuisance, target. Amber cards are hidden prediction targets.
-#     Other fields provide the input.
 # evidence-review:
 #   question: Can relflow combine noisy measurements with missing readings?
 #   modeling: Generate three noisy sensor readings of one hidden signal and an unrelated fourth reading. Randomly
@@ -102,15 +96,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("first", type: "Number", body: [Skip when `hide_first`]),
-#   node("second", type: "Number", body: [Skip when `hide_second`]),
-#   node("third", type: "Number", body: [Skip when `hide_third`]),
-#   node("nuisance", type: "Number", body: [Independent noise]),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # The illustrated readings can arise from hidden target 0.4 plus different sensor errors. None is an
 # exact copy of the target. The first sensor has lower noise than the third, so equal averaging is not

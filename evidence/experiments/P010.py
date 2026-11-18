@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it total weighted values for one group?
-# categories:
-# - Grouped weighted aggregation
 # description: Ask for a group’s total after multiplying each of its values by its own weight.
 # evidence-readout:
 # - label: Correct data
@@ -21,10 +19,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, selected_group, items, group, value, weight, answer. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow total weighted values for one group?
 #   modeling: Give each item a group, value, and weight. A visible request selects one of three groups; the hidden
@@ -82,18 +76,6 @@
 # giving −0.1. All B and C items are excluded. If the two A weights were exchanged, their
 # contributions would instead total 0.8; preserving the same values and weights separately would not
 # preserve the answer.
-#
-# ```typst
-# #tree(node("request", kind: "root", width: 120pt, children: (
-#   node("selected_group", type: "Category"),
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("group", type: "Category"),
-#     node("value", type: "Number"),
-#     node("weight", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it average only the requested group?
-# categories:
-# - Category-conditioned reduction
 # description: Ask for the average of one named group within a mixed list.
 # evidence-readout:
 # - label: Group A, correct labels
@@ -14,10 +12,6 @@
 #   - corrupted/A/nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, items, value, group, answer, operation, selected_group. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow average only the requested group?
 #   modeling: Mix values from three named groups in one list. Supply a group request and hide that group’s average.
@@ -76,18 +70,6 @@
 # The illustrated B values are −0.4 and −0.2, giving an answer of −0.3. Requesting A from the same
 # list would instead give 1.1, and requesting C would give 0.6. Averaging all six values would
 # ignore the instruction and produce a different answer.
-#
-# ```typst
-# #tree(node("request", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("group", type: "Category"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt,),
-#   node("operation", type: "Category"),
-#   node("selected_group", type: "Category"),
-# )))
-# ```
 #
 # ## Comparison
 #

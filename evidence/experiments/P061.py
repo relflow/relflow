@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: How confident should it be about a new identity?
-# categories:
-# - Vocabulary
 # description: Predict a yes/no outcome using a numeric signal and an identity-specific effect. New identities remove
 #   only the latter information.
 # evidence-readout:
@@ -19,10 +17,6 @@
 #   - decisive_confidence
 #   format: percent
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. The numeric signal remains available for unfamiliar identities.
-#   alt: Model tree with record, x, entity, label. Amber cards are hidden prediction targets. The numeric signal remains
-#     available for unfamiliar identities.
 # evidence-review:
 #   question: How confident should relflow be about a new identity?
 #   modeling: Generate outcomes from a numeric signal plus an identity-specific effect. New identities remove only
@@ -82,13 +76,6 @@
 #
 # The outcome is hidden and randomly sampled. Scores compare predicted probabilities with the generator’s known probabilities.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", detail: "Generalizable evidence"),
-#   node("entity", type: "Category", detail: "Persistent identity"),
-#   node("label", kind: "target", type: "Category", detail: "Known yes/no labels"),
-# )))
-# ```
 #
 # At the illustrative `x = 0`, the two possible identity effects favor opposite answers; without
 # knowing which effect belongs to a new identity, their average yes probability is 0.5. At a

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: What happens to Set members never seen in training?
-# categories:
-# - Vocabulary
 # description: Train a Set field on known members without ever teaching it how unavailable members should affect prediction.
 # evidence-readout:
 # - label: Prediction for empty input
@@ -16,10 +14,6 @@
 #   - all_unknown
 #   format: number
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, tags, labels, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: What does an untrained Set fallback do with entirely new members?
 #   modeling: Train on known set members, empty sets, and nulls, without simulating unavailable members. Predict a
@@ -68,13 +62,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("tags", type: "Set"),
-#   node("labels", kind: "target", type: "Set"),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # The illustrated row is a deliberate prediction probe. The known member `red` contributes +1, and
 # `never-seen` supplies no learned membership bit, giving the reference numeric answer 1. For familiar

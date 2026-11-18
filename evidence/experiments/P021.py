@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it recognize matching IDs it has never seen?
-# categories:
-# - Identity
 # description: Ask whether two IDs are equal, using IDs absent from training.
 # evidence-readout:
 # - label: Hash inputs
@@ -18,10 +16,6 @@
 #   - shuffled_auc
 #   format: auc
 # evidence-group: Identity
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with identity, left_id, right_id, equal. Amber cards are hidden prediction targets. Other fields
-#     provide the input.
 # evidence-review:
 #   question: Can relflow recognize matching IDs relflow has never seen?
 #   modeling: 'Give the model two identifiers and hide a Boolean target indicating whether they match. Training and
@@ -91,14 +85,6 @@
 # test-18 makes the answer false; replacing both with a different shared test ID should still mean
 # equality. The experiment scores new equal and unequal pairs, rather than assigning a permanent
 # yes/no meaning to any one string.
-#
-# ```typst
-# #tree(node("identity", kind: "root", children: (
-#   node("left_id", type: "Hash", width: 150pt,),
-#   node("right_id", type: "Hash", width: 150pt,),
-#   node("equal", kind: "target", type: "Boolean",),
-# )))
-# ```
 #
 # ## Comparison
 #

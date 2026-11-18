@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does repeating a list preserve its average?
-# categories:
-# - Cardinality generalization
 # description: Predict the average amount, using a branch that averages its encoded items without item attention;
 #   the branch's count lane sees the repetition, the average must not.
 # evidence-readout:
@@ -16,10 +14,6 @@
 #   - duplication_drift
 #   format: number
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, amount, mean_amount. Amber cards are hidden prediction targets. Repeated collections
-#     keep their fields together.
 # evidence-review:
 #   question: Does repeating a list preserve its average?
 #   modeling: Generate lists of numbers and hide their arithmetic average. A Mean branch averages their encoded values,
@@ -76,15 +70,6 @@
 # The illustrated amounts 0.2 and 0.8 average to 0.5. Repeating the entire list gives 0.2, 0.8, 0.2,
 # 0.8: its total doubles from 1.0 to 2.0, but dividing by four items still gives 0.5. Repeating just
 # one item would be a different intervention and need not preserve the mean.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("mean_amount", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: What is forgotten when old examples stop arriving?
-# categories:
-# - Vocabulary
 # description: Predict a cohort-specific response and retain earlier cohorts through sequential adaptation.
 # evidence-readout:
 # - label: Joint reference error
@@ -18,9 +16,6 @@
 #   - final_mean_nrmse
 #   format: number
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Visible fields supply evidence; prediction targets are hidden.
-#   alt: Predict a cohort-specific response and retain earlier cohorts through sequential adaptation.
 # evidence-review:
 #   question: What is forgotten when old examples stop arriving?
 #   modeling: Generate three visible cohorts with different numeric response rules. Fit them sequentially, with an
@@ -74,10 +69,6 @@
 #
 # Predict a cohort-specific response and retain earlier cohorts through sequential adaptation. The example
 # is illustrative; its answer is hidden during scoring.
-#
-# ```typst
-# #tree(node("record",kind:"root",children:(node("cohort",type:"Enum"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
-# ```
 #
 # ## Comparison
 #

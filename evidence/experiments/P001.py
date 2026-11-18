@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it add a list of numbers?
-# categories:
-# - Cardinality generalization
 # description: Predict the total of a list whose length varies within the range used in training.
 # evidence-readout:
 # - label: New lists
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections
-#     keep their fields together.
 # evidence-review:
 #   question: Can relflow add a list of numbers?
 #   modeling: Generate independent lists of one to six amounts between −1 and 1. Give the model the amounts in a repeated
@@ -70,15 +64,6 @@
 # In the illustration, adding 0.5 and −0.2 gives 0.3; adding the remaining 0.9 gives the hidden
 # answer 1.2. Negative amounts matter: predicting the number of items, or simply adding their
 # magnitudes, would produce a different answer.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does declaring a class teach its meaning?
-# categories:
-# - Enum
 # description: Declare all four classes, but leave one out of initial training.
 # evidence-readout:
 # - label: Withheld class, before examples
@@ -21,9 +19,6 @@
 #   - accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, x, label. Amber cards are hidden prediction targets. Other fields provide the input.
 # evidence-review:
 #   question: Does declaring a class teach its meaning?
 #   modeling: Declare four output classes, but initially train on examples from only three. Each class occupies a
@@ -76,12 +71,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [Four separated numerical regions]),
-#   node("label", kind: "target", type: "Enum", body: [Four fixed classes; one initially withheld]),
-# )))
-# ```
 #
 # The illustrative `x = −0.94` lies near −1, the region labeled `blue`. The other regions are centered
 # at −3, +1, and +3, with the +3 region labeled `green` and initially withheld. Independent deviations

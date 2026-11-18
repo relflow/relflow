@@ -79,7 +79,6 @@ export interface EvidenceEntry {
   source: string;
   code: string;
   sections: Sections;
-  diagram: { caption: string; alt: string };
   readouts: Readout[];
   result: EvidenceRecord | null;
   sourceMatches: boolean;
@@ -407,7 +406,7 @@ function presentation(
   source: string,
   sourcePath: string,
   revision: string,
-): { code: string; sections: Sections; diagram: { caption: string; alt: string } } {
+): { code: string; sections: Sections } {
   const parts = cells(source);
   const code = parts
     .filter((part) => !part.markdown)
@@ -418,22 +417,6 @@ function presentation(
     .map((part) => part.text)
     .join('\n');
   markdown = markdown.replace(/^\s*---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, '');
-  const metadata = header(source);
-  const declared = metadata['evidence-diagram'];
-  if (
-    declared !== undefined &&
-    (!object(declared) ||
-      typeof declared.caption !== 'string' ||
-      !declared.caption.trim() ||
-      typeof declared.alt !== 'string' ||
-      !declared.alt.trim())
-  )
-    throw new Error(`${sourcePath}: evidence-diagram requires nonempty caption and alt strings.`);
-  const diagram = {
-    caption: object(declared) ? (declared.caption as string) : '',
-    alt: object(declared) ? (declared.alt as string) : '',
-  };
-  markdown = markdown.replace(/^```typst[^\n]*\n[\s\S]*?^```[ \t]*$/gm, '');
   const sections: Sections = { intro: '', example: '', comparison: '', result: '', method: '' };
   let active: keyof Sections = 'intro';
   for (const line of markdown.split('\n')) {
@@ -444,7 +427,7 @@ function presentation(
   for (const key of Object.keys(sections) as (keyof Sections)[]) {
     sections[key] = links(sections[key].trim(), sourcePath, revision).replace(/\n{3,}/g, '\n\n');
   }
-  return { code, sections, diagram };
+  return { code, sections };
 }
 
 function readouts(metadata: Header, record: EvidenceRecord | null): Readout[] {
@@ -526,7 +509,6 @@ export const evidenceEntries: EvidenceEntry[] = declared.map((entry) => {
     : {
         code: '',
         sections: { intro: '', example: '', comparison: '', result: '', method: '' },
-        diagram: { caption: '', alt: '' },
       };
   content.code = selected.matches
     ? cells(selected.source)

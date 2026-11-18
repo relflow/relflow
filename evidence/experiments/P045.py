@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can day-of-year alone identify the weekday?
-# categories:
-# - Calendar reasoning
 # description: Predict weekday from the day number while deliberately balancing different years across all seven weekday
 #   answers.
 # evidence-readout:
@@ -15,10 +13,6 @@
 #   - with_weekday_accuracy
 #   format: percent
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can day-of-year identify weekday without the missing calendar information?
 #   modeling: Balance all seven weekdays for every sampled day-of-year, so the visible day number alone cannot identify
@@ -73,13 +67,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt,),
-#   node("target", kind: "target", type: "Category", detail: "weekday",),
-# )))
-# ```
 #
 # ## Comparison
 #

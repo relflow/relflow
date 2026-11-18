@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does the count help with longer lists?
-# categories:
-# - Cardinality generalization
 # description: Give the model both a repeated amount and its count, then test larger counts absent from training.
 # evidence-readout:
 # - label: Larger counts
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Does the count help with longer lists?
 #   modeling: Train a model to predict a repeated amount’s total from the items and a visible count. Training counts
@@ -78,16 +72,6 @@
 # Eight copies of 0.5 give the illustrated total 4.0. Counts seven through ten are absent from
 # training. To picture the scaling check within the allowed capacity, start with four copies, whose
 # answer is 2.0, and duplicate that whole bag while changing item_count from four to eight.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("item_count", type: "Number"),
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

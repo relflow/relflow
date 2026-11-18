@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does the grouping of values matter?
-# categories:
-# - Hierarchical statistics
 # description: Predict the largest session total when the same six amounts are divided into different sessions.
 # evidence-readout:
 # - label: Model error
@@ -14,10 +12,6 @@
 #   - flat_oracle_rmse
 #   format: number
 # evidence-group: Structure
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, sessions, transactions, amount, largest_session_total. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Does the grouping of values matter?
 #   modeling: Pair records containing the same six amounts, arranged in sessions of two, two, and two versus one,
@@ -73,17 +67,6 @@
 # ```
 #
 # largest_session_total is hidden. global_total is an explanatory value, not a model input.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("sessions", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
-#       node("amount", type: "Number"),
-#     )),
-#   )),
-#   node("largest_session_total", width: 180pt, kind: "target", type: "Number",),
-# )))
-# ```
 #
 # ## Comparison
 #

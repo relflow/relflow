@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn how two measurements vary together?
-# categories:
-# - Distribution statistics
 # description: 'Predict covariance: whether paired measurements tend to rise together or move in opposite directions.'
 # evidence-readout:
 # - label: Correct pairs
@@ -16,10 +14,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, x, y, covariance. Amber cards are hidden prediction targets. Repeated collections
-#     keep their fields together.
 # evidence-review:
 #   question: Can relflow learn how two measurements vary together?
 #   modeling: 'Generate eight paired x and y measurements with varying means, spreads, and correlation. Hide their
@@ -79,16 +73,6 @@
 # eight products: the answer is 0.8. A positive answer means the measurements tend to move together.
 # Swapping only the y values can change that answer even though neither field gains or loses any
 # values.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("x", type: "Number"),
-#     node("y", type: "Number"),
-#   )),
-#   node("covariance", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

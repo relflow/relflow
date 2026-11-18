@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can learning preserve small differences beside enormous offsets?
-# categories:
-# - Representation
 # description: Compare the same smooth regression around zero and around one trillion, keeping source values and residual
 #   scoring in float64.
 # evidence-readout:
@@ -25,11 +23,6 @@
 #   - nrmse
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
-#     condition.
-#   alt: Can learning preserve small differences beside enormous offsets? Visible inputs lead to one hidden prediction
-#     target.
 # evidence-review:
 #   question: Can learning preserve small differences beside enormous offsets?
 #   modeling: Generate the same small regression differences near zero and near a trillion. Fit matched models using
@@ -85,10 +78,6 @@
 #
 # The comparison asks whether that small spread survives encoding, learning, and numeric readout. It
 # does not ask one model trained at zero to understand a new, unseen offset.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (node("x", type: "Number"), node("target", kind: "target", type: "Number"),)))
-# ```
 #
 # ## Comparison
 #

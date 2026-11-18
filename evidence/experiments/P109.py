@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can a plain Group recover label groups?
-# categories:
-# - Group
 # description: Use a Group field as input beside a hidden prediction target and require its assignments to recover
 #   the label groups.
 # evidence-readout:
@@ -20,10 +18,6 @@
 #   - shuffled_accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with event, merchant_id, label. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can a plain Group recover label groups?
 #   modeling: Generate five label groups with ten recurring identities each, plus unrelated context. Train a sibling
@@ -71,14 +65,6 @@
 # ten identities for each of five labels, and every identity repeats twenty times. The names are
 # synthetic identifiers, not evidence about real merchants. Predicting L2 for this familiar identity
 # and updating the adaptive grouping mechanism are separate behaviors.
-#
-# ```typst
-# #tree(node("event", kind: "root", children: (
-#   node("merchant_id", type: "Group", width: 150pt,),
-#   node("context", type: "Number"),
-#   node("label", kind: "target", type: "Category",),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it average prepared squared differences?
-# categories:
-# - Distribution statistics
 # description: Supply each value’s squared distance from the average, then predict the average of those distances.
 # evidence-readout:
 # - label: Average prediction
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, squared_deviation, variance. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow average prepared squared differences?
 #   modeling: Calculate each value’s squared distance from its list mean before giving data to the model. A Mean branch
@@ -73,15 +67,6 @@
 # One possible raw list would alternate −1 and 1 around a mean of zero. The original signs are
 # deliberately absent: squared distances describe spread, not which side of the mean each value
 # occupied.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("squared_deviation", width: 150pt, type: "Number"),
-#   )),
-#   node("variance", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

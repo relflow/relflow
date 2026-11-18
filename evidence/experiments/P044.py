@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn the month from the day number?
-# categories:
-# - Calendar reasoning
 # description: Learn month boundaries from day-of-year in non-leap years.
 # evidence-readout:
 # - label: Original dates
@@ -14,10 +12,6 @@
 #   - permuted_accuracy
 #   format: percent
 # evidence-group: Temporal
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with calendar, observed_at, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can relflow learn the month from the day number?
 #   modeling: Give a date’s day-of-year and hide its month, using non-leap years only. Train on odd-numbered days
@@ -70,13 +64,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("calendar", kind: "root", children: (
-#   node("observed_at", type: "DateParts", width: 150pt,),
-#   node("target", kind: "target", type: "Category", detail: "month",),
-# )))
-# ```
 #
 # ## Comparison
 #

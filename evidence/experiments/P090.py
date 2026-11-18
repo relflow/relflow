@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does input jitter buy robustness at a reasonable clean-data cost?
-# categories:
-# - Representation
 # description: Compare zero, modest, and excessive input jitter on a small fixed regression dataset with independent
 #   nuisance coordinates.
 # evidence-readout:
@@ -31,11 +29,6 @@
 #   - nrmse
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
-#     condition.
-#   alt: Does input jitter buy robustness at a reasonable clean-data cost? Visible inputs lead to one hidden prediction
-#     target.
 # evidence-review:
 #   question: Does input jitter buy robustness at a reasonable clean-data cost?
 #   modeling: Fit identical regression models on the same small training set with no, modest, or excessive input jitter.
@@ -98,10 +91,6 @@
 #
 # An extra noisy reading changes what the model observes, while the underlying answer stays the same.
 # Jitter may encourage smoother predictions, but enough jitter also removes real information.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (node("signal", type: "Number", detail: "Training jitter"), node("nuisance", type: "Vector(8)"), node("target", kind: "target", type: "Number"),)))
-# ```
 #
 # ## Comparison
 #

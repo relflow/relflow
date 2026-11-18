@@ -858,13 +858,6 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
         ):
             fig, note, interactive = handler(bundle, spec)
             fig.savefig(output / f"{bundle.manifest['id']}-{theme}.svg", bbox_inches="tight", metadata={"Date": None})
-            if theme == "light":
-                fig.savefig(
-                    output / f"{bundle.manifest['id']}.png",
-                    bbox_inches="tight",
-                    dpi=130,
-                    metadata={"Software": "relflow proof diagnostics"},
-                )
             plt.close(fig)
             result.update(caption=note, interactive=interactive)
             if theme == "light":
@@ -881,7 +874,6 @@ def render(bundle: Bundle, spec: dict, output: Path) -> dict:
                 name = bundle.manifest["id"] + "-" + suffix
                 extra.savefig(output / f"{name}-{theme}.svg", bbox_inches="tight", metadata={"Date": None})
                 if theme == "light":
-                    extra.savefig(output / f"{name}.png", bbox_inches="tight", dpi=130)
                     result["figures"].append({"name": name, "caption": description})
                 plt.close(extra)
     return result

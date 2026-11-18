@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does pretraining reduce the labels needed for a new task?
-# categories:
-# - Representation
 # description: Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample.
 # evidence-readout:
 # - label: Eight-label adaptation
@@ -20,9 +18,6 @@
 #   - accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Visible fields supply evidence; prediction targets are hidden.
-#   alt: Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample.
 # evidence-review:
 #   question: Does pretraining reduce the labels needed for a new task?
 #   modeling: Generate noisy views of four hidden classes and pretrain without their labels. Adapt the pretrained
@@ -75,10 +70,6 @@
 #
 # Use noisy categorical and geometric views to predict a hidden four-way style with a small labeled sample.
 # The example is illustrative; its answer is hidden during scoring.
-#
-# ```typst
-# #tree(node("record",kind:"root",body:[Export context],children:(node("first",type:"Enum"),node("second",type:"Enum"),node("geometry",type:"Vector(16)"))))
-# ```
 #
 # ## Comparison
 #

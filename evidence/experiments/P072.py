@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it infer a new rule from examples in the record?
-# categories:
-# - Learning from context
 # description: Each record supplies four examples of a fresh straight-line rule and asks for the answer at a new input.
 # evidence-readout:
 # - label: Familiar rules
@@ -25,10 +23,6 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Composition
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with task, examples, x, y, query, answer. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow infer a new rule from examples in the record?
 #   modeling: Each record supplies four noisy input–output examples from a newly generated straight line, plus a new
@@ -85,15 +79,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("task", kind: "root", children: (
-#   node("examples", kind: "branch", repeated: true, children: (
-#     node("x", type: "Number"), node("y", type: "Number"),
-#   )),
-#   node("query", type: "Number"),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # The illustrated examples follow the noiseless rule `y = x + 0.5`. Applying it to query 0.6 gives
 # 1.1. These values illustrate the task; generated examples and answers include small independent

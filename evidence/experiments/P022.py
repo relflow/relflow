@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can a summary retain the winning item’s value?
-# categories:
-# - Argmax retrieval
 # description: Predict the value attached to the highest-scoring candidate after compressing the candidates into learned
 #   summaries.
 # evidence-readout:
@@ -15,10 +13,6 @@
 #   - broken_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can a summary retain the winning item’s value?
 #   modeling: Give each candidate a score and a separate payload value. Hide the payload belonging to the highest
@@ -71,16 +65,6 @@
 # The highest illustrated score is 1.7, whose payload is −3.0, so the answer is −3.0 even though
 # another candidate carries payload 5.0. A predictor that returns the largest payload, an average
 # payload, or the winning score would be answering a different question.
-#
-# ```typst
-# #tree(node("retrieval", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("score", type: "Number"),
-#     node("payload", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt,),
-# )))
-# ```
 #
 # ## Comparison
 #

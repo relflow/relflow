@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it distinguish missing values from zero?
-# categories:
-# - Value state
 # description: Predict a label from whether a number is missing, even though every present number is zero.
 # evidence-readout:
 # - label: Nulls preserved
@@ -14,10 +12,6 @@
 #   - prefilled_accuracy
 #   format: percent
 # evidence-group: State
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with state, measurement, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Can relflow distinguish missing values from zero?
 #   modeling: Generate records in which a measurement is either null or the number zero, and hide the Boolean answer
@@ -83,13 +77,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("state", kind: "root", children: (
-#   node("measurement", type: "Number", width: 150pt,),
-#   node("target", kind: "target", type: "Boolean",),
-# )))
-# ```
 #
 # ## Comparison
 #

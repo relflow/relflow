@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can one number representation serve additive and multiplicative structure?
-# categories:
-# - Representation
 # description: Compare Number, which embeds raw and log lanes and reads out standardized log-scale deviations, with
 #   Quantile ranks on additive, moderate-tail, heavy-tail, and far-from-zero targets.
 # evidence-readout:
@@ -25,10 +23,6 @@
 #   - normalized_mae
 #   format: error
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Each arm changes only how numbers are represented.
-#   alt: Model tree with customer, price, rate, ltv. Amber cards are hidden prediction targets. Each arm changes only
-#     how numbers are represented.
 # evidence-review:
 #   question: Can one number representation serve additive and multiplicative structure?
 #   modeling: Generate additive and multiplicative prediction tasks, including heavy-tailed inputs and targets far
@@ -91,14 +85,6 @@
 # right = -4 gives a median total of 6 in the additive task and 1006 when the
 # fixed 1000 offset is added. The target formula stays simple even though its
 # scale changes considerably.
-#
-# ```typst
-# #tree(node("customer", kind: "root", children: (
-#   node("price", type: "Number / Quantile", detail: "raw and log lanes, or ranks"),
-#   node("rate", type: "Number / Quantile", detail: "raw and log lanes, or ranks"),
-#   node("ltv", kind: "target", type: "Number / Quantile", detail: "log-scale readout, or ranks"),
-# )))
-# ```
 #
 # ## Comparison
 #

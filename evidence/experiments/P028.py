@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it find a shared ID across two lists?
-# categories:
-# - Collection overlap
 # description: Predict whether two lists have any ID in common, using IDs absent from training.
 # evidence-readout:
 # - label: Original lists
@@ -14,10 +12,6 @@
 #   - broken_auc
 #   format: auc
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with overlap, left, entity_id, right, entity_id, has_overlap. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow find a shared ID across two lists?
 #   modeling: Generate two lists of previously unseen IDs. Half the records share exactly one ID; half share none.
@@ -78,18 +72,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("overlap", kind: "root", width: 120pt, children: (
-#   node("left", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("entity_id", type: "Hash"),
-#   )),
-#   node("right", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("entity_id", type: "Hash"),
-#   )),
-#   node("has_overlap", kind: "target", type: "Boolean", width: 150pt,),
-# )))
-# ```
 #
 # ## Comparison
 #

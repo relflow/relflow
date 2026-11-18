@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does each value keep its own weight?
-# categories:
-# - Weighted aggregation
 # description: Predict a weighted total from values and weights stored together on each item.
 # evidence-readout:
 # - label: Correct pairs
@@ -16,10 +14,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, value, weight, weighted_sum. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Does each value keep its own weight?
 #   modeling: Generate six items, each with its own independently sampled value and positive weight. Hide the sum
@@ -77,16 +71,6 @@
 # adding the values, or multiplying their sum by the average weight, would generally give a
 # different result. A negative value still contributes negatively because all generated weights are
 # positive.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("weight", type: "Number"),
-#   )),
-#   node("weighted_sum", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

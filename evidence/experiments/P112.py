@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: When does grouping identities help prediction?
-# categories:
-# - Representation
 # description: Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity
 #   populations.
 # evidence-readout:
@@ -23,9 +21,6 @@
 #   - nrmse
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Visible fields supply evidence; prediction targets are hidden.
-#   alt: Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity populations.
 # evidence-review:
 #   question: When does grouping identities help prediction?
 #   modeling: Generate known identities belonging to four hidden response groups. Train Group and Category models
@@ -78,10 +73,6 @@
 #
 # Compare Group, Category, and a true-group reference across dense, sparse, and skewed known-identity
 # populations. The example is illustrative; its answer is hidden during scoring.
-#
-# ```typst
-# #tree(node("record",kind:"root",children:(node("entity",type:"Group or Category"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
-# ```
 #
 # ## Comparison
 #

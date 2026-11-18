@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: What happens beyond the learned percentile range?
-# categories:
-# - Quantile
 # description: Train a Quantile relationship within a bounded amount range, then supply much smaller and larger amounts.
 # evidence-readout:
 # - label: In-range error, original units
@@ -20,10 +18,6 @@
 #   - rmse
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with order, amount, cost. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: What happens beyond the learned percentile range?
 #   modeling: Train Quantile inputs and targets on amounts between 10 and 30, with cost = 100 + 4 × amount plus small
@@ -79,12 +73,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("order", kind: "root", children: (
-#   node("amount", type: "Quantile", detail: "In-range or shifted input"),
-#   node("cost", kind: "target", type: "Quantile", detail: "Bounded learned support"),
-# )))
-# ```
 #
 # The illustrated amount of 20 has average cost `100 + 4 × 20 = 180`; 180.5 is a possible noisy
 # observation. An illustrative amount of 50 instead has average cost 300. Training costs occupy

@@ -1,7 +1,6 @@
 # %% [markdown]
 # ---
 # title: ${title}
-# categories: [${group}]
 # description: "TODO: State the information boundary and held-out comparison."
 # evidence-readout:
 # - label: "TODO: Name the measurement"
@@ -26,9 +25,6 @@
 #   focus: "TODO: State the diagnostic question."
 #   comparison: "TODO: Name the retained observations to compare."
 #   limit: "TODO: State what the diagnostic cannot establish."
-# evidence-diagram:
-#   caption: "Replace these fields with the experiment's schema."
-#   alt: "A record contains a visible numeric feature and a hidden numeric target."
 # ---
 #
 # TODO: Explain the question in plain language: what does the model receive,
@@ -37,7 +33,7 @@
 #
 # ## Example
 #
-# Replace this illustrative record and diagram with the observation and schema
+# Replace this illustrative record with the observation and schema
 # used by the experiment. The target must be hidden from model inputs.
 #
 # ```yaml
@@ -50,12 +46,6 @@
 # fields are hidden during prediction. Illustrative answers are not measured
 # model predictions.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("feature", type: "Number"),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

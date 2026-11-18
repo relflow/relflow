@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it total prepared contributions for one group?
-# categories:
-# - Grouped weighted aggregation
 # description: Supply already calculated contributions and ask for the total belonging to one group.
 # evidence-readout:
 # - label: Correct groups
@@ -16,10 +14,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, selected_group, items, group, contribution, answer. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow total prepared contributions for one group?
 #   modeling: Give each item a group and an already calculated value × weight contribution. Ask for one group’s total
@@ -76,17 +70,6 @@
 # The illustrated request selects A, so only 0.6 and −0.1 contribute: the answer is 0.5. With the
 # same list and a B request, the answer would instead be 0.4 + 0.3 = 0.7. The request therefore
 # changes what must be selected without changing the underlying list.
-#
-# ```typst
-# #tree(node("request", kind: "root", width: 120pt, children: (
-#   node("selected_group", type: "Category"),
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("group", type: "Category"),
-#     node("contribution", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

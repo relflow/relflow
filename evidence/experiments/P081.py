@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Do frozen financial embeddings retain their groups with missing evidence?
-# categories:
-# - Representation
 # description: Reconstruct noisy financial views, fit four clusters on complete training embeddings, and keep those
 #   clusters fixed while removing a view or replacing unrelated noise in independent records.
 # evidence-readout:
@@ -28,11 +26,6 @@
 #   - ari_mean
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Reconstruct visible financial measurements; export one frozen record embedding. Hidden styles are not
-#     fields.
-#   alt: Record embedding with channel Enum, amount Number, frequency Number, and an independent nuisance Vector.
-#     All four fields use sampled reconstruction.
 # evidence-review:
 #   question: Do frozen financial embeddings retain their groups with missing evidence?
 #   modeling: Generate financial records with noisy amount, frequency, and channel clues to four hidden styles, plus
@@ -119,15 +112,6 @@
 # frequency still provide evidence. For complete signal removal, also replace
 # those two measurements with null, leaving only unrelated noise. Neither change
 # supplies the hidden style as a field or label to the model.
-#
-# ```typst
-# #tree(node("record", kind: "root", body: [Frozen embedding], children: (
-#   node("channel", type: "Enum", body: [Noisy style clue]),
-#   node("amount", type: "Number", body: [Low or high amount]),
-#   node("frequency", type: "Number", body: [Low or high frequency]),
-#   node("nuisance", type: "Vector", body: [Independent noise]),
-# )))
-# ```
 #
 # ## Comparison
 #

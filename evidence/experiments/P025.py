@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it look up a value using a new ID?
-# categories:
-# - Associative recall
 # description: Mix source values and questions in different positions. Use unfamiliar IDs to connect each question
 #   to its source, and judge the result over a panel of three seeds.
 # evidence-readout:
@@ -22,10 +20,6 @@
 #   - intact_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. Source values are visible; query values are hidden.
-#   alt: Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values.
-#     Source values are visible; query values are hidden.
 # evidence-review:
 #   question: Can relflow look up a value using a new ID?
 #   modeling: Put IDs and values in a source list, and ask for those values in an independently shuffled query list.
@@ -97,17 +91,6 @@
 # source despite their separated positions. These short IDs stand in for generated record-local
 # names. Actual train, validation, and test namespaces differ, so test associations must be read
 # from the current record rather than recalled from a training vocabulary.
-#
-# ```typst
-# #tree(node("association", kind: "root", width: 120pt, children: (
-#   node("memory", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("entity_id", type: "Hash"),
-#     node("role", type: "Category"),
-#     node("is_query", type: "Boolean"),
-#     node("value", type: "Number", width: 155pt, detail: "Source visible; query hidden"),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

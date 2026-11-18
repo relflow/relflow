@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it tell how spread out a list is?
-# categories:
-# - Distribution statistics
 # description: Predict variance, a measure of how far the values lie from their average.
 # evidence-readout:
 # - label: Variance prediction
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, value, variance. Amber cards are hidden prediction targets. Repeated collections
-#     keep their fields together.
 # evidence-review:
 #   question: Can relflow tell how spread out a list is?
 #   modeling: Generate lists of eight raw numbers with independently varying location and spread. Hide their variance,
@@ -73,15 +67,6 @@
 # The illustrated values average to 0.3. Each is 0.2 away from that center, and squaring 0.2 gives
 # 0.04, so averaging the eight squared distances still gives 0.04. The sign of each deviation
 # disappears when it is squared; positive and negative departures cannot cancel.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#   )),
-#   node("variance", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

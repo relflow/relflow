@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does label encounter order limit vocabulary coverage?
-# categories:
-# - Vocabulary
 # description: Train on common and rare labels, changing which labels appear first.
 # evidence-readout:
 # - label: Common-label coverage, rare first
@@ -18,10 +16,6 @@
 #   - common_coverage
 #   format: percent
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, code, target. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: Does label encounter order limit vocabulary coverage?
 #   modeling: 'Present the same four observed labels in two orders: rare labels first or common labels first. Let
@@ -75,12 +69,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("code", type: "Category", body: [Growing vocabulary with stable IDs]),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # The displayed `rare-left` target of −1 is the illustrative mean before noise. The two common codes
 # have means −1 for `cold` and +1 for `hot`. Giving rare labels the first two encounters should

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it subtract an average supplied as input?
-# categories:
-# - Peer-relative inference
 # description: Give each item both its value and its peer average, then predict their difference.
 # evidence-readout:
 # - label: Difference prediction
@@ -10,10 +8,6 @@
 #   - intact_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with collection, items, value, peer_mean, deviation. Amber cards are hidden prediction targets.
-#     Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow subtract an average supplied as input?
 #   modeling: Give every item both its value and an already calculated peer average. Hide their difference. Vary the
@@ -64,16 +58,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("collection", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("peer_mean", type: "Number"),
-#     node("deviation", kind: "target", type: "Number", width: 150pt,),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it add six numbers?
-# categories:
-# - Hierarchical statistics
 # description: Predict the total of six independently chosen amounts.
 # evidence-readout:
 # - label: Total prediction
@@ -10,10 +8,6 @@
 #   - test_nrmse
 #   format: error
 # evidence-group: Structure
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, transactions, amount, global_total. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow add six numbers?
 #   modeling: Generate independent records containing exactly six amounts sampled between −1 and 1. Put the amounts
@@ -64,15 +58,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("global_total", kind: "target", type: "Number",),
-# )))
-# ```
 #
 # ## Comparison
 #

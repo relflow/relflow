@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it infer an average and compare each item?
-# categories:
-# - Peer-relative inference
 # description: Predict each item’s difference from the list average without supplying that average.
 # evidence-readout:
 # - label: Original lists
@@ -14,10 +12,6 @@
 #   - translated_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with collection, items, value, deviation. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow infer an average and compare each item?
 #   modeling: Give a list of six values and hide each item’s difference from the list average. Do not provide the
@@ -67,15 +61,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("collection", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#     node("deviation", kind: "target", type: "Number", width: 150pt,),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

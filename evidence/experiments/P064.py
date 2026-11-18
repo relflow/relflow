@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it distinguish an unknown set from an empty set?
-# categories:
-# - Vocabulary
 # description: Predict whether a set is nonempty, including sets whose member names were absent from training.
 # evidence-readout:
 # - label: Unknown-input error, fallback trained
@@ -14,10 +12,6 @@
 #   - control_unknown
 #   format: number
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, tags, nonempty. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: Can relflow distinguish an unknown set from an empty set?
 #   modeling: Predict whether a set is nonempty. Train one model with input members sometimes made unavailable and
@@ -64,12 +58,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("tags", type: "Set", detail: "Known or unavailable membership"),
-#   node("nonempty", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # The illustrated one-member set has target 1. An empty list has target 0, and changing `tag-12` to a
 # completely new name still leaves the reference answer at 1. Repeating that new member also leaves

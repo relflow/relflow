@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it tell a recorded zero from an absent or invalid reading?
-# categories:
-# - State
 # description: Predict three labels from a numeric zero, an Arrow null, or a valid floating-point NaN, preserving
 #   their distinct states.
 # evidence-readout:
@@ -28,11 +26,6 @@
 #   - accuracy
 #   format: percent
 # evidence-group: State
-# evidence-diagram:
-#   caption: The target is hidden. The diagram shows the informative representation; controls change only the declared
-#     condition.
-#   alt: Can it tell a recorded zero from an absent or invalid reading? Visible inputs lead to one hidden prediction
-#     target.
 # evidence-review:
 #   question: Can relflow tell a recorded zero from an absent or invalid reading?
 #   modeling: Generate three balanced classes identified solely by a numeric zero, null, or valid NaN. Hide the class
@@ -97,10 +90,6 @@
 #
 # The typed Arrow construction explicitly retains NaN as a valid floating-point entry. A data adapter
 # that converts NaN into a null would erase the distinction before the model could learn it.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (node("measurement", type: "Number", body: [Zero, null, or NaN]), node("target", kind: "target", type: "Enum"),)))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it recover when a whole branch is hidden?
-# categories:
-# - Masking
 # description: Provide two redundant measurements of the same signal and sometimes hide an entire branch.
 # evidence-readout:
 # - label: First view hidden
@@ -24,10 +22,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Masking
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. hidden skips a whole view and its descendants.
-#   alt: Model tree with record, views, reading, backup, target. Amber cards are hidden prediction targets. hidden
-#     skips a whole view and its descendants.
 # evidence-review:
 #   question: Can relflow recover when a whole branch is hidden?
 #   modeling: Create two branches carrying redundant measurements of one hidden signal. Randomly hide whole branches
@@ -103,16 +97,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("views", kind: "branch", repeated: true, body: [Skip when `hidden`], children: (
-#     node("reading", type: "Number"),
-#     node("backup", type: "Number", body: [Also skip when `hide_backup`]),
-#   )),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: What happens when a new prediction target is added?
-# categories:
-# - Schema mutation
 # description: Add hidden target w to a model already trained to predict u and v from a and b.
 # evidence-readout:
 # - label: New target before training
@@ -22,10 +20,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, a, b, u, v, w. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: What happens when a new prediction target is added?
 #   modeling: Train a model to predict two hidden numeric targets from inputs a and b. Add a third hidden target,
@@ -102,16 +96,6 @@
 # to approximate them from examples. Although `w` also equals `u + v`, those
 # two answers remain hidden from the input encoder, so the new task still has
 # to be learned from `a` and `b`.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number"),
-#   node("b", type: "Number"),
-#   node("u", type: "Number", kind: "target", body: [Existing, always hidden]),
-#   node("v", type: "Number", kind: "target", body: [Existing, always hidden]),
-#   node("w", type: "Number", kind: "target", body: [Added, always hidden]),
-# )))
-# ```
 #
 # ## Comparison
 #

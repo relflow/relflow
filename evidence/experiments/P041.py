@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can an average lose the total?
-# categories:
-# - Hierarchical statistics
 # description: Predict both average and total after an average-only branch with item attention disabled; the branch's
 #   count lane keeps the total recoverable.
 # evidence-readout:
@@ -20,10 +18,6 @@
 #   - 1
 #   format: number
 # evidence-group: Structure
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, transactions, amount, mean_amount, global_total. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow distinguish lists with the same average but different totals?
 #   modeling: Repeat the same amount one to six times and hide both the average and total. Disable item attention
@@ -74,16 +68,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("transactions", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("mean_amount", kind: "target", type: "Number",),
-#   node("global_total", kind: "target", type: "Number",),
-# )))
-# ```
 #
 # ## Comparison
 #

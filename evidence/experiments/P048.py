@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can one prediction target be reset and relearned?
-# categories:
-# - Schema mutation
 # description: Reset the learned predictor for u while preserving its sibling target v.
 # evidence-readout:
 # - label: Reset target, before retraining
@@ -30,9 +28,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, a, b, u, v. Amber cards are hidden prediction targets. Other fields provide the input.
 # evidence-review:
 #   question: Can one prediction target be reset and relearned?
 #   modeling: Train two hidden numeric targets, then reset only the learned head for u. Continue training both targets
@@ -91,15 +86,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number"),
-#   node("b", type: "Number"),
-#   node("u", type: "Number", kind: "target", body: [Reset, then relearned]),
-#   node("v", type: "Number", kind: "target", body: [Unselected, always hidden]),
-# )))
-# ```
 #
 # ## Comparison
 #

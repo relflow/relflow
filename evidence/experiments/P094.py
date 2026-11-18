@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can new requests work on unfamiliar group sizes?
-# categories:
-# - Composition
 # description: A request selects a group and operation from a mixed list, with a hidden numeric answer.
 # evidence-readout:
 # - label: New requests and lengths
@@ -20,9 +18,6 @@
 #   - normalized_rmse
 #   format: number
 # evidence-group: Composition
-# evidence-diagram:
-#   caption: Visible inputs and the hidden prediction target for this controlled task.
-#   alt: A request selects a group and operation from a mixed list, with a hidden numeric answer.
 # evidence-review:
 #   question: Can new requests work on unfamiliar group sizes?
 #   modeling: Generate group-specific mean, minimum, and maximum requests. Train with three group–operation combinations
@@ -73,10 +68,6 @@
 #   - {group: amber, value: 0.2}
 #   - {group: amber, value: 0.7}
 # answer: 0.7
-# ```
-#
-# ```typst
-# #tree(node("request", kind: "root", children: (node("selected_group", type: "Enum"), node("operation", type: "Enum"), node("items", kind: "branch", children: (node("group", type: "Enum"), node("value", type: "Number"))), node("answer", kind: "target", type: "Number"),)))
 # ```
 #
 # ## Comparison

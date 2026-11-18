@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can Group recover known hidden regimes?
-# categories:
-# - Group
 # description: Repeated identities follow four hidden numerical rules. Test whether four fixed Group slots recover
 #   the groups while predicting new observations.
 # evidence-readout:
@@ -28,9 +26,6 @@
 #   - normalized_rmse
 #   format: error
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: The entity identity is visible input; y is the hidden prediction target.
-#   alt: Model tree with event, entity, x, y. The entity identity is visible input; y is the hidden prediction target.
 # evidence-review:
 #   question: Can Group recover known hidden regimes?
 #   modeling: Assign 64 recurring identities to four hidden linear response rules. Hide each new numeric answer and
@@ -114,14 +109,6 @@
 # These are worked examples of the data-generating rules. The model is never
 # given this table or a device's true group. It learns from individual labeled
 # measurements, and the evaluator keeps the true grouping for scoring.
-#
-# ```typst
-# #tree(node("event", kind: "root", children: (
-#   node("entity", type: "Group", detail: "Repeated identity; fixed group slots"),
-#   node("x", type: "Number"),
-#   node("y", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

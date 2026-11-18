@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it spot an ordinary value in the wrong context?
-# categories:
-# - Anomaly detection
 # description: Learn to reconstruct a numeric answer from its context. Use a large reconstruction error as a warning
 #   that the value does not fit.
 # evidence-readout:
@@ -22,10 +20,6 @@
 #   - normal_false_positive_rate
 #   format: percent
 # evidence-group: Anomaly
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, group, x, y. Amber cards are hidden prediction targets. Other fields provide the
-#     input.
 # evidence-review:
 #   question: Can relflow spot an ordinary value in the wrong context?
 #   modeling: Generate ordinary numeric answers from a visible group and x, then train the model to reconstruct those
@@ -82,13 +76,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("group", type: "Enum", detail: "Selects a relationship"),
-#   node("x", type: "Number", detail: "Visible measurement"),
-#   node("y", kind: "target", type: "Number", detail: "Hidden for scoring"),
-# )))
-# ```
 #
 # For the illustrative amber row, the normal mean is `0.7 × 1 − 0.5 = 0.2`; the shown 0.24 includes a
 # possible small noise draw. A value near −1 is normal for another group at the same x, but would

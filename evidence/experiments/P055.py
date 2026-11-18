@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Is an unfamiliar category the same as a null?
-# categories:
-# - Vocabulary
 # description: Compare familiar labels, new labels, and missing values in a task where identity and numeric context
 #   both matter.
 # evidence-readout:
@@ -17,10 +15,6 @@
 #   - information_limit_rmse
 #   format: number
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, x, code, target. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Is an unfamiliar category the same as a null?
 #   modeling: Generate numeric context x and a category-specific effect, then hide 2x + effect. At test time, introduce
@@ -70,13 +64,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number"),
-#   node("code", type: "Category", body: [30% unavailable content in training]),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # The illustrated values are a worked calculation, not a measured prediction: `2 × 0.4 + 1.5 = 2.3`
 # for `right`. At the same `x`, `left` would give −0.7 and null would give −2.2. A new code has no

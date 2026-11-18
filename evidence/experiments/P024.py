@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Is it copying by position instead of by ID?
-# categories:
-# - Associative recall
 # description: Place source values and questions in matching positions, then ask the model to copy the values.
 # evidence-readout:
 # - label: Matching IDs
@@ -14,10 +12,6 @@
 #   - broken_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. Source values are visible; query values are hidden.
-#   alt: Model tree with association, memory, entity_id, role, is_query, value. Selector notes identify hidden values.
-#     Source values are visible; query values are hidden.
 # evidence-review:
 #   question: Can matching positions make an apparent ID lookup misleading?
 #   modeling: Place source values and their queries in corresponding positions, with matching IDs. Hide the copied
@@ -71,17 +65,6 @@
 # should return −0.8. But the same answers can be obtained by copying the first source into the
 # first query and the second source into the second query. Correct predictions alone cannot tell
 # those strategies apart.
-#
-# ```typst
-# #tree(node("association", kind: "root", width: 120pt, children: (
-#   node("memory", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("entity_id", type: "Hash"),
-#     node("role", type: "Category"),
-#     node("is_query", type: "Boolean"),
-#     node("value", type: "Number", width: 155pt, detail: "Source visible; query hidden"),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

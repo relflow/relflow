@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Do reconstruction embeddings help a new small-label task?
-# categories:
-# - Representation
 # description: Learn to reconstruct three noisy views of a hidden class, then freeze the encoder and classify using
 #   eight labeled examples per class.
 # evidence-readout:
@@ -23,10 +21,6 @@
 #   - raw_accuracy
 #   format: percent
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. Each view is sometimes hidden; the downstream class is absent.
-#   alt: Model tree with record, first, second, geometry. Selector notes identify hidden values. Each view is sometimes
-#     hidden; the downstream class is absent.
 # evidence-review:
 #   question: Do reconstruction embeddings help a new small-label task?
 #   modeling: 'Generate three noisy views of a hidden class: two categorical views and a vector. Pretrain an encoder
@@ -98,13 +92,6 @@
 #
 # The hidden class is used only for the later classifier. During reconstruction, parts of the three visible views are sampled for hiding.
 #
-# ```typst
-# #tree(node("record", kind: "root", body: [Export frozen embedding], children: (
-#   node("first", type: "Enum", body: [Noisy synonym; sampled reconstruction]),
-#   node("second", type: "Enum", body: [Independent noisy synonym]),
-#   node("geometry", type: "Vector", body: [Two signal and fourteen noise coordinates]),
-# )))
-# ```
 #
 # The illustrated `arch` and `bay` are two possible synonyms associated with the same generating
 # class. The first two geometry coordinates carry a noisy class-specific square corner, while fourteen

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does each subtotal stay with its own item?
-# categories:
-# - Item alignment
 # description: Predict quantity times price separately for every real item in an order.
 # evidence-readout:
 # - label: Correct item answers
@@ -14,10 +12,6 @@
 #   - permuted_target_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with order, items, quantity, unit_price, subtotal. Amber cards are hidden prediction targets.
-#     Repeated collections keep their fields together.
 # evidence-review:
 #   question: Does each subtotal stay with its own item?
 #   modeling: Generate orders with zero to five items. Give each real item its own quantity and price, and hide its
@@ -65,16 +59,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("order", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("quantity", type: "Number"),
-#     node("unit_price", type: "Number"),
-#     node("subtotal", kind: "target", type: "Number", width: 150pt,),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

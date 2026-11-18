@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it average prepared contributions to covariance?
-# categories:
-# - Distribution statistics
 # description: Supply the centered products used to calculate covariance, then ask for their average.
 # evidence-readout:
 # - label: Average prediction
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, cross_deviation, covariance. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow average prepared contributions to covariance?
 #   modeling: 'Calculate each item’s contribution to covariance upstream: (x − mean(x)) × (y − mean(y)). Give those
@@ -73,15 +67,6 @@
 # The illustration contains four contributions of 1.4 and four of 0.2. Their total is 6.4; dividing
 # by eight gives the hidden covariance, 0.8. Positive and negative contributions are possible in the
 # generator, so the learned average must retain their signs rather than average absolute magnitudes.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("cross_deviation", type: "Number"),
-#   )),
-#   node("covariance", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

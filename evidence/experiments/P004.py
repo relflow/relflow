@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can a visible count help recover a total?
-# categories:
-# - Cardinality generalization
 # description: Every item has the same amount. Give the model the item count as an extra input and ask for the total.
 # evidence-readout:
 # - label: Total prediction
@@ -11,10 +9,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, item_count, items, amount, total. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can a visible count help recover a total?
 #   modeling: Repeat one randomly chosen amount between one and six times. Give the model both the repeated items
@@ -72,16 +66,6 @@
 # The illustration supplies six copies of 0.7 and explicitly says item_count is six, so the hidden
 # total is 6 × 0.7 = 4.2. One copy of the same amount would total 0.7. Looking only at the average
 # amount would not distinguish those answers.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("item_count", type: "Number"),
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

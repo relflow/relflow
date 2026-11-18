@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Do transaction histories form meaningful customer neighborhoods?
-# categories:
-# - Representation
 # description: Cluster frozen customer embeddings using only unlabeled training histories, then score independent
 #   customers with shorter or longer histories.
 # evidence-readout:
@@ -28,10 +26,6 @@
 #   - ari_mean
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Only visible transaction fields are reconstructed. The root exports one customer embedding.
-#   alt: Customer root exporting one embedding above a mean-reduced transaction branch capped at sixteen, with merchant,
-#     amount, interval days, and an irrelevant terminal.
 # evidence-review:
 #   question: Do transaction histories form meaningful customer neighborhoods?
 #   modeling: Generate independent customer histories whose transactions reflect four hidden styles, without customer
@@ -132,17 +126,6 @@
 # transactions should preserve its customer vector. A different test gives the
 # same new customer's first four, eight, or twelve transactions to the frozen
 # model, probing how much evidence it can use without changing the cluster fit.
-#
-# ```typst
-# #tree(node("customer", kind: "root", body: [Export frozen embedding], children: (
-#   node("transactions", kind: "branch", detail: "Cap 16; mean reduction; no attention", children: (
-#     node("merchant", type: "Enum", body: [Sampled reconstruction]),
-#     node("amount", type: "Number", body: [Sampled reconstruction]),
-#     node("interval_days", type: "Number", body: [Sampled reconstruction]),
-#     node("terminal", type: "Enum", body: [Independent nuisance]),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

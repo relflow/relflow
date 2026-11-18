@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can hiding values teach a relationship in both directions?
-# categories:
-# - Masking
 # description: Sometimes hide x or y during training, then ask the model to recover the missing value from the other.
 # evidence-readout:
 # - label: Recover y from x
@@ -18,10 +16,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Masking
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. Each field is sometimes hidden during training.
-#   alt: Model tree with record, x, y. Selector notes identify hidden values. Each field is sometimes hidden during
-#     training.
 # evidence-review:
 #   question: Can hiding values teach a relationship in both directions?
 #   modeling: Generate independent x values and set y = 2x + 0.3. Randomly hide either field during training so the
@@ -88,13 +82,6 @@
 # ```
 #
 # Values marked for reconstruction are hidden. During training, the selection is sampled separately for each field.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [35% sampled; query `hide_x`]),
-#   node("y", type: "Number", body: [35% sampled; query `hide_y`]),
-# )))
-# ```
 #
 # ## Comparison
 #

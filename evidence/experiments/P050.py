@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it adapt after losing an input?
-# categories:
-# - Schema mutation
 # description: Delete b from a model trained on y = a + b, then continue training with only a.
 # evidence-readout:
 # - label: After deletion and adaptation
@@ -25,9 +23,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input.
 # evidence-review:
 #   question: Can relflow adapt after losing an input?
 #   modeling: Train on y = a + b, permanently delete b, and continue fitting with only a. Compare the adapted model’s
@@ -81,14 +76,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number", body: [Retained input]),
-#   node("b", type: "Number", body: [Deleted before adaptation]),
-#   node("y", type: "Number", kind: "target", body: [Always hidden; still a + b]),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Do reconstruction embeddings separate transaction styles in new records?
-# categories:
-# - Representation
 # description: Fit four clusters without labels, then measure their agreement with hidden transaction styles on independent
 #   records and compare trained, untrained, shuffled-view, and raw representations.
 # evidence-readout:
@@ -25,10 +23,6 @@
 #   - ari
 #   format: number
 # evidence-group: Representation
-# evidence-diagram:
-#   caption: Train by reconstructing sampled fields, freeze the root embedding, then cluster without labels.
-#   alt: Account model with merchant pattern and payment rhythm Enum fields and a sixteen-coordinate cashflow Vector.
-#     The root exports one frozen embedding; hidden style labels stay outside the model.
 # evidence-review:
 #   question: Do reconstruction embeddings separate transaction styles in new records?
 #   modeling: Generate three noisy views of four hidden styles, then pretrain an encoder by reconstructing hidden
@@ -115,14 +109,6 @@
 # The hope is that relationships shared across these imperfect views become
 # useful in the account vector. The hidden style itself is never a reconstruction
 # answer, and its label is excluded from clustering.
-#
-# ```typst
-# #tree(node("account", kind: "root", body: [Export one frozen embedding], children: (
-#   node("merchant_pattern", type: "Enum", body: [Noisy spending view; sampled reconstruction]),
-#   node("payment_rhythm", type: "Enum", body: [Independent noisy payment view]),
-#   node("cashflow", type: "Vector(16)", body: [Two signal and fourteen nuisance coordinates]),
-# )))
-# ```
 #
 # ## Comparison
 #

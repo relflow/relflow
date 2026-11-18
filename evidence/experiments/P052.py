@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can each item choose which value to hide?
-# categories:
-# - Masking
 # description: Use an item’s selected flag to hide its value and predict it from x.
 # evidence-readout:
 # - label: Correct visible x
@@ -14,10 +12,6 @@
 #   - corrupted_context_nrmse
 #   format: error
 # evidence-group: Masking
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. selected chooses which item values are hidden.
-#   alt: Model tree with record, items, x, value. Selector notes identify hidden values. selected chooses which item
-#     values are hidden.
 # evidence-review:
 #   question: Can each item choose which value to hide?
 #   modeling: Generate bags of items with x and value = 2x + 0.3. An item-level Boolean selector hides some values
@@ -65,15 +59,6 @@
 # ```
 #
 # value is hidden and scored only where selected is true; the other item remains visible.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("items", kind: "branch", repeated: true, children: (
-#     node("x", type: "Number"),
-#     node("value", type: "Number", body: [Skip and reconstruct when `selected`]),
-#   )),
-# )))
-# ```
 #
 # ## Comparison
 #

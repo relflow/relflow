@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can admitting a new input change predictions before learning?
-# categories:
-# - Vocabulary
 # description: Introduce a new cohort of input identities while keeping output labels and hidden-answer selection
 #   fixed.
 # evidence-readout:
@@ -17,10 +15,6 @@
 #   - admission_mean_drift
 #   format: number
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. hide chooses which label answers are hidden.
-#   alt: Model tree with record, entity, context, label. Amber cards are hidden prediction targets. hide chooses which
-#     label answers are hidden.
 # evidence-review:
 #   question: Can admitting a new input change predictions before learning?
 #   modeling: Train on one cohort of identities, then admit a new cohort from training data without an optimizer update.
@@ -77,13 +71,6 @@
 #
 # label is hidden where hide is true. Each new cohort has unrelated identity effects.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("entity", type: "Category", detail: "Growing input vocabulary"),
-#   node("context", type: "Category", detail: "Fixed low/high evidence"),
-#   node("label", kind: "target", type: "Category", detail: "Query-selected reconstruction"),
-# )))
-# ```
 #
 # The illustrated row supplies an identity and the shared context `high`; the yes/no answer is sampled
 # from their combined effect. The hide flag selects which training labels are reconstructed and is not

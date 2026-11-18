@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can an instruction change the calculation?
-# categories:
-# - Operation-conditioned reduction
 # description: Ask for a list’s minimum, maximum, average, or total by changing a visible operation field.
 # evidence-readout:
 # - label: Total, instruction visible
@@ -14,10 +12,6 @@
 #   - hidden/sum/nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with request, items, value, answer, operation. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can an instruction change the calculation?
 #   modeling: Give the same list a visible request for minimum, maximum, average, or total. Hide the requested result.
@@ -74,16 +68,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("request", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("value", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt,),
-#   node("operation", type: "Category"),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -35,8 +35,8 @@ const inspect = `
   const { selection, evidenceEntries } = await import(${JSON.stringify(adapter)});
   process.stdout.write(JSON.stringify({
     selection,
-    entries: evidenceEntries.map(({ id, tags, requirements, diagram, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived }) => ({
-      id, tags, requirements, diagram, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived,
+    entries: evidenceEntries.map(({ id, tags, requirements, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived }) => ({
+      id, tags, requirements, result, readouts, sourceRevision, sourceUrl, sourcePath, sourceMatches, sourceSha256, source, code, sections, archived,
     })),
   }));
 `;
@@ -136,8 +136,6 @@ test('every current source belongs to one catalog and preserves plain Markdown p
   for (const entry of actual.entries) {
     assert.match(entry.sourcePath, /^evidence\/experiments\/P\d+\.py$/);
     assert.equal('lane' in entry, false);
-    assert.ok(entry.diagram.caption.trim(), `${entry.id}: keep the figure caption`);
-    assert.ok(entry.diagram.alt.trim(), `${entry.id}: keep alternative text`);
     assert.ok(entry.sections.method.trim(), `${entry.id}: retain the scientific method`);
     assert.doesNotMatch(entry.sections.result, /## Method|\{\{</);
   }

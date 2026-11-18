@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Do legitimate noisy groups trigger too many anomaly warnings?
-# categories:
-# - Anomaly
 # description: Predict an expected response in quiet and noisy groups, then compare global and group-specific residual
 #   thresholds.
 # evidence-readout:
@@ -17,9 +15,6 @@
 #   - precision_at_one_percent
 #   format: percent
 # evidence-group: Anomaly
-# evidence-diagram:
-#   caption: Visible fields supply evidence; prediction targets are hidden.
-#   alt: Predict an expected response in quiet and noisy groups, then compare global and group-specific residual thresholds.
 # evidence-review:
 #   question: Do group-specific thresholds reduce false alarms on noisy groups?
 #   modeling: Generate legitimate responses from quiet and noisy groups, then use one fitted predictor to score reconstruction
@@ -72,10 +67,6 @@
 #
 # Predict an expected response in quiet and noisy groups, then compare global and group-specific residual
 # thresholds. The example is illustrative; its answer is hidden during scoring.
-#
-# ```typst
-# #tree(node("record",kind:"root",children:(node("group",type:"Enum"),node("x",type:"Number"),node("answer",kind:"target",type:"Number"))))
-# ```
 #
 # ## Comparison
 #

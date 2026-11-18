@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can an average reveal how many items there were?
-# categories:
-# - Weighted aggregation
 # description: Use a Mean branch, with item attention disabled, to predict both an average and a total; the branch's
 #   count lane carries the multiplicity a plain average erases.
 # evidence-readout:
@@ -22,10 +20,6 @@
 #   - 1
 #   format: number
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, contribution, mean_contribution, weighted_sum. Amber cards are hidden prediction
-#     targets. Repeated collections keep their fields together.
 # evidence-review:
 #   question: Can relflow predict the total of repeated values?
 #   modeling: Repeat the same contribution one to six times. Ask a Mean branch, with item attention disabled, to predict
@@ -87,16 +81,6 @@
 # Six copies of 0.75 have an average of 0.75 and a total of 4.5, as illustrated. A single copy has
 # the same average but a total of 0.75. These matched cases separate knowing the shared contribution
 # from knowing how many times it should be counted.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("contribution", type: "Number"),
-#   )),
-#   node("mean_contribution", width: 150pt, kind: "target", type: "Number"),
-#   node("weighted_sum", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

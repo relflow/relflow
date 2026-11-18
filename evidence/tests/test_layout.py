@@ -286,7 +286,8 @@ def test_every_registered_proof_has_a_small_readable_overview() -> None:
         documented[identifier] += 1
         assert ROOT / entries[identifier]["script"] == page, f"{page}: registered script does not match {identifier}"
         assert metadata.get("title") and metadata.get("description"), page
-        assert metadata.get("categories"), f"{page}: missing proof family"
+        assert metadata.get("evidence-group"), f"{page}: missing proof family"
+        assert not {"categories", "evidence-diagram"} & metadata.keys(), f"{page}: remove unused presentation metadata"
         assert "evidence-source" not in metadata and "evidence-status" not in metadata, (
             f"{page}: status is derived from the measured result"
         )
@@ -298,12 +299,8 @@ def test_every_registered_proof_has_a_small_readable_overview() -> None:
         insight = overview.split("## Result\n", maxsplit=1)[1].strip()
         assert insight, f"{page}: interpret the result and name its limits in the authored script"
         assert 1 <= len(metadata["evidence-readout"]) <= 3, f"{page}: keep the result comparison small"
-        assert "```typst" in text and "#tree(" in text, f"{page}: missing model tree"
-        diagram = metadata["evidence-diagram"]
-        assert diagram["caption"] and diagram["alt"], f"{page}: describe the model tree"
-        assert "//|" not in text, f"{page}: keep diagram metadata in the header"
+        assert "```typst" not in text and "#tree(" not in text, f"{page}: remove unused diagram source"
         assert len(re.findall(r"^```yaml\s*$", text, flags=re.MULTILINE)) == 1, f"{page}: show one example record"
-        assert "#tree(" not in details, f"{page}: keep one diagram beside the example"
 
     assert set(documented) == set(entries), (
         f"proofs missing documentation: {sorted(entries.keys() - documented.keys())}"

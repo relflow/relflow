@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it return the winning item’s value?
-# categories:
-# - Argmax retrieval
 # description: Predict the value attached to the highest score while retaining the encoded candidates.
 # evidence-readout:
 # - label: Correct pairs
@@ -14,10 +12,6 @@
 #   - broken_nrmse
 #   format: error
 # evidence-group: Relational
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with retrieval, items, score, payload, answer. Amber cards are hidden prediction targets. Repeated
-#     collections keep their fields together.
 # evidence-review:
 #   question: Can relflow return the winning item’s value?
 #   modeling: Give each candidate a score and payload, retain the encoded candidates, and hide the payload with the
@@ -70,16 +64,6 @@
 # The second illustrated candidate wins because 1.7 is the largest score. Its payload is −3.0, which
 # is therefore the hidden answer. The payload 5.0 belongs to a lower-scoring candidate and must not
 # win simply because it is numerically larger.
-#
-# ```typst
-# #tree(node("retrieval", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("score", type: "Number"),
-#     node("payload", type: "Number"),
-#   )),
-#   node("answer", kind: "target", type: "Number", width: 150pt,),
-# )))
-# ```
 #
 # ## Comparison
 #

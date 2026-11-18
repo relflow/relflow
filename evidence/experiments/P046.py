@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Do harmless schema edits preserve predictions?
-# categories:
-# - Schema mutation
 # description: Train a useful predictor, then make edits that should not alter its visible information or learned
 #   state.
 # evidence-readout:
@@ -18,10 +16,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, x, code, y, unused. Amber cards are hidden prediction targets. Other fields provide
-#     the input.
 # evidence-review:
 #   question: Do harmless schema edits preserve predictions?
 #   modeling: Train a predictor, then change metadata or add and remove inactive fields without changing its useful
@@ -79,15 +73,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", body: [Source key becomes *renamed_x*]),
-#   node("code", type: "Category"),
-#   node("y", type: "Number", kind: "target", body: [Always hidden]),
-#   node("unused", type: "Number", body: [Added inactive, then deleted]),
-# )))
-# ```
 #
 # ## Comparison
 #

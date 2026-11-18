@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Does reconstruction accuracy include unfamiliar answers?
-# categories:
-# - Vocabulary
 # description: Hide a categorical answer and reconstruct it from numeric context, while varying how many test answers
 #   belong to the learned vocabulary.
 # evidence-readout:
@@ -22,10 +20,6 @@
 #   - accuracy.all
 #   format: percent
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Selector notes identify hidden values. hide chooses which code answers are hidden.
-#   alt: Model tree with record, x, code. Selector notes identify hidden values. hide chooses which code answers are
-#     hidden.
 # evidence-review:
 #   question: Does reconstruction accuracy include unfamiliar answers?
 #   modeling: Learn to reconstruct a hidden Category answer from numeric context. At evaluation, replace some expected
@@ -85,12 +79,6 @@
 # code is hidden wherever hide is true. Unknown code names cannot be emitted by the learned output
 # vocabulary.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", detail: "Class coordinate"),
-#   node("code", type: "Category", detail: "Reconstruct where hide is true"),
-# )))
-# ```
 #
 # The illustrative `x = 2` identifies `class-2`, and `hide: true` selects that code for
 # reconstruction. The auxiliary hide value controls masking; it is not a predictive schema field.

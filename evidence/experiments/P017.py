@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn a signal without inventing one?
-# categories:
-# - Calibration
 # description: Predict a yes/no answer from a visible yes/no input.
 # evidence-readout:
 # - label: Matching answers
@@ -14,10 +12,6 @@
 #   - noise_auc
 #   format: auc
 # evidence-group: Calibration
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with calibration, x, segment, tags, leak, target. Amber cards are hidden prediction targets. Other
-#     fields provide the input.
 # evidence-review:
 #   question: Can relflow learn a signal without inventing one?
 #   modeling: Train two yes/no predictors with the same architecture and budget. In one dataset, the visible Boolean
@@ -77,16 +71,6 @@
 # numeric x, segment, and tags are unrelated distractions. In the noise arm, leak is generated
 # independently: the same visible true can accompany either target. A single illustrated row cannot
 # show the difference; it is a relationship across many independent examples.
-#
-# ```typst
-# #tree(node("calibration", kind: "root", children: (
-#   node("x", type: "Number"),
-#   node("segment", type: "Category"),
-#   node("tags", type: "Set"),
-#   node("leak", type: "Boolean", width: 150pt,),
-#   node("target", kind: "target", type: "Boolean",),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can an input be disabled and restored?
-# categories:
-# - Schema mutation
 # description: Train on y = a + b, temporarily disable b, then enable it again.
 # evidence-readout:
 # - label: Original model
@@ -17,9 +15,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Mutations
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, a, b, y. Amber cards are hidden prediction targets. Other fields provide the input.
 # evidence-review:
 #   question: Can an input be disabled and restored?
 #   modeling: Train on y = a + b, then temporarily disable input b without retraining. Score the original model, the
@@ -76,14 +71,6 @@
 # ```
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
-#
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("a", type: "Number", body: [Always active]),
-#   node("b", type: "Number", body: [Active → inactive → active]),
-#   node("y", type: "Number", kind: "target", body: [Always hidden]),
-# )))
-# ```
 #
 # ## Comparison
 #

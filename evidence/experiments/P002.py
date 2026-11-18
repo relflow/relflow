@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it add longer lists than it saw in training?
-# categories:
-# - Cardinality generalization
 # description: Train on short lists, then ask for totals of longer lists.
 # evidence-readout:
 # - label: Familiar lengths
@@ -16,10 +14,6 @@
 #   - nrmse
 #   format: error
 # evidence-group: Aggregation
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Repeated collections keep their fields together.
-#   alt: Model tree with record, items, amount, total. Amber cards are hidden prediction targets. Repeated collections
-#     keep their fields together.
 # evidence-review:
 #   question: Can relflow add longer lists than relflow saw in training?
 #   modeling: Train on lists containing one to six signed amounts, with their total hidden. Test on new lists containing
@@ -85,15 +79,6 @@
 # six items, making this an example of an unfamiliar length. Four copies would total 2.0;
 # duplicating that complete four-item list must double the answer without changing the individual
 # values.
-#
-# ```typst
-# #tree(node("record", kind: "root", width: 120pt, children: (
-#   node("items", kind: "branch", repeated: true, width: 120pt, children: (
-#     node("amount", type: "Number"),
-#   )),
-#   node("total", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #

@@ -1,8 +1,6 @@
 # %% [markdown]
 # ---
 # title: Can it learn separate probabilities for Set members?
-# categories:
-# - Vocabulary
 # description: With no useful context, red appears in 90% of answer sets and blue in 20%. Predict each member’s probability.
 # evidence-readout:
 # - label: Predicted red membership
@@ -18,9 +16,6 @@
 #   - blue
 #   format: percent
 # evidence-group: Vocabulary
-# evidence-diagram:
-#   caption: Amber cards are hidden prediction targets. Other fields provide the input.
-#   alt: Model tree with record, x, labels. Amber cards are hidden prediction targets. Other fields provide the input.
 # evidence-review:
 #   question: Can relflow learn separate probabilities for Set members?
 #   modeling: Generate answer sets where red appears 90% of the time and blue 20%, independently of useful context.
@@ -79,12 +74,6 @@
 #
 # The answer is shown here for explanation; it is hidden from the model when scored.
 #
-# ```typst
-# #tree(node("record", kind: "root", children: (
-#   node("x", type: "Number", detail: "Constant"),
-#   node("labels", kind: "target", type: "Set", detail: "Independent memberships"),
-# )))
-# ```
 #
 # The illustrated set containing both colors is one sampled outcome. Red occurs with probability 0.9
 # and blue independently with probability 0.2, making their joint occurrence 0.18 in the generator.
