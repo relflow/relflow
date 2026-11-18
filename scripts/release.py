@@ -27,9 +27,9 @@ from urllib.request import urlopen
 
 ARTIFACT = "python-package-distributions"
 FIELDS = {"schema", "source_sha", "version", "files", "ci_run_id", "ci_run_attempt"}
-LICENSE = "AGPL-3.0-only"
+LICENSE = "Apache-2.0"
 LICENSE_FILES = ("LICENSE", "NOTICE")
-LICENSE_SHA256 = "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+LICENSE_SHA256 = "3c4082093feeaff38813f4e67969587abc89c915fcde3542dcd13a02c1d9682d"
 
 
 def artifact_name(attempt: int) -> str:
@@ -47,7 +47,7 @@ def notices(files: dict[str, bytes], address: str) -> None:
     if any(name not in files for name in LICENSE_FILES):
         raise ValueError(f"{address}: include one LICENSE and NOTICE with the distribution")
     if digest(files["LICENSE"].replace(b"\r\n", b"\n")) != LICENSE_SHA256:
-        raise ValueError(f"{address}: LICENSE must contain the unchanged GNU AGPLv3 text")
+        raise ValueError(f"{address}: LICENSE must contain the unchanged Apache 2.0 license text")
     notice = files["NOTICE"].decode("utf-8")
     if any(name not in notice for name in (LICENSE, "Grantham Taylor", "Reid Taylor")):
         raise ValueError(f"{address}: NOTICE must identify {LICENSE}, Grantham Taylor, and Reid Taylor")

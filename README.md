@@ -16,7 +16,7 @@
       <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=dark" />
       <img alt="Required Python version" src="https://shieldcn.dev/pypi/python/relflow.svg?variant=outline&amp;size=sm&amp;mode=light" />
     </picture>
-  <a href="LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/license-AGPL--3.0--only-68b78a.svg?variant=outline&amp;size=sm&amp;mode=dark" /><img alt="AGPL-3.0-only license" src="https://shieldcn.dev/badge/license-AGPL--3.0--only-185a3c.svg?variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
+  <a href="LICENSE"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/license-Apache--2.0-68b78a.svg?variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Apache 2.0 license" src="https://shieldcn.dev/badge/license-Apache--2.0-185a3c.svg?variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <!-- discord-invite:start -->
   <a href="https://discord.gg/DVyZUkvTFA"><picture><source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Discord-Join-68b78a.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=dark" /><img alt="Discord community" src="https://shieldcn.dev/badge/Discord-Join-185a3c.svg?logo=discord&amp;variant=outline&amp;size=sm&amp;mode=light" /></picture></a>
   <!-- discord-invite:end -->
@@ -248,12 +248,8 @@ Join the [Discord community](https://discord.gg/DVyZUkvTFA), contribute through
 [CONTRIBUTING.md](CONTRIBUTING.md), or work on the site using the
 [documentation guide](docs/README.md).
 
-Public relflow releases beginning with 0.5.0 are free and open source under the
-[GNU Affero General Public License, version 3 only](LICENSE) (`AGPL-3.0-only`).
-This covers project-authored code, documentation, examples, schema machinery,
-cache implementations, and preset definitions unless a file states otherwise.
-See [NOTICE](NOTICE) for attribution and
-[licensing](https://www.relflow.ai/latest/license/) for scope and source-sharing obligations.
-
-Additional licensing permissions require written approval from both Grantham
-Taylor and Reid Taylor and the necessary contribution rights.
+relflow is free and open source under the [Apache License, Version 2.0](LICENSE)
+(`Apache-2.0`). This covers project-authored code, documentation, examples, schema
+machinery, cache implementations, and preset definitions unless a file states
+otherwise. See [NOTICE](NOTICE) for project attribution and
+[licensing](https://www.relflow.ai/latest/license/) for details.

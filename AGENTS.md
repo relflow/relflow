@@ -8,17 +8,16 @@ needed; do not use camel-case branding.
 
 ## Licensing
 
-Public relflow releases beginning with 0.5.0 use `AGPL-3.0-only` for
-project-authored code, documentation, examples, schema machinery, caches, and
-preset definitions unless a file states otherwise. Preserve third-party notices
-and existing licensing grants. Additional licensing permissions require written
-approval from both Grantham Taylor and Reid Taylor and the necessary rights for
-every contribution; follow [CONTRIBUTING.md](CONTRIBUTING.md).
+Project-authored relflow code, documentation, examples, schema machinery,
+caches, and preset definitions use `Apache-2.0` unless a file states otherwise.
+Preserve historical copyright and attribution notices, existing licensing
+grants, and third-party licenses. Contributions follow
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Run `python scripts/release.py licensing` before creating distributions. Keep
 the pre-build CI check and the archive licensing checks in `scripts/release.py`.
 Never replace already-published files or rewrite historical Evidence provenance
-to apply the new license retroactively.
+when updating licensing.
 
 ## Package Mental Model
 

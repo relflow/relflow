@@ -1,7 +1,7 @@
 {
   "name": "relflow-docs-starlight",
   "private": true,
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "version": "0.0.0",
   "type": "module",
   "engines": {

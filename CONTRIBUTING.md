@@ -6,19 +6,17 @@ contract and the invariants affected by the change.
 
 ## Licensing and contribution rights
 
-Public relflow releases beginning with 0.5.0 use `AGPL-3.0-only`, as set out in
-[LICENSE](LICENSE) and [NOTICE](NOTICE). Project-authored documentation, examples,
-schema machinery, caches, and preset definitions share that license unless a
-file states otherwise. Preserve third-party licenses and attribution.
+relflow uses `Apache-2.0`, as set out in [LICENSE](LICENSE) and [NOTICE](NOTICE).
+Project-authored documentation, examples, schema machinery, caches, and preset
+definitions share that license unless a file states otherwise. Preserve the
+project attribution in NOTICE and all third-party licenses and notices.
 
-Additional licensing permissions and changes away from AGPL require written
-approval from both Grantham Taylor and Reid Taylor. A pull request or a DCO
-sign-off alone does not grant proprietary relicensing rights. Before merging
-outside contributions, both maintainers must retain a separate written grant
-from every relevant rights holder authorizing inclusion under AGPL and under
-additional terms they jointly approve. This includes contributions copied from
-forks and employer-owned work. The contribution instructions do not replace that
-agreement or establish a transfer of copyright.
+Contributions intentionally submitted for inclusion in relflow are provided
+under Apache 2.0 unless explicitly stated otherwise, as described in section 5
+of the license. Contributors retain their copyright and must have the necessary
+rights to submit their work, including employer-owned work and material copied
+from another project. Identify third-party material and its license in the pull
+request.
 
 Check source licensing before a build creates any distributions:
 
@@ -28,9 +26,9 @@ python scripts/release.py licensing
 
 The required CI source check precedes package and documentation builds. The
 package workflow repeats it before building; archive validation then checks
-0.5.0 and later wheels and source distributions for AGPL metadata, the unchanged
-license text, and the attribution notice. Preserve already-published artifacts
-and their original licensing and provenance.
+0.5.0 and later wheels and source distributions for Apache 2.0 metadata, the
+unchanged license text, and the attribution notice. Preserve already-published
+artifacts and their original licensing and provenance.
 
 ## Development Setup
 

@@ -2,7 +2,7 @@
 name = "relflow-native"
 version = "0.1.0"
 description = "Native kernels and shared local runtimes for relflow"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 repository = "https://github.com/relflow/relflow"
 edition = "2024"
 rust-version = "1.88"
