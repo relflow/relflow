@@ -171,7 +171,7 @@ def test_frontmatter_updates_preserve_code_and_nested_results(source):
 def test_discovery_rejects_duplicate_ids_instead_of_losing_an_experiment(source, tmp_path):
     import pytest
 
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
     text = (
         "# %% [markdown]\n# ---\n# title: Signal\n# ---\n# %%\n"
@@ -179,7 +179,7 @@ def test_discovery_rejects_duplicate_ids_instead_of_losing_an_experiment(source,
         "@experiment('P001', seed=1)\n"
         "def run(seed, steps, accelerator):\n    raise RuntimeError('not executed')\n"
     )
-    (family / "first.py").write_text(text)
-    (family / "second.py").write_text(text)
+    (family / "P001.py").write_text(text)
+    (family / "P002.py").write_text(text)
     with pytest.raises(ValueError, match="duplicate evidence ID"):
         source.registry(tmp_path)

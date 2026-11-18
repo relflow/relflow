@@ -52,7 +52,8 @@ experiments, their protocol, runtime tests, and recorded results live in
   do not publish the production site.
 - Shared package branding remains in `assets/branding/`; the font and its OFL
   remain in `assets/fonts/`. The website uses its selected prepared SVGs under
-  `starlight/src/assets/branding/`. Optional branding regeneration is separate
+  `starlight/src/assets/branding/`; its authoring lives in
+  `assets/branding/site/`. Optional branding regeneration is separate
   from normal builds. Downloaded diagnostic bundles may stage under the ignored
   `assets/evidence-plots/` path; their verification remains owned by Evidence.
 - Update public README links when routes change. Do not add old-route aliases.

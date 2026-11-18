@@ -9,6 +9,7 @@ import inspect
 import json
 import os
 import platform
+import re
 import subprocess
 import time
 import traceback
@@ -69,9 +70,8 @@ def provenance(script: Path) -> dict[str, Any]:
     import torch
 
     package = Path(relflow.__file__).resolve().parent
-    files = [
-        (path.relative_to(ROOT).as_posix(), path) for path in (script, *sorted(Path(__file__).parent.glob("*.py")))
-    ]
+    shared = [path for path in sorted(Path(__file__).parent.glob("*.py")) if not re.fullmatch(r"P\d+\.py", path.name)]
+    files = [(path.relative_to(ROOT).as_posix(), path) for path in (script, *shared)]
     files.extend(
         ("src/relflow/" + path.relative_to(package).as_posix(), path) for path in sorted(package.rglob("*.py"))
     )

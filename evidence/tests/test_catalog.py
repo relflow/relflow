@@ -9,8 +9,10 @@ from evidence_ci import evaluate, plan, registry
 
 
 def test_baseline_catalog_reads_git_tree_as_data(tmp_path, monkeypatch):
+    for name in subprocess.check_output(["git", "rev-parse", "--local-env-vars"], text=True).splitlines():
+        monkeypatch.delenv(name, raising=False)
     repo = tmp_path / "repo"
-    source = repo / "evidence/experiments/example/proof.py"
+    source = repo / "evidence/experiments/P001.py"
     source.parent.mkdir(parents=True)
     source.write_text(
         "# %% [markdown]\n# ---\n# title: Signal\n# ---\n"

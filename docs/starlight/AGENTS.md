@@ -42,10 +42,10 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   negative content margins, or viewport-dependent padding/gap changes. Responsive
   layouts may change columns, orientation, and wrapping; spacing stays fixed.
   Markdown section gaps use rem so responsive heading sizes do not change them.
-- The header logo and favicon use the selected soft-canopy mark from the
-  `logo-rework` worktree, including its Black pine light ink and matching
+- The header logo and favicon use the selected soft-canopy mark owned by the
+  checked-in site SVGs, including Black pine light ink and the matching
   Libertinus Serif Semibold wordmark. Prepared SVGs live in `src/assets/branding/`;
-  regeneration and source provenance are documented in `branding/README.md`.
+  regeneration and source provenance are documented in `../assets/branding/site/README.md`.
   Keep both theme variants, accessible home-link text, and mobile sizing intact.
 - Standalone lowercase `relflow` mentions in page prose use an inline serif
   wordmark. Keep authored text plain: `src/middleware.ts` applies the server-only
@@ -54,7 +54,7 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   `data-no-brand` opts an element and its descendants out. Preserve original
   text and attributes, heading anchors, selection, and copying. Style the shared
   `.rf-wordmark` in `src/styles/site.css`; the prepared, licensed font subset and
-  regeneration command are documented in `branding/README.md`. Do not add
+  regeneration command are documented in `../assets/branding/site/README.md`. Do not add
   browser text-replacement scripts or manually wrap each authored mention.
 - The palette lab explores accent variations of the current neutral theme.
   Keep surfaces, body text, and semantic string/number colors identical across
@@ -295,17 +295,15 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   measurements. Never hardcode counts, check outcomes, or readout values
   in pages or a separate catalog. Pending selections stay pending; explicit bad
   inputs fail. Preserve all raw metrics, named checks, and provenance.
-  Validate the fields consumed by presentation. Results outside the current
-  declaration catalog require exact retained CI source bytes, a matching script
-  digest and ID, and their recorded original path/lane identity; reject unknown
-  identities rather than silently omitting measurements or reusing another proof.
-  `src/evidence/reviews.ts` owns an individually reviewed question, concise modeling
-  explanation, primary comparison paths/units, and scope note for every proof.
-  There is no extracted-prose or arbitrary-first-metric fallback: add a review
-  when adding a proof. `src/evidence/catalog.ts` owns only the shared tag vocabulary
-  and display labels. Each experiment owns its capability, types, and conditions
-  in its PEP 723 `[tool.relflow.evidence]` table. Never add ID membership lists
-  to a central catalog. Missing, unknown, or duplicate tags fail static checks.
+  Validate the fields consumed by presentation. Only current experiment scripts
+  define pages; removed experiments are not reintroduced from a selected publication.
+  Each script's YAML `evidence-review` owns its reviewed question, modeling explanation,
+  comparison paths/units, scope note, and optional criterion labels. There is no
+  extracted-prose or first-metric fallback. `src/evidence/metadata.ts` validates
+  this structure; it never lists IDs. `src/evidence/catalog.ts` owns only shared
+  vocabulary and filters. Capability, types, and conditions remain in each script's
+  PEP 723 table. Never add per-experiment maps to shared code. Missing, unknown,
+  or duplicate tags fail static checks.
   Each current proof needs exactly one capability and reviewed conditions.
   Tags describe the protocol, independently of the selected outcome. The tags drive catalog filters and `LeafEvidence`
   reverse links; do not tag retired Cluster proofs as current Group evidence.

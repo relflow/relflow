@@ -11,11 +11,11 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
-NAMES = ("sampled_reconstruction", "query_reconstruction", "branch_ablation", "prefix_generation")
+NAMES = ("P051", "P052", "P053", "P054")
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(f"masking_proof_{name}", ROOT / "experiments/masking" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(f"masking_proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -31,7 +31,7 @@ def test_masking_generators_are_restartable_with_independent_splits(name):
 
 
 def test_sampled_proof_does_not_use_query_targets_during_training():
-    proof = load("sampled_reconstruction")
+    proof = load("P051")
     rows = list(proof.records(rows=256, seed=11))
     assert all(not row["hide_x"] and not row["hide_y"] for row in rows)
     model = proof.build()
@@ -46,7 +46,7 @@ def test_sampled_proof_does_not_use_query_targets_during_training():
 
 
 def test_nested_query_proof_selects_real_targets_not_padding():
-    proof = load("query_reconstruction")
+    proof = load("P052")
     rows = list(proof.records(rows=32, seed=11))
     expected = np.asarray(
         [[item["selected"] for item in row["items"]] + [False] * (proof.LENGTH - len(row["items"])) for row in rows]
@@ -58,7 +58,7 @@ def test_nested_query_proof_selects_real_targets_not_padding():
 
 
 def test_branch_proof_selectors_cover_all_visibility_patterns_and_compose():
-    proof = load("branch_ablation")
+    proof = load("P053")
     rows = list(proof.records(rows=128, seed=11))
     assert {tuple(view["hidden"] for view in row["views"]) for row in rows} == {
         (False, False),
@@ -78,7 +78,7 @@ def test_branch_proof_selectors_cover_all_visibility_patterns_and_compose():
 
 
 def test_prefix_proof_hides_every_future_and_trains_one_next_value():
-    proof = load("prefix_generation")
+    proof = load("P054")
     rows = list(proof.records(rows=32, seed=11))
     model = proof.build()
     source = pa.Table.from_pylist(rows)
@@ -91,13 +91,13 @@ def test_prefix_proof_hides_every_future_and_trains_one_next_value():
     np.testing.assert_array_equal(field.present.numpy().reshape(visible.shape), visible)
 
 
-@pytest.mark.parametrize("name", ("query_reconstruction", "prefix_generation"))
+@pytest.mark.parametrize("name", ("P052", "P054"))
 def test_repeated_prediction_reads_public_output_without_learning(name):
     import relflow as rf
 
     proof = load(name)
     model = proof.build()
-    address = "/items/value" if name == "query_reconstruction" else "/events/value"
+    address = "/items/value" if name == "P052" else "/events/value"
     before = rf.Number.normalization(model, address)
     content, inferred = proof.prediction(model, list(proof.records(rows=4, seed=11)))
     assert content.shape == inferred.shape == (4, proof.LENGTH)
@@ -106,7 +106,7 @@ def test_repeated_prediction_reads_public_output_without_learning(name):
 
 
 def test_rollout_uses_generated_values_never_true_suffix(monkeypatch):
-    proof = load("prefix_generation")
+    proof = load("P054")
     rows = list(proof.records(rows=8, seed=11))
     calls = []
 
@@ -131,7 +131,7 @@ def test_rollout_uses_generated_values_never_true_suffix(monkeypatch):
 
 
 def test_query_reader_keeps_scoring_alignment_when_public_collections_have_different_lengths():
-    proof = load("query_reconstruction")
+    proof = load("P052")
     rows = [
         {"items": []},
         {"items": [{"x": 0.1, "value": 0.5, "selected": True}]},

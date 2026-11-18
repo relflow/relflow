@@ -1,0 +1,340 @@
+# %% [markdown]
+# ---
+# title: Do legitimate noisy groups trigger too many anomaly warnings?
+# description: Predict an expected response in quiet and noisy groups, then compare global and group-specific residual
+#   thresholds.
+# evidence-readout:
+# - label: Conditional anomaly ranking
+#   metric:
+#   - conditional
+#   - auc
+#   format: auc
+# - label: Precision at 1% prevalence
+#   metric:
+#   - conditional
+#   - precision_at_one_percent
+#   format: percent
+# evidence-group: Anomaly
+# evidence-review:
+#   question: Do group-specific thresholds reduce false alarms on noisy groups?
+#   modeling: Generate legitimate responses from quiet and noisy groups, then use one fitted predictor to score reconstruction
+#     errors. Compare a global anomaly threshold with separate thresholds for each group, all chosen from clean validation
+#     data. Measure false alarms on legitimate noisy-group records.
+#   comparison:
+#     metric: False positive rate
+#     kind: Controlled comparison
+#     conditions:
+#     - label: Global threshold · noisy group
+#       path:
+#       - global
+#       - false_positive_by_group
+#       - noisy
+#       format: number
+#     - label: Group-specific threshold · noisy group
+#       path:
+#       - conditional
+#       - false_positive_by_group
+#       - noisy
+#       format: number
+#     definition: Fraction of legitimate records incorrectly flagged as anomalies in the named group. Lower means
+#       fewer false alarms.
+#     direction: Lower error is better
+#     domain:
+#     - 0
+#     - 1
+#   note: Lower false alarms alone do not establish useful detection. Recall, ranking, and expected precision at 1%
+#     anomaly prevalence remain separate measurements.
+# evidence-plot:
+#   target: answer
+#   focus: Does a global anomaly threshold unfairly flag noisy but valid contexts?
+#   comparison: Compare global and conditional residual scoring, including false alarms within each noise group.
+#   limit: All operating thresholds are chosen from validation data; group false alarms are not replaced by a pooled
+#     average.
+#   renderer: plot
+# ---
+#
+# The same-sized prediction error can be extraordinary in a quiet group and ordinary in a noisy one. A
+# useful anomaly warning should account for that difference instead of systematically over-alerting on
+# legitimate noisy records.
+#
+# ## Example
+#
+# ```yaml
+# group: noisy
+# x: 0.5
+# answer: 3.4
+# ```
+#
+# Predict an expected response in quiet and noisy groups, then compare global and group-specific residual
+# thresholds. The example is illustrative; its answer is hidden during scoring.
+#
+# ## Comparison
+#
+# Train one context-aware predictor, then compare a global residual threshold and a validation-only
+# threshold for each group. A marginal-only baseline ignores context. Anomalies permute complete response
+# values across test contexts, preserving the response distribution exactly.
+#
+# ## Result
+#
+# No result is claimed before a full run is recorded. The checks below are provisional hypotheses, not
+# established capabilities. Lower error and proper loss are better; larger accuracy is better. Controls and
+# each evaluation condition remain separate.
+#
+# ## Method
+#
+# ### Process, splits, and interpretation
+#
+# Balanced groups have response 2x-2 or 2x+2 with Gaussian noise standard deviation 0.1 or 0.8. In the
+# illustration, the noisy group expects3.0 at x=0.5, so3.4 is a plausible legitimate value. Independent
+# training/validation/test streams contain4096/2048/8192 rows. A500-update predictor is shared by both
+# residual scoring policies. Global and group thresholds are their validation 95th percentiles; no test
+# labels choose thresholds. Report legitimate false positives separately for each group, detection recall,
+# AUROC, and expected precision at 1% anomaly prevalence. Conditional scores divide by their own validation
+# threshold. The marginal control has identical clean/anomaly score distributions by construction. High
+# recall without useful precision is not sufficient, and heterogeneous Gaussian noise does not cover
+# arbitrary uncertainty or new unseen groups.
+#
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["matplotlib>=3.10",
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyarrow",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "reliability"
+# types = []
+# conditions = ["changed-associations", "noise"]
+# ///
+
+"""P096: compare anomaly thresholds when legitimate groups have unequal noise."""
+
+import sys
+from pathlib import Path
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import pyarrow as pa
+import relflow as rf
+from reporting import experiment, report
+
+BUDGET = 500
+GROUPS = ("quiet", "noisy")
+SIGMA = {"quiet": 0.1, "noisy": 0.8}
+
+
+def records(rows: int, seed: int):
+    rng = np.random.default_rng(seed)
+    groups = np.resize(np.arange(2), rows)
+    rng.shuffle(groups)
+    for group, x, z in zip(groups, rng.uniform(-1.0, 1.0, rows), rng.normal(size=rows), strict=True):
+        name = GROUPS[group]
+        yield {"group": name, "x": float(x), "answer": float(2 * x + (-2.0, 2.0)[group] + SIGMA[name] * z)}
+
+
+class PredictionModel(rf.Model):
+    group = rf.Enum(values=GROUPS)
+    x = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
+def build() -> rf.Model:
+    return PredictionModel(d_model=16, n_layers=1, n_heads=4, dropout=0.0)
+
+
+def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:
+    output = pl.DataFrame(
+        model.predict(pa.Table.from_pylist([{"group": row["group"], "x": row["x"]} for row in rows]))
+    )["predictions"].to_list()
+    return np.asarray([row["answer"]["content"] for row in output])
+
+
+def auc(normal: np.ndarray, anomalous: np.ndarray) -> float:
+    ordered = np.sort(normal)
+    return float(
+        np.mean(
+            (np.searchsorted(ordered, anomalous, "left") + np.searchsorted(ordered, anomalous, "right"))
+            / (2 * len(ordered))
+        )
+    )
+
+
+def operating(normal: np.ndarray, anomalous: np.ndarray, groups: np.ndarray) -> dict:
+    false_positive = float(np.mean(normal > 1.0))
+    recall = float(np.mean(anomalous > 1.0))
+    prevalence = 0.01
+    denominator = prevalence * recall + (1 - prevalence) * false_positive
+    return {
+        "auc": auc(normal, anomalous),
+        "false_positive_rate": false_positive,
+        "recall": recall,
+        "precision_at_one_percent": float(prevalence * recall / denominator) if denominator else 0.0,
+        "false_positive_by_group": {name: float(np.mean(normal[groups == name] > 1.0)) for name in GROUPS},
+    }
+
+
+def fit(model: rf.Model, train: list[dict], validation: list[dict], seed: int, budget: int, accelerator: str) -> int:
+    """Fit only the supplied training rows with a fixed optimizer/update budget."""
+    data = rf.ArrowDataModule(
+        train=pa.Table.from_pylist(train),
+        validate=pa.Table.from_pylist(validation),
+        num_workers=0,
+        persistent_workers=False,
+        pin_memory=False,
+    )
+    model.fit(
+        data,
+        batch_size=64,
+        learning_rate=0.002,
+        weight_decay=0.01,
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_steps=budget,
+        max_epochs=-1,
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+        limit_val_batches=1,
+    )
+    model.eval()
+    return int(model.trainer.global_step)
+
+
+@experiment("P096", seed=9601)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    model = build()
+    train = list(records(4096, seed + 1))
+    validation = list(records(2048, seed + 2))
+    test = list(records(8192, seed + 3))
+    budget = BUDGET if steps is None else min(steps, BUDGET)
+    used = fit(model, train, validation, seed, budget, accelerator)
+    validation_residual = np.abs(predict(model, validation) - np.asarray([row["answer"] for row in validation]))
+    valid_groups = np.asarray([row["group"] for row in validation])
+    groups = np.asarray([row["group"] for row in test])
+    global_threshold = max(float(np.quantile(validation_residual, 0.95)), 1e-8)
+    thresholds = {
+        name: max(float(np.quantile(validation_residual[valid_groups == name], 0.95)), 1e-8) for name in GROUPS
+    }
+    prediction = predict(model, test)
+    actual = np.asarray([row["answer"] for row in test])
+    broken = actual[np.random.default_rng(seed + 4).permutation(len(test))]
+    clean = np.abs(prediction - actual)
+    anomalous = np.abs(prediction - broken)
+    marginal_mean = float(np.mean([row["answer"] for row in train]))
+    marginal_threshold = max(
+        float(np.quantile(np.abs(np.asarray([row["answer"] for row in validation]) - marginal_mean), 0.95)), 1e-8
+    )
+    scale = np.asarray([thresholds[name] for name in groups])
+    global_score = operating(clean / global_threshold, anomalous / global_threshold, groups)
+    conditional = operating(clean / scale, anomalous / scale, groups)
+    marginal = operating(
+        np.abs(actual - marginal_mean) / marginal_threshold, np.abs(broken - marginal_mean) / marginal_threshold, groups
+    )
+    metrics = {
+        "updates": used,
+        "global_threshold": global_threshold,
+        "conditional_thresholds": thresholds,
+        "global": global_score,
+        "conditional": conditional,
+        "marginal": marginal,
+        "prediction_nrmse": float(np.sqrt(np.mean(clean**2)) / np.std(actual)),
+        "anomaly_prevalence": 0.01,
+        "target_marginals_exactly_preserved": bool(np.array_equal(np.sort(actual), np.sort(broken))),
+    }
+    checks = {
+        "Permutation preserves the target marginal exactly": metrics["target_marginals_exactly_preserved"],
+        "Conditional predictor beats marginal standard deviation": metrics["prediction_nrmse"] < 0.45,
+        "Conditional anomaly AUROC reaches 0.75": conditional["auc"] >= 0.75,
+        "Marginal-only anomaly AUROC stays at 0.50": abs(marginal["auc"] - 0.5) < 1e-6,
+    }
+    for name in GROUPS:
+        checks[f"Conditional threshold keeps {name} false positives below 0.10"] = (
+            conditional["false_positive_by_group"][name] <= 0.10
+        )
+    checks["All global and conditional operating points are finite"] = all(
+        np.isfinite(item[key])
+        for item in (global_score, conditional, marginal)
+        for key in ("auc", "false_positive_rate", "recall", "precision_at_one_percent")
+    )
+    return metrics, checks
+
+
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    import numpy as np
+    from matplotlib.ticker import PercentFormatter
+
+    from evidence.diagnostics.data import human
+    from evidence.diagnostics.plots import COLORS, axes_pair, dots, roc
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.7)
+    groups = list(m["global"]["false_positive_by_group"])
+    dots(
+        axes[0],
+        groups,
+        {
+            human(arm): [m[arm]["false_positive_by_group"][group] for group in groups]
+            for arm in ["global", "conditional", "marginal"]
+        },
+        xlabel="Normal false-alarm rate within each group",
+        percent=True,
+    )
+    axes[0].set_xlim(
+        0,
+        max(
+            0.12,
+            max(
+                (
+                    value
+                    for arm in ["global", "conditional", "marginal"]
+                    for value in m[arm]["false_positive_by_group"].values()
+                )
+            )
+            * 1.1,
+        ),
+    )
+    frames = [frame for frame in bundle.frames if frame["function"] == "operating"]
+    for index, (frame, arm) in enumerate(zip(frames, ["global", "conditional", "marginal"], strict=True)):
+        normal, anomalous = bundle.values(frame, "normal", "anomalous")
+        fpr, tpr = roc(normal, anomalous)
+        np.testing.assert_allclose(np.trapezoid(tpr, fpr), m[arm]["auc"], atol=1e-12)
+        axes[1].plot(fpr, tpr, color=COLORS[index], lw=1.8, label=f"{human(arm)} (AUC {m[arm]['auc']:.3f})")
+        axes[1].scatter(m[arm]["false_positive_rate"], m[arm]["recall"], color=COLORS[index], s=35, zorder=5)
+    axes[1].set(
+        xlabel="Normal false-alarm rate",
+        ylabel="Anomaly recall",
+        title="Ranking with validation-chosen thresholds",
+        xlim=(0, 1),
+        ylim=(0, 1),
+    )
+    axes[1].xaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].yaxis.set_major_formatter(PercentFormatter(1))
+    axes[1].legend(fontsize=8, loc="lower right")
+    return (
+        fig,
+        "Group false alarms use fixed held-out memberships. Curves use retained scores and their areas match the proof. Dots use thresholds chosen only from clean validation residuals; conditional thresholds adjust for each group's normal noise level.",
+        {},
+    )
+
+
+if __name__ == "__main__":
+    report(run)

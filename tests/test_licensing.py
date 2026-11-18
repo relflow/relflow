@@ -33,7 +33,7 @@ def checkout(tmp_path):
     return tmp_path
 
 
-def test_checked_out_sources_are_ready_for_agpl_builds(checkout):
+def test_checked_out_sources_are_ready_for_apache_builds(checkout):
     release.licensing(checkout)
     for name in ("LICENSE", "native/LICENSE"):
         path = checkout / name
@@ -55,10 +55,11 @@ def test_checked_out_sources_are_ready_for_agpl_builds(checkout):
         "native/NOTICE",
     ],
 )
-def test_source_gate_rejects_a_stale_permissive_declaration(checkout, name):
+@pytest.mark.parametrize("license", ["AGPL-3.0-only", "MIT"])
+def test_source_gate_rejects_a_different_license(checkout, name, license):
     path = checkout / name
-    path.write_text(path.read_text().replace("AGPL-3.0-only", "MIT"))
-    with pytest.raises(ValueError, match="AGPL"):
+    path.write_text(path.read_text().replace("Apache-2.0", license))
+    with pytest.raises(ValueError, match="Apache-2.0"):
         release.licensing(checkout)
 
 
@@ -69,17 +70,17 @@ def test_source_gate_requires_real_license_and_notice_files(checkout, name):
         release.licensing(checkout)
 
 
-def test_source_gate_rejects_a_custom_addition_to_the_agpl_text(checkout):
+def test_source_gate_rejects_a_custom_addition_to_the_apache_text(checkout):
     path = checkout / "LICENSE"
     path.write_bytes(path.read_bytes() + b"\nOnly the founders may make private modifications.\n")
-    with pytest.raises(ValueError, match="unchanged GNU AGPLv3"):
+    with pytest.raises(ValueError, match="unchanged Apache 2.0"):
         release.licensing(checkout)
 
 
 def test_docs_lockfile_license_is_its_root_package_license(checkout):
     path = checkout / "docs/starlight/package-lock.json"
     lock = json.loads(path.read_text())
-    lock["license"] = "AGPL-3.0-only"
+    lock["license"] = "Apache-2.0"
     lock["packages"][""]["license"] = "MIT"
     path.write_text(json.dumps(lock))
     with pytest.raises(ValueError, match="documentation package license"):

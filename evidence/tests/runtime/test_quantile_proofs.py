@@ -13,15 +13,13 @@ sys.path.insert(0, str(ROOT / "experiments"))
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(
-        f"quantile_proof_{name}", ROOT / "experiments/quantile" / f"{name}.py"
-    )
+    spec = importlib.util.spec_from_file_location(f"quantile_proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-@pytest.mark.parametrize("name", ["rank_regression", "clipped_extrapolation"])
+@pytest.mark.parametrize("name", ["P067", "P068"])
 def test_quantile_proof_streams_restart_independently_without_latent_columns(name):
     proof = load(name)
     rows = list(proof.records(rows=32, seed=11))
@@ -32,7 +30,7 @@ def test_quantile_proof_streams_restart_independently_without_latent_columns(nam
     assert proof.TEST_ROWS >= 2048
 
 
-@pytest.mark.parametrize("name", ["rank_regression", "clipped_extrapolation"])
+@pytest.mark.parametrize("name", ["P067", "P068"])
 def test_quantile_proof_schema_keeps_the_only_target_hidden(name):
     model = load(name).build()
     assert model.schema.requests[rf.Address("amount")].type == "quantile"
@@ -44,7 +42,7 @@ def test_quantile_proof_schema_keeps_the_only_target_hidden(name):
 
 
 def test_rank_generator_has_skew_and_independent_source_unit_noise():
-    rows = list(load("rank_regression").records(rows=8192, seed=11))
+    rows = list(load("P067").records(rows=8192, seed=11))
     amount = np.asarray([row["amount"] for row in rows])
     residual = np.asarray([row["cost"] for row in rows]) - 200.0 - 3.0 * amount
     assert amount.min() >= 0
@@ -56,7 +54,7 @@ def test_rank_generator_has_skew_and_independent_source_unit_noise():
 
 @pytest.mark.parametrize("shift", [-30.0, 30.0])
 def test_shifted_control_retains_noise_but_moves_beyond_training_support(shift):
-    proof = load("clipped_extrapolation")
+    proof = load("P068")
     original = list(proof.records(rows=2048, seed=11))
     shifted = list(proof.records(rows=2048, seed=11, shift=shift))
     amount = np.asarray([row["amount"] for row in original])

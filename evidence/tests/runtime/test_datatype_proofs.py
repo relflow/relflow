@@ -13,14 +13,17 @@ sys.path.insert(0, str(ROOT / "experiments"))
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(f"datatype_proof_{name}", ROOT / "research/datatypes" / f"{name}.py")
+    spec = importlib.util.spec_from_file_location(
+        f"datatype_proof_{name}",
+        ROOT / "experiments" / f"{name}.py",
+    )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def test_duration_arms_share_targets_and_elapsed_values_across_epoch_offsets():
-    proof = load("duration_equivalence")
+    proof = load("P099")
     dynamic = list(proof.records(rows=128, seed=11))
     static = list(proof.records(rows=128, seed=11, static=True))
     assert dynamic == list(proof.records(rows=128, seed=11))
@@ -35,7 +38,7 @@ def test_duration_arms_share_targets_and_elapsed_values_across_epoch_offsets():
 
 
 def test_shuffled_duration_control_preserves_marginals_and_breaks_only_training_alignment():
-    proof = load("duration_equivalence")
+    proof = load("P099")
     original = list(proof.records(rows=4096, seed=11))
     shuffled = list(proof.records(rows=4096, seed=11, shuffled=True))
     assert shuffled == list(proof.records(rows=4096, seed=11, shuffled=True))
@@ -47,7 +50,7 @@ def test_shuffled_duration_control_preserves_marginals_and_breaks_only_training_
 
 @pytest.mark.parametrize("domain", ["integer", "labels"])
 def test_ordinal_withheld_answers_are_inside_observed_range_and_disjoint(domain):
-    proof = load("ordinal_generalization")
+    proof = load("P100")
     populations = {}
     for arm in ("ordinal", "number", "category"):
         seen = list(proof.records(rows=2048, seed=11, domain=domain, novel=False, arm=arm))
@@ -59,9 +62,7 @@ def test_ordinal_withheld_answers_are_inside_observed_range_and_disjoint(domain)
     assert populations["ordinal"] == populations["number"] == populations["category"]
 
 
-@pytest.mark.parametrize(
-    "name,arm,field", [("duration_equivalence", "duration", "target"), ("ordinal_generalization", "ordinal", "rank")]
-)
+@pytest.mark.parametrize("name,arm,field", [("P099", "duration", "target"), ("P100", "ordinal", "rank")])
 def test_prediction_readers_accept_polars_and_omit_answers(name, arm, field):
     proof = load(name)
     inputs = []
@@ -83,7 +84,7 @@ def test_prediction_readers_accept_polars_and_omit_answers(name, arm, field):
 
 
 def test_ordinal_rank_readouts_keep_population_counts_and_errors(monkeypatch):
-    proof = load("ordinal_generalization")
+    proof = load("P100")
     monkeypatch.setattr(proof, "prediction", lambda *args: np.array([1, 3, 4]))
     rows = [{"signal": value + 0.02, "rank": value} for value in (1, 1, 3)]
     measured = proof.evaluate(None, rows, "integer", "ordinal")

@@ -42,7 +42,7 @@ def distributions(root, name="package", source=SOURCE, content=b"original", run_
     fields = f"Metadata-Version: 2.4\nName: relflow\nVersion: {version}\n"
     files = {}
     if licensed:
-        fields += "License-Expression: AGPL-3.0-only\nLicense-File: LICENSE\nLicense-File: NOTICE\n"
+        fields += "License-Expression: Apache-2.0\nLicense-File: LICENSE\nLicense-File: NOTICE\n"
         checkout = Path(__file__).resolve().parents[1]
         files = {name: (checkout / name).read_bytes() for name in ("LICENSE", "NOTICE")}
     metadata = (fields + "\n").encode()
@@ -62,7 +62,7 @@ def distributions(root, name="package", source=SOURCE, content=b"original", run_
 
 
 @pytest.mark.parametrize("version", ["0.5.0rc1", "0.5.0", "0.5.0.post1", "0.6.0", "1.0.0"])
-def test_agpl_metadata_and_notices_are_required_from_the_first_050_prerelease(tmp_path, version):
+def test_apache_metadata_and_notices_are_required_from_the_first_050_prerelease(tmp_path, version):
     with pytest.raises(ValueError, match="expected one"):
         distributions(tmp_path, name="missing-license", version=version)
     distributions(tmp_path, version=version, licensed=True)
@@ -73,7 +73,7 @@ def test_agpl_metadata_and_notices_are_required_from_the_first_050_prerelease(tm
     "problem",
     ["expression", "legacy", "declaration", "missing", "modified", "attribution", "duplicate", "link"],
 )
-def test_agpl_archives_reject_inconsistent_licensing(tmp_path, kind, problem):
+def test_apache_archives_reject_inconsistent_licensing(tmp_path, kind, problem):
     version = "0.5.0"
     directory = distributions(tmp_path, version=version, licensed=True)
     path = directory / (f"relflow-{version}-py3-none-any.whl" if kind == "wheel" else f"relflow-{version}.tar.gz")
@@ -92,7 +92,7 @@ def test_agpl_archives_reject_inconsistent_licensing(tmp_path, kind, problem):
                 assert stream is not None
                 members[member.name] = stream.read()
     if problem == "expression":
-        members[metadata] = members[metadata].replace(b"AGPL-3.0-only", b"MIT")
+        members[metadata] = members[metadata].replace(b"Apache-2.0", b"MIT")
     elif problem == "legacy":
         members[metadata] = b"License: MIT\n" + members[metadata]
     elif problem == "declaration":
@@ -372,7 +372,7 @@ def test_receipt_rejects_unexpected_distribution_inventory(tmp_path, unexpected)
 def test_distribution_metadata_is_checked_even_when_hashes_match(tmp_path, name):
     directory = distributions(tmp_path)
     path = directory / name
-    metadata = b"Name: json2vec\nVersion: 0.4.2\n"
+    metadata = b"Name: unrelated-project\nVersion: 0.4.2\n"
     if name == WHEEL:
         with zipfile.ZipFile(path, "w") as archive:
             archive.writestr(f"relflow-{VERSION}.dist-info/METADATA", metadata)

@@ -9,10 +9,14 @@ Read prediction output with Polars DataFrames and Series. Use
 coerce predictions back to Arrow for metric checks. IPC diagnostic artifacts
 remain a separate persistence boundary.
 
-Keep fixed field and branch contracts visible in experiment-owned `Model` and
-`Branch` classes. Put declarations at module scope when they do not depend on a
-local experimental arm; instantiate the neural model only during execution.
-Generated field mappings remain appropriate for parameterized schemas.
+Declare each experiment's model as an `rf.Model` subclass. Use named `Branch`
+classes for reusable or substantial structures; inline `rf.Branch(...)` is also
+appropriate, especially for a small branch with one leaf. Put fixed declarations
+at module scope and instantiate neural models only during execution. Use
+subclasses for fixed schema variants and function-local declarations when field
+options depend on an experimental arm. Constructor arguments on classes with
+declared children configure architecture and placement. Static checks require
+class-based models without restricting inline branches.
 
 `experiments/policies.py` is the narrow shared-configuration exception: its
 immutable `CONTROL` policy freezes the historical XS architecture under the
@@ -24,8 +28,9 @@ with a fit preset. Do not track changing SDK architecture defaults.
 The internal name replaces the previous `xs` policy metadata in new executions;
 historical records retain their original names, sources, and measurements.
 Runtime input identities and isolated worker views include this shared module.
-The reporter hashes all top-level shared runtime Python files without importing
-them. Static discovery and documentation builds must not import `policies.py`.
+The reporter hashes shared runtime Python files without importing them; sibling
+`Pxxx.py` experiments never enter another study's provenance. Static discovery
+and documentation builds must not import `policies.py`.
 
 From the repository root, `make check` validates static docs and evidence tooling.
 Runtime tests under evidence/tests/runtime are explicit and require a separately
@@ -41,9 +46,11 @@ in publication JSON assets. Never write results back into experiment sources.
 Each experiment declares an isolated uv environment using standard PEP 723
 `# /// script` metadata, with `requires-python` and its direct dependencies.
 Include the reporter's `pyyaml` and `torch` requirements and the relevant relflow
-extra for optional features. Preserve the first Markdown/YAML cell for historical
-readers; place the TOML block in the first code cell. Keep the shared import path
-relative to `__file__`, so direct `uv run <script>` works outside the checkout.
+extra for optional features. Keep question metadata in the first Markdown/YAML cell and put the TOML block
+in the first code cell. Use plain Markdown sections and illustrative records.
+Do not add unused diagram sources or presentation metadata. Current sources must
+not contain Quarto execution options, shortcodes, or disclosure markup. Keep shared imports
+relative to the script directory, so direct `uv run <script>` works outside the checkout.
 Use `uv run evidence/experiments/run.py --wheel /path/to/relflow-<version>-py3-none-any.whl P001`
 to exercise an exact SDK wheel. The runner resolves all dependencies together,
 preserves extras, clears inherited import paths, and records the wheel digest.
@@ -58,19 +65,41 @@ contains labels, never lists of experiment IDs. Tags describe the protocol, not
 the selected outcome. Static docs reject unknown, duplicate, or missing tags.
 Replace the scaffold's `unreviewed` placeholders before completing an experiment.
 Never rewrite frozen release sources to add tags or infer current datatype tags
-for retired proofs. Historical untagged entries remain visibly archived.
+for retired proofs. Current documentation shows the active script catalog.
 
-The required core catalog lives in `experiments/<category>/`. Optional studies
-live in `research/<category>/`, declare `evidence-requires`, and run only with an
-explicit `--lane research` selection. IDs are global across both directories.
-Hosted execution keeps every core experiment; frontmatter cannot change a lane.
-Static docs and authoring checks cover both lanes without importing resources.
+Each experiment is one removable unit: its file owns the environment, schemas,
+generator, training protocol, checks, review, diagnostic plan, optional custom
+renderers, publication highlights, and scheduling estimates. Adding or removing
+it must require no edit to a shared per-ID table. Shared code owns vocabulary,
+validation, execution, and reusable plotting primitives only.
+
+YAML frontmatter owns `evidence-review` (question, modeling, comparison paths,
+units, scope note, and optional criterion labels), `evidence-plot`, optional
+`evidence-highlight`, and optional per-role `evidence-cost` estimates. The latter
+are advisory seconds, not measurements or training budgets. There are no
+central review, view, highlight, or timing catalogs and no authoring compatibility
+paths for those catalogs.
+
+A diagnostic plan selects either a shared `mode` or a `renderer` function in
+this same script, with optional named `supplements` using the same contract.
+Custom renderers declare `(bundle, spec)` and put their imports and helpers
+inside the function. Return a Matplotlib figure, caption string, and portable
+interactive-data mapping (an empty mapping is valid). Only this function is loaded in the bounded offline plot
+container; module imports, schemas, generators, and training do not execute.
+Render captured observations only. Declare plotting dependencies in the script's
+uv block. Static documentation never loads or executes a renderer.
+
+All canonical studies live directly in `experiments/` as `Pxxx.py` and belong to
+the same required catalog. There are no execution lanes, opt-in study lists, or directory
+classifications. Every script declares its uv dependencies and owns its tags;
+IDs are discovered from declarations without a central list. Static docs and
+authoring checks inspect the complete catalog without importing model resources.
 
 Starlight reads the declarations, authored comment cells, and selected publication
 through `docs/starlight/src/evidence/data.ts`. Keep visible behavioral criteria,
 structured nested metrics, the full raw record, reproduction details, provenance,
 and exact source downloads. Source commentary must remain distinct from measured
-checks. The site never generates a second Python page or executes diagram source.
+checks. The site never generates a second Python page.
 Preserve retained diagnostic plots alongside their readouts and tables. Retain actual
 paired predictions, scores, masks, coordinates, and other needed observations
 during the proof; do not limit figures to the latest released scalar metrics.
@@ -80,7 +109,7 @@ from model outcomes. Static builds consume prepared SVG/JSON only; paired
 Evidence CI runs own model compute and capture already-computed readouts. See [diagnostics/README.md](diagnostics/README.md).
 Presentation changes never add measurements or alter scientific budgets and checks.
 
-Use `experiments/run.py --new <category>/<name>` for a new authoring file. The
+Use `experiments/run.py --new --title "A new question?"` for a new authoring file. The
 template lives in `templates/experiment.py.txt`, outside canonical discovery.
 Creation must remain static, reject unsafe paths and overwrites, allocate the
 next ID without reusing gaps, and preserve explicit ID/seed overrides. Keep the
@@ -117,11 +146,9 @@ measurements until the first >=0.5.0 release. New release downloads use
 Keep generated publications and executed source bundles outside Git. Local builds without a selected
 publication show pending measurements. Hosted builds verify the public release
 asset's digest and source revision, without model dependencies or credentials.
-Equivalent requests may reuse that execution only through the trusted verifier
-and a separate receipt binding the current source, wheel payloads, comparison,
-and actual execution runtime. Hosted shards execute both roles freshly;
-dependency caches do not authorize measurement reuse. Historical baseline
-references retain their original immutable records and execution provenance.
+Hosted shards execute both roles freshly. Publication authenticates the exact
+successful CI attempt, current helper and executor, input request, and collector.
+Dependency caches never substitute learning results.
 The required gate verifies every logical slot and its actual shard host, image,
 and resource policy. A missing or failed shard cannot become a successful gate.
 A publication update must not relabel an older result as a fresh run.

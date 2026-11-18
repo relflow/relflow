@@ -13,8 +13,8 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
 
 
-def load(directory, name):
-    spec = importlib.util.spec_from_file_location(f"proof_{name}", ROOT / "experiments" / directory / f"{name}.py")
+def load(name):
+    spec = importlib.util.spec_from_file_location(f"proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -22,7 +22,7 @@ def load(directory, name):
 
 @pytest.mark.parametrize("hops", (1, 2))
 def test_retrieval_oracle_requires_each_link_and_uses_fresh_names(hops):
-    proof = load("relational", "retrieval_capacity")
+    proof = load("P075")
     options = {"rows": 64, "seed": 31, "namespace": "train", "hops": hops}
     original = list(proof.records(**options))
     assert original == list(proof.records(**options))
@@ -54,7 +54,7 @@ def test_retrieval_oracle_requires_each_link_and_uses_fresh_names(hops):
 
 
 def test_permutation_changes_positions_without_changing_keyed_relations():
-    proof = load("relational", "retrieval_capacity")
+    proof = load("P075")
     rows = list(proof.records(rows=32, seed=51, namespace="test", hops=2))
     permuted = proof.permute(rows, 52)
     assert rows != permuted
@@ -66,7 +66,7 @@ def test_permutation_changes_positions_without_changing_keyed_relations():
 
 
 def test_regime_control_preserves_numeric_pairs_and_identity_counts():
-    proof = load("group", "regime_recovery")
+    proof = load("P111")
     options = {"rows": 4096, "seed": 21, "partition_seed": 20}
     stable = list(proof.records(**options))
     control = list(proof.records(**options, no_regime=True))
@@ -91,7 +91,7 @@ def test_regime_control_preserves_numeric_pairs_and_identity_counts():
 
 
 def test_adjusted_rand_ignores_label_names_and_penalizes_wrong_partitions():
-    proof = load("group", "regime_recovery")
+    proof = load("P111")
     actual = np.repeat(np.arange(4), 16)
     assert proof.adjusted_rand(actual, 10 - actual) == 1.0
     assert proof.adjusted_rand(actual, np.zeros(64)) == 0.0
@@ -102,26 +102,26 @@ def test_adjusted_rand_ignores_label_names_and_penalizes_wrong_partitions():
 @pytest.mark.parametrize(
     "name,target,arguments",
     (
-        ("aligned_pair_covariance", "covariance", ()),
-        ("attention_sum_in_range", "total", ()),
-        ("attention_sum_unseen_lengths", "total", ()),
-        ("mean_duplicate_invariance", "mean_amount", ()),
-        ("mean_keeps_contribution_count", "total", ("total",)),
-        ("raw_value_variance", "variance", ()),
-        ("raw_value_weight_sum", "weighted_sum", ()),
-        ("requested_rank_values", "answer", ()),
-        ("selected_group_raw_weighted_sum", "answer", ()),
-        ("selected_group_supplied_contribution_sum", "answer", ()),
-        ("supplied_contribution_sum", "weighted_sum", ()),
-        ("supplied_cross_deviations", "covariance", ()),
-        ("supplied_squared_deviations", "variance", ()),
-        ("variable_cardinality_weighted_mean", "weighted_mean", ()),
-        ("visible_count_sum", "total", ()),
-        ("visible_count_unseen_lengths", "total", ()),
+        ("P006", "covariance", ()),
+        ("P001", "total", ()),
+        ("P002", "total", ()),
+        ("P003", "mean_amount", ()),
+        ("P013", "total", ("total",)),
+        ("P007", "variance", ()),
+        ("P014", "weighted_sum", ()),
+        ("P012", "answer", ()),
+        ("P010", "answer", ()),
+        ("P011", "answer", ()),
+        ("P015", "weighted_sum", ()),
+        ("P008", "covariance", ()),
+        ("P009", "variance", ()),
+        ("P016", "weighted_mean", ()),
+        ("P004", "total", ()),
+        ("P005", "total", ()),
     ),
 )
 def test_aggregation_readers_accept_named_scalar_outputs(name, target, arguments):
-    proof = load("aggregation", name)
+    proof = load(name)
     model = rf.Model(
         d_model=8,
         n_layers=1,
@@ -140,10 +140,10 @@ def test_aggregation_readers_accept_named_scalar_outputs(name, target, arguments
 
 @pytest.mark.parametrize(
     "name",
-    ("attention_learns_fixed_width_sum", "attention_preserves_nested_cardinality", "mean_keeps_cardinality"),
+    ("P039", "P040", "P041"),
 )
 def test_structure_readers_accept_named_scalar_outputs(name):
-    proof = load("structure", name)
+    proof = load(name)
     model = rf.Model(
         d_model=8,
         n_layers=1,
@@ -160,14 +160,14 @@ def test_structure_readers_accept_named_scalar_outputs(name):
 @pytest.mark.parametrize(
     "name",
     (
-        "ungrouped_peer_deviation",
-        "grouped_peer_deviation",
-        "single_query_preserves_group_membership",
-        "supplied_peer_mean_control",
+        "P035",
+        "P032",
+        "P033",
+        "P034",
     ),
 )
 def test_peer_readers_score_real_items_without_cap_padding(name):
-    proof = load("relational", name)
+    proof = load(name)
     model = rf.Model(
         d_model=8,
         n_layers=1,
@@ -183,7 +183,7 @@ def test_peer_readers_score_real_items_without_cap_padding(name):
 
 @pytest.mark.parametrize("hops", (1, 2))
 def test_retrieval_reader_preserves_target_collection_width(hops):
-    proof = load("relational", "retrieval_capacity")
+    proof = load("P075")
     rows = list(proof.records(rows=4, seed=31, namespace="test", hops=hops))
     predicted = proof.predict(proof.build(hops), rows)
     assert predicted.shape == (4, 2)
@@ -191,7 +191,7 @@ def test_retrieval_reader_preserves_target_collection_width(hops):
 
 
 def test_subtotal_reader_preserves_each_observed_length_and_inferred_flag():
-    proof = load("relational", "repeated_subtotal_reconstruction")
+    proof = load("P030")
     model = rf.Model(
         d_model=8,
         n_layers=1,

@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import publication
@@ -110,9 +111,27 @@ def test_suite_revision_cannot_replace_the_trusted_host_executor():
     checkouts = {step["with"]["path"]: step["with"] for step in STEPS if step.get("uses") == "actions/checkout@v4"}
     executor, suite = checkouts["executor"], checkouts["suite"]
     assert executor["repository"] == suite["repository"] == "relflow/relflow"
-    assert re.fullmatch(r"[0-9a-f]{40}", executor["ref"])
+    assert executor["ref"] == "${{ env.EVIDENCE_EXECUTOR }}"
+    assert re.fullmatch(r"[0-9a-f]{40}", CONFIG["env"]["EVIDENCE_EXECUTOR"])
     assert suite["ref"] == "${{ inputs.suite_ref }}"
     assert executor["persist-credentials"] is suite["persist-credentials"] is False
+
+
+def test_pinned_executor_accepts_current_project_licensing(tmp_path):
+    revision = CONFIG["env"]["EVIDENCE_EXECUTOR"]
+    source = subprocess.check_output(
+        ["git", "show", revision + ":scripts/release.py"], cwd=WORKFLOW.parents[2], text=True
+    )
+    validator = tmp_path / "release.py"
+    validator.write_text(source)
+    checked = subprocess.run(
+        [sys.executable, str(validator), "licensing"], cwd=WORKFLOW.parents[2], capture_output=True, text=True
+    )
+    assert checked.returncode == 0, (
+        f"Evidence executor {revision} rejects current project licensing; update the executor and helper pins.\n"
+        + checked.stdout
+        + checked.stderr
+    )
 
 
 @pytest.mark.parametrize(
@@ -220,14 +239,29 @@ def test_every_job_checks_out_the_same_immutable_executor(job):
         if step.get("uses") == "actions/checkout@v4" and step["with"]["path"] == "executor"
     ]
     assert len(checkouts) == 1
-    assert re.fullmatch(r"[0-9a-f]{40}", checkouts[0]["ref"])
+    assert "EVIDENCE_EXECUTOR" not in CONFIG["jobs"][job].get("env", {})
+    assert all("EVIDENCE_EXECUTOR" not in step.get("env", {}) for step in CONFIG["jobs"][job]["steps"])
+    assert checkouts[0]["ref"] == "${{ env.EVIDENCE_EXECUTOR }}"
+    assert re.fullmatch(r"[0-9a-f]{40}", CONFIG["env"]["EVIDENCE_EXECUTOR"])
     assert checkouts[0]["persist-credentials"] is False
-    assert checkouts[0]["ref"] == next(
+    assert CONFIG["env"]["EVIDENCE_EXECUTOR"] == publication.EXECUTOR
+
+
+def test_consumer_resolves_inputs_with_the_same_immutable_helper_it_executes():
+    consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
+    helper = consumer["jobs"]["run"]["uses"].rsplit("@", 1)[1]
+    resolver = next(
         step["with"]["ref"]
-        for step in STEPS
-        if step.get("uses") == "actions/checkout@v4" and step["with"]["path"] == "executor"
+        for step in consumer["jobs"]["wheels"]["steps"]
+        if step.get("with", {}).get("path") == "executor"
     )
-    assert checkouts[0]["ref"] == publication.EXECUTOR
+    assert resolver == helper
+    pinned = yaml.safe_load(
+        subprocess.check_output(
+            ["git", "show", helper + ":.github/workflows/evidence-hosted.yml"], cwd=WORKFLOW.parents[2], text=True
+        )
+    )
+    assert pinned["env"]["EVIDENCE_EXECUTOR"] == publication.EXECUTOR
 
 
 def test_wheel_preparation_records_the_supported_baseline_before_building(history, monkeypatch):
@@ -249,7 +283,7 @@ def test_wheel_preparation_records_the_supported_baseline_before_building(histor
     consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
     steps = consumer["jobs"]["wheels"]["steps"]
     resolver = next(step["with"]["ref"] for step in steps if step.get("with", {}).get("path") == "executor")
-    assert resolver == publication.EXECUTOR
+    assert resolver == consumer["jobs"]["run"]["uses"].rsplit("@", 1)[1]
     build = next(step["run"] for step in steps if step.get("id") == "inputs")
     assert build.index("comparison(") < build.index("worktree add") < build.index("uv build")
     assert build.index("scripts/release.py licensing") < build.index("uv build")

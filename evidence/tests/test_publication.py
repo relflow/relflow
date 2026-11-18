@@ -6,7 +6,7 @@ import shutil
 import pytest
 from evidence_ci import ROOT, plan, task_key, write_json
 from experiments.source import fingerprint, frontmatter, registry
-from record import readme, select, validate
+from record import readme_content, select, validate
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def publication(tmp_path):
         target = root / entry["script"]
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
-    for helper in sorted((ROOT / "experiments").glob("*.py")):
+    for helper in sorted((ROOT / "experiments").glob("[a-z]*.py")):
         shutil.copy2(helper, root / "experiments" / helper.name)
     (root / "results.json").write_text(
         json.dumps(
@@ -149,7 +149,7 @@ def test_selection_rejects_catalog_and_source_drift_before_writing(reports, publ
         original = source.read_text()
         added = original.replace('@experiment("P001",', '@experiment("P999",', 1)
         assert added != original, "the added experiment fixture must declare its own ID"
-        source.with_name("new_experiment.py").write_text(added)
+        source.with_name("P999.py").write_text(added)
         assert "P999" in registry(publication), "the fixture must add a valid catalog entry"
     before = {path: path.read_bytes() for path in publication.rglob("*.py")}
     with pytest.raises(ValueError, match="source|catalog"):
@@ -204,6 +204,12 @@ def readme_target(tmp_path):
     return target
 
 
+def test_removing_the_last_highlight_does_not_require_another_catalog_edit(readme_target):
+    result = readme_content({}, readme_target.read_text())
+    assert "No publication highlights are declared" in result
+    assert "Keep the footer." in result
+
+
 def test_selection_refreshes_readme_from_candidate_metrics_with_exact_boundaries(reports, publication, readme_target):
     before = readme_target.read_bytes()
     select(reports, root=publication, readme_target=readme_target)
@@ -220,17 +226,6 @@ def test_selection_refreshes_readme_from_candidate_metrics_with_exact_boundaries
     assert content.count("| [") == 3
     for identifier in ("P021", "P025", "P038"):
         assert f"https://www.relflow.ai/latest/evidence/{identifier}/" in content
-
-
-def test_readme_reads_current_selection_instead_of_an_old_report(reports, publication, readme_target):
-    selected = publication / "results.json"
-    select(reports, root=publication, output=selected)
-    document = json.loads(selected.read_text())
-    document["results"]["P021"]["metrics"]["hash_auc"] = 0.912345
-    selected.write_text(json.dumps(document))
-    readme(publication, readme_target)
-    assert "**0.9123 AUC**" in readme_target.read_text()
-    assert "**0.9812 AUC**" not in readme_target.read_text()
 
 
 @pytest.mark.parametrize(
@@ -260,7 +255,7 @@ def test_readme_rejects_unusable_metrics_without_writing(publication, readme_tar
     selected.write_text(json.dumps(document))
     before = readme_target.read_bytes()
     with pytest.raises(ValueError, match="metric|measurements"):
-        readme(publication, readme_target)
+        readme_content(registry(publication), readme_target.read_text())
     assert readme_target.read_bytes() == before
 
 

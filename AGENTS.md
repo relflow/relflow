@@ -8,17 +8,16 @@ needed; do not use camel-case branding.
 
 ## Licensing
 
-Public relflow releases beginning with 0.5.0 use `AGPL-3.0-only` for
-project-authored code, documentation, examples, schema machinery, caches, and
-preset definitions unless a file states otherwise. Preserve third-party notices
-and existing licensing grants. Additional licensing permissions require written
-approval from both Grantham Taylor and Reid Taylor and the necessary rights for
-every contribution; follow [CONTRIBUTING.md](CONTRIBUTING.md).
+Project-authored relflow code, documentation, examples, schema machinery,
+caches, and preset definitions use `Apache-2.0` unless a file states otherwise.
+Preserve historical copyright and attribution notices, existing licensing
+grants, and third-party licenses. Contributions follow
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Run `python scripts/release.py licensing` before creating distributions. Keep
 the pre-build CI check and the archive licensing checks in `scripts/release.py`.
 Never replace already-published files or rewrite historical Evidence provenance
-to apply the new license retroactively.
+when updating licensing.
 
 ## Package Mental Model
 
@@ -487,9 +486,8 @@ PRs and merge groups targeting `main` or `stage/**` run the same complete gate. 
 `docs.yml`, and `evidence.yml` are reusable implementations. Require `CI / required`
 for every event, including the shared package build, full matrix, static
 documentation checks, and complete paired evidence validation. Tests, Evidence,
-and release consume the same candidate wheel. Verified reuse must preserve
-original measurements and revisions and separately attest the current inputs;
-missing, changed, or invalid inputs require fresh execution. Release, coverage, and evidence publication workflows consume
+and release consume the same candidate wheel. Evidence executes both roles freshly;
+publication authenticates the exact successful CI attempt and its current inputs. Release, coverage, and evidence publication workflows consume
 successful main CI; do not add a second matrix invocation to publication.
 Version releases retain verified evidence reports and a frozen publication JSON
 asset before publishing the package tag. New public assets use versioned

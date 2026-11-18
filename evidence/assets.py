@@ -14,7 +14,7 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from evidence.experiments.source import registry, snapshot
+from evidence.experiments.source import describe, registry, snapshot
 from evidence.releases import VERSION, inventory, supported
 
 REPOSITORY = "relflow/relflow"
@@ -147,7 +147,10 @@ def sources(selected: dict, release: dict, destination: Path) -> None:
                 if not member.name.startswith("source/"):
                     continue
                 if (
-                    not re.fullmatch(r"source/(?:experiments|research)/[a-z0-9_]+/[a-z0-9_]+\.py", member.name)
+                    not re.fullmatch(
+                        r"source/(?:experiments/P\d+|(?:experiments|research)/[a-z0-9_]+/[a-z0-9_]+)\.py",
+                        member.name,
+                    )
                     or not member.isfile()
                 ):
                     # Shared runner modules and non-source report files are not documentation inputs.
@@ -164,12 +167,17 @@ def sources(selected: dict, release: dict, destination: Path) -> None:
                 stream = reports.extractfile(member)
                 assert stream is not None
                 target.write_bytes(stream.read())
-        entries = registry(staging, measurements=False, lane="all")
+        entries = {}
+        for source in sorted(staging.rglob("*.py")):
+            identifier = describe(source.read_text())["evidence-id"]
+            if identifier in entries:
+                raise ValueError(f"Duplicate publication source identifier: {identifier}")
+            entries[identifier] = source
         for identifier, record in selected["results"].items():
-            entry = entries.get(identifier)
-            if entry is None or hashlib.sha256((staging / entry["script"]).read_bytes()).hexdigest() != record.get(
-                "provenance", {}
-            ).get("script_sha256"):
+            source = entries.get(identifier)
+            if source is None or hashlib.sha256(source.read_bytes()).hexdigest() != record.get("provenance", {}).get(
+                "script_sha256"
+            ):
                 raise ValueError(f"{identifier}: publication source differs from its frozen measurement")
         shutil.rmtree(destination / "source", ignore_errors=True)
         staging.replace(destination / "source")

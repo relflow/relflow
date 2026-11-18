@@ -11,6 +11,52 @@ import {
 } from '../src/evidence/catalog.ts';
 import { status } from '../src/evidence/presentation.ts';
 import { record } from './fixtures/evidence.mjs';
+import { readReview } from '../src/evidence/metadata.ts';
+
+test('an independent experiment owns new metric semantics and labels without a shared entry', () => {
+  const review = readReview(
+    {
+      question: 'Can this independently added experiment define a new metric?',
+      modeling: 'Its own synthetic setup.',
+      note: 'Its own scope.',
+      comparison: {
+        kind: 'Recorded measurement',
+        metric: 'Custom distance',
+        definition: 'Distance in the units owned by this experiment.',
+        direction: 'Closer to zero is better',
+        conditions: [{ label: 'New condition', path: ['distance'], format: 'number' }],
+      },
+      criteria: { prefixes: { own: 'Experiment-owned condition' } },
+    },
+    'independent.py',
+  );
+  const item = {
+    id: 'P999',
+    review,
+    sourceMatches: true,
+    result: { ...record(), metrics: { distance: 7 } },
+  };
+  const chart = comparison(item);
+  assert.equal(chart.metric, 'Custom distance');
+  assert.equal(chart.definition, review.comparison.definition);
+  assert.equal(chart.direction, 'Closer to zero is better');
+  assert.equal(chart.points[0].value, 7);
+  assert.throws(() => readReview(undefined, 'missing.py'), /evidence-review/);
+  assert.throws(
+    () =>
+      readReview(
+        {
+          ...review,
+          comparison: {
+            ...review.comparison,
+            conditions: [{ label: 'Bad', path: [1.5], format: 'number' }],
+          },
+        },
+        'invalid.py',
+      ),
+    /paths/,
+  );
+});
 
 // Presentation tests use invented values, independent of downloaded CI measurements.
 const selectedPublication = process.env.RELFLOW_EVIDENCE_PUBLICATION;
@@ -182,9 +228,8 @@ test('primary type tags are the same source used by the leaf reference tables', 
 });
 
 test('every experiment has a complete individual explanation and explicit primary comparison', async () => {
-  const { reviews } = await import('../src/evidence/reviews.ts');
   const { modeling, review } = await import('../src/evidence/catalog.ts');
-  assert.ok(evidenceEntries.every((entry) => reviews[entry.id]));
+  assert.ok(evidenceEntries.every((entry) => entry.review));
   const texts = new Set();
   for (const entry of evidenceEntries) {
     const content = review(entry);
@@ -203,16 +248,14 @@ test('every experiment has a complete individual explanation and explicit primar
     texts.add(content.modeling);
   }
   assert.equal(texts.size, evidenceEntries.length, 'Every setup is individually authored.');
-  assert.throws(() => review({ id: 'P999' }), /individually reviewed/);
 });
 
 test('limitation proofs and confounded comparisons retain their scientific scope', async () => {
-  const { reviews } = await import('../src/evidence/reviews.ts');
-  assert.match(reviews.P028.note, /limitation.*not.*succeeded/);
-  assert.match(reviews.P024.note, /shortcut/);
-  assert.match(reviews.P068.note, /does not mean.*extrapolated/);
-  assert.equal(reviews.P043.comparison.kind, 'Recorded conditions');
-  assert.match(reviews.P043.note, /different training budgets/);
+  assert.match(entry('P028').review.note, /limitation.*not.*succeeded/);
+  assert.match(entry('P024').review.note, /shortcut/);
+  assert.match(entry('P068').review.note, /does not mean.*extrapolated/);
+  assert.equal(entry('P043').review.comparison.kind, 'Recorded conditions');
+  assert.match(entry('P043').review.note, /different training budgets/);
   const operations = comparison(entry('P027'));
   assert.equal(operations.points.length, 12);
   assert.equal(operations.metric, 'Normalized RMSE');
@@ -222,8 +265,8 @@ test('limitation proofs and confounded comparisons retain their scientific scope
     sensors.points.map((point) => point.path),
     ['100', '010', '001', '111'].map((pattern) => ['patterns', pattern, 'mse']),
   );
-  assert.equal(reviews.P080.comparison.metric, 'Adjusted Rand index');
-  assert.equal(reviews.P096.comparison.metric, 'False positive rate');
+  assert.equal(entry('P080').review.comparison.metric, 'Adjusted Rand index');
+  assert.equal(entry('P096').review.comparison.metric, 'False positive rate');
 });
 
 test('human-readable criterion labels retain separate criterion identities and original records', async () => {
@@ -231,7 +274,7 @@ test('human-readable criterion labels retain separate criterion identities and o
   for (const entry of evidenceEntries) {
     const originals = Object.keys(entry.result?.checks || {});
     const copy = JSON.stringify(entry.result);
-    const labels = originals.map((name) => criterionLabel(entry.id, name));
+    const labels = originals.map((name) => criterionLabel(entry, name));
     assert.equal(
       new Set(labels).size,
       originals.length,
@@ -241,15 +284,15 @@ test('human-readable criterion labels retain separate criterion identities and o
     assert.equal(JSON.stringify(entry.result), copy);
   }
   assert.equal(
-    criterionLabel('P074', '101: tracks conditional mean'),
+    criterionLabel(entry('P074'), '101: tracks conditional mean'),
     'Sensors 1 and 3 visible: tracks conditional mean',
   );
   assert.equal(
-    criterionLabel('P061', '0.2: evaluation preserves mapping and exposures'),
+    criterionLabel(entry('P061'), '0.2: evaluation preserves mapping and exposures'),
     '20% input unavailability: evaluation preserves mapping and exposures',
   );
   assert.equal(
-    criterionLabel('P001', 'Seen-length nRMSE below 0.35'),
+    criterionLabel(entry('P001'), 'Seen-length nRMSE below 0.35'),
     'Seen-length normalized RMSE below 0.35',
   );
 });
@@ -269,7 +312,6 @@ test('script-owned tags cover every current proof without central ID membership 
   );
   assert.equal(capabilityFor(entry('P025')).id, 'structure');
   assert.equal(capabilityFor(entry('P099')).id, 'representation');
-  assert.equal(capabilityFor(entry('P091')).id, 'training');
   assert.throws(
     () => capabilityFor({ id: 'P999', tags: null, archived: false }),
     /script metadata/,
@@ -292,7 +334,6 @@ test('script-owned tags cover every current proof without central ID membership 
     !conditionsFor(entry('P111')).some((item) => item.id === 'unseen-identities'),
     'P111 tests new observations of known identities',
   );
-  assert.deepEqual(typesFor(entry('P091')), ['Vector']);
   assert.ok(typesFor(entry('P089')).includes('Boolean'));
   assert.ok(typesFor(entry('P090')).includes('Number'));
 });
@@ -303,7 +344,7 @@ test('tag assignments follow script metadata without registering experiment IDs'
     '# /// script\n# dependencies = []\n# [tool.relflow.evidence]\n' +
     '# capability = "structure"\n# types = ["Hash"]\n# conditions = ["unseen-identities"]\n# ///\n' +
     '@experiment("P987654", seed=0)\nraise RuntimeError("must never import")\n';
-  const entry = { id: 'P987654', tags: tags(source), archived: false };
+  const entry = { id: 'P987654', tags: tags(source) };
   assert.equal(capabilityFor(entry).id, 'structure');
   assert.deepEqual(typesFor(entry), ['Hash']);
   assert.deepEqual(
@@ -314,10 +355,7 @@ test('tag assignments follow script metadata without registering experiment IDs'
   assert.equal(capabilityFor(entry).id, 'training');
   assert.deepEqual(typesFor(entry), ['Vector']);
   assert.equal(tags('# Historical script without inline metadata\n'), null);
-  assert.deepEqual(capabilityFor({ id: 'P123', tags: null, archived: true }), {
-    id: 'archived',
-    label: 'Archived experiments',
-  });
+  assert.throws(() => capabilityFor({ id: 'P123', tags: null }), /needs a capability/);
   for (const changed of [
     source.replace('"structure"', '"made-up"'),
     source.replace('"Hash"', '"made-up"'),

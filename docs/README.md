@@ -116,13 +116,12 @@ with a title such as **relflow 0.5.0 evidence**. Downloads use these names:
 - `relflow-0.5.0-evidence-provenance.json`
 - `relflow-0.5.0-evidence-measurements.md`
 - `relflow-0.5.0-evidence-checksums.txt`
-- `relflow-0.5.0-evidence-reuse.json`, when a verified execution was reused
 
 Earlier published assets retain their original names and bytes. Trusted
 selection and verification remain in `evidence/assets.py`,
 `evidence/publication.py`, and the diagnostic helpers. Rendering documentation
 does not run learning experiments or rewrite measurements.
 
-relflow-authored material uses [AGPL-3.0-only](../LICENSE) beginning with 0.5.0 and retains
+relflow-authored material uses [Apache-2.0](../LICENSE) and retains
 [NOTICE](../NOTICE). The shared font retains its
 [SIL Open Font License](assets/fonts/OFL.txt).

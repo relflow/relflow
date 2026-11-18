@@ -17,9 +17,9 @@ from evidence.releases import filenames
 @pytest.fixture
 def released(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text('[project]\nversion="0.5.0"\n')
-    family = tmp_path / "evidence/experiments/example"
+    family = tmp_path / "evidence/experiments"
     family.mkdir(parents=True)
-    (family / "signal.py").write_text(
+    (family / "P001.py").write_text(
         "# %% [markdown]\n# ---\n# evidence-id: P001\n# ---\nraise RuntimeError('do not execute')\n"
     )
     revision = "a" * 40
@@ -35,14 +35,14 @@ def released(tmp_path, monkeypatch):
                 "outcome": "met",
                 "seed": 7,
                 "metrics": {"score": 0.9},
-                "provenance": {"script_sha256": hashlib.sha256((family / "signal.py").read_bytes()).hexdigest()},
+                "provenance": {"script_sha256": hashlib.sha256((family / "P001.py").read_bytes()).hexdigest()},
             }
         },
     }
     bundle = io.BytesIO()
     with tarfile.open(fileobj=bundle, mode="w:gz") as archive:
-        content = (family / "signal.py").read_bytes()
-        member = tarfile.TarInfo("source/experiments/example/signal.py")
+        content = (family / "P001.py").read_bytes()
+        member = tarfile.TarInfo("source/experiments/P001.py")
         member.size = len(content)
         archive.addfile(member, io.BytesIO(content))
     reports = bundle.getvalue()
@@ -133,10 +133,10 @@ def test_invalid_release_material_never_replaces_the_snapshot(released, fault):
         responses[url] = content
         asset["digest"] = "sha256:" + hashlib.sha256(content).hexdigest()
         asset["size"] = len(content)
-    before = (root / "evidence/experiments/example/signal.py").read_bytes()
+    before = (root / "evidence/experiments/P001.py").read_bytes()
     with pytest.raises(ValueError, match="Evidence|publication"):
         assets.fetch(root, required=True)
-    assert (root / "evidence/experiments/example/signal.py").read_bytes() == before
+    assert (root / "evidence/experiments/P001.py").read_bytes() == before
     assert not list((root / ".cache").rglob("*.json"))
 
 
@@ -236,7 +236,7 @@ def test_released_plots_bind_to_frozen_source_instead_of_newer_checkout(tmp_path
     record = {"provenance": {"script_sha256": hashlib.sha256(source.encode()).hexdigest()}, "metrics": {"score": 0.8}}
     (directory / "P001-proof.py").write_text(source if not corrupt else source + "value = 2\n")
     (directory / "P001.json").write_text(json.dumps({"record": record}))
-    (directory / "P091.json").write_text(json.dumps({"record": None}))
+    (directory / "P999.json").write_text(json.dumps({"record": None}))
     review = {
         "ci": {"run_id": "gh-123-1"},
         "entries": {
@@ -245,7 +245,7 @@ def test_released_plots_bind_to_frozen_source_instead_of_newer_checkout(tmp_path
                 "assets": {"P001-proof.py": record["provenance"]["script_sha256"]},
                 "code_sha256": fingerprint(source),
             },
-            "P091": {"data": "P091.json", "assets": {}, "code_sha256": "unmeasured illustration"},
+            "P999": {"data": "P999.json", "assets": {}, "code_sha256": "unmeasured illustration"},
         },
     }
     name = filenames("0.5.0")["plots"]
@@ -288,8 +288,8 @@ def test_report_sources_reject_unbound_changed_and_unsafe_material(released, fau
     elif fault == "record":
         selected["results"]["P001"]["provenance"]["script_sha256"] = "0" * 64
     else:
-        source = (root / "evidence/experiments/example/signal.py").read_bytes()
-        name = "source/experiments/example/signal.py"
+        source = (root / "evidence/experiments/P001.py").read_bytes()
+        name = "source/experiments/P001.py"
         if fault == "missing":
             name = "ignored.txt"
         elif fault == "unsafe":
@@ -313,10 +313,37 @@ def test_report_sources_reject_unbound_changed_and_unsafe_material(released, fau
     assert not (destination / "outside.py").exists()
 
 
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_frozen_sources_keep_historical_paths_and_reject_duplicate_ids(released, duplicate):
+    root, responses, selected, release, _, _ = released
+    source = (root / "evidence/experiments/P001.py").read_bytes()
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+        for collection in ["research", "experiments"] if duplicate else ["research"]:
+            member = tarfile.TarInfo(f"source/{collection}/example/signal.py")
+            member.size = len(source)
+            archive.addfile(member, io.BytesIO(source))
+    content = buffer.getvalue()
+    asset = release["assets"][1]
+    responses[asset["browser_download_url"]] = content
+    digest = hashlib.sha256(content).hexdigest()
+    asset.update(digest="sha256:" + digest, size=len(content))
+    selected["report"]["reports_sha256"] = digest
+    destination = root / "cache"
+    destination.mkdir()
+    if duplicate:
+        with pytest.raises(ValueError, match="Duplicate publication source identifier"):
+            assets.sources(selected, release, destination)
+        assert not (destination / "source").exists()
+    else:
+        assets.sources(selected, release, destination)
+        assert (destination / "source/research/example/signal.py").read_bytes() == source
+
+
 def test_cached_source_tampering_is_repaired_from_the_verified_ci_report(released):
     root, _, _, _, calls, _ = released
     path = assets.fetch(root, required=True)
-    source = path.parent / "source/experiments/example/signal.py"
+    source = path.parent / "source/experiments/P001.py"
     expected = source.read_bytes()
     source.write_text("changed source")
     assets.fetch(root, required=True)

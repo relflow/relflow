@@ -1,6 +1,5 @@
 import type { EvidenceEntry } from './data';
 import { parse } from 'smol-toml';
-import { reviews, type Review } from './reviews.ts';
 
 /** Shared vocabulary only; each experiment owns its tag assignments. */
 export const leafTypes = [
@@ -189,8 +188,7 @@ export function experimentsForType<T extends Pick<EvidenceEntry, 'tags'>>(
   return entries.filter((entry) => typesFor(entry).includes(type));
 }
 
-export function capabilityFor(entry: Pick<EvidenceEntry, 'id' | 'tags' | 'archived'>) {
-  if (!entry.tags && entry.archived) return { id: 'archived', label: 'Archived experiments' };
+export function capabilityFor(entry: Pick<EvidenceEntry, 'id' | 'tags'>) {
   const capability = capabilities.find((item) => item.id === entry.tags?.capability);
   if (!capability)
     throw new Error(`Evidence ${entry.id} needs a capability in its script metadata.`);
@@ -201,23 +199,18 @@ export function conditionsFor(entry: Pick<EvidenceEntry, 'tags'>) {
   return conditions.filter((item) => entry.tags?.conditions.includes(item.id));
 }
 
-export function review(entry: Pick<EvidenceEntry, 'id'>): Review {
-  const content = reviews[entry.id];
-  if (!content)
-    throw new Error(
-      `Evidence ${entry.id} needs an individually reviewed explanation and comparison in reviews.ts.`,
-    );
-  return content;
+export function review(entry: Pick<EvidenceEntry, 'review'>) {
+  return entry.review;
 }
 
-export function question(entry: Pick<EvidenceEntry, 'id' | 'title'>): string {
-  return review(entry).question;
+export function question(entry: Pick<EvidenceEntry, 'review' | 'title'>): string {
+  return entry.review.question;
 }
 
-export function description(entry: Pick<EvidenceEntry, 'id' | 'description'>): string {
-  return review(entry).description || entry.description;
+export function description(entry: Pick<EvidenceEntry, 'review' | 'description'>): string {
+  return entry.review.description || entry.description;
 }
 
 export function modeling(entry: EvidenceEntry): string {
-  return entry.sourceMatches && entry.source ? review(entry).modeling : '';
+  return entry.sourceMatches && entry.source ? entry.review.modeling : '';
 }

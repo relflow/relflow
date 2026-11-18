@@ -39,7 +39,7 @@ You can also invoke an experiment directly from any working directory using its
 absolute path:
 
 ```sh
-uv run /path/to/relflow/evidence/experiments/aggregation/attention_sum_in_range.py --steps 2
+uv run /path/to/relflow/evidence/experiments/P001.py --steps 2
 ```
 
 Keep the evidence checkout alongside the script: shared reporting and frozen
@@ -68,10 +68,13 @@ retired entries appear as archived, without inferred tags.
 
 ## Define an experiment
 
-Keep each experiment's typed data contract visible in its own `Model` and
-`Branch` classes. Module-level declarations allocate no neural weights; the
-experiment constructs the model when it runs. Programmatically generated field
-mappings remain useful when an arm changes the schema.
+Declare each experiment's typed data contract in an `rf.Model` subclass. Branches
+may use named classes or inline `rf.Branch(...)` definitions; inline branches are
+useful for small local structures. Module-level declarations allocate no neural
+weights; the experiment constructs the model when it runs. Use subclasses for
+fixed variants and function-local declarations when field options depend on an
+experimental arm. Constructor arguments on declared classes configure architecture
+and placement. Static checks require class-based models and permit inline branches.
 
 Experiments that share the historical XS capacity use `CONTROL` from
 `experiments/policies.py`:
@@ -83,6 +86,7 @@ from policies import CONTROL
 
 class Model(rf.Model):
     value = rf.Number
+    history = rf.Branch(length=8, value=rf.Number)
     target = rf.Boolean(mask=True)
 
 
@@ -102,39 +106,36 @@ architecture and seeded initialization are checked separately. Source and runtim
 fingerprints change, so old measurements keep their original provenance.
 Historical results are never rewritten or presented as a fresh execution.
 
-The default **core** lane runs in required hosted CI. Additional studies with
-optional resources live in `research/<category>/`; they use the same experiment
-format and appear in the docs with their provisioning requirements. List or run that lane
-explicitly:
+Each file is a self-contained experiment. Its YAML frontmatter owns the reviewed
+question, modeling explanation, primary comparison, criterion labels, diagnostic
+plan, optional publication highlights, and optional scheduling estimates. Custom
+`(bundle, spec)` plot functions live in that same file with their own imports.
+Adding or removing it updates the catalog without editing any side list. See
+[SPEC.md](SPEC.md#self-contained-experiment-files).
+
+All studies live directly in `experiments/` as `Pxxx.py` and run in the required
+hosted catalog. There are no lanes or optional exclusions. Each script owns its uv
+dependencies and classification tags. Use `--list` to inspect the full catalog,
+or pass IDs to run a local selection explicitly:
 
 ```sh
-uv run evidence/experiments/run.py --lane all --list
-uv run evidence/experiments/run.py --wheel /path/to/provisioned-relflow.whl \
-  --lane research P091
+uv run evidence/experiments/run.py --list
+uv run evidence/experiments/run.py --wheel /path/to/relflow.whl P099 P100
 ```
-
-Read the selected page's Reproduce tab for its declared `evidence-requires`.
-P091 requires TorchJD and P092 requires a real offline Text encoder. P099/P100
-are provisional Duration/Ordinal studies awaiting full paired validation under
-the 0.5 protocol. A research selection does not download
-models, substitute a mocked encoder, or replace a missing measurement with a pass.
 
 Create an authoring file from the repository root:
 
 ```sh
 uv run evidence/experiments/run.py \
-  --new aggregation/median --title "Can a model learn a median?"
+  --new --title "Can a model learn a median?" --group Aggregation
 ```
 
-This writes `evidence/experiments/aggregation/median.py` with the next stable
-ID, a literal default seed of `0`, presentation metadata, example sections, and
-the decorator and reporting entrypoint. The title defaults to words from the
-filename; the category comes from the first path segment. The display group
-reuses that category's existing group when unambiguous, otherwise its name.
-Use `--title`, `--group`, `--id`, or `--seed` to choose those values.
-Add `--lane research` to scaffold a separately provisioned study. IDs are
-allocated across both lanes, and research sources must describe their resources
-in `evidence-requires`.
+This writes `evidence/experiments/Pxxx.py` using the next stable ID, with a
+literal default seed of `0`, presentation metadata, example sections, and the
+decorator and reporting entrypoint. The filename matches the declared ID.
+The title is required; `--group` defaults to an explicit `Unreviewed` placeholder.
+Use `--id` or `--seed` to override those values. Tags and frontmatter supply
+categorization independently of the file path.
 Creation reads declarations without importing experiments or model packages,
 and refuses to overwrite an existing file. IDs increase beyond the current
 maximum instead of filling gaps.
@@ -142,7 +143,7 @@ maximum instead of filling gaps.
 The generated scientific implementation raises `NotImplementedError`. Fill in
 the generator, model, independent training/validation/test splits, explicit
 budgets, matched control, held-out metrics, and Boolean checks. Update the
-example, model tree, and metric readout to match. The file joins discovery
+example and metric readout to match. The file joins discovery
 immediately, so it cannot satisfy the full gate until it is complete; it may
 also fail authoring checks while those sections are unfinished.
 
@@ -263,7 +264,6 @@ New immutable Evidence releases use versioned downloads. For relflow 0.5.0:
 - `relflow-0.5.0-evidence-plots.zip`: matched diagnostic plots, when available.
 - `relflow-0.5.0-evidence-provenance.json` and
   `relflow-0.5.0-evidence-checksums.txt`: execution identity and integrity.
-- `relflow-0.5.0-evidence-reuse.json`: a verified reuse receipt, when applicable.
 
 Previously published names and bytes remain unchanged.
 Publication never edits experiment headers or the source README, commits a
@@ -299,9 +299,9 @@ gh workflow run release.yml --repo relflow/relflow --ref main
 successful main CI run, source revision, and package version. It has no ordinary
 CI-completion trigger or standalone preview mode.
 Keep actual metrics, checks, seeds, environment, tested revisions, and source
-digests bound to the measured execution. A verified reused selection retains
-its original identity and separate current-request receipt. Source edits and
-reader changes do not establish fresh learning results.
+digests bound to the measured execution. Publication authenticates the exact
+successful main CI attempt. Source edits and reader changes do not establish
+fresh learning results.
 
 ## Runtime efficiency
 

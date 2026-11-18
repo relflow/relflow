@@ -6,7 +6,7 @@ state. The initial module is the shared tensorfield artifact cache. Future
 helpers belong beside `src/cache/` in this crate, with their own bindings and
 contracts; they do not require another Python distribution or build system.
 
-Project-authored native code is licensed under `AGPL-3.0-only`; see
+Project-authored native code is licensed under `Apache-2.0`; see
 [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party dependencies retain their
 own licenses. Run `python scripts/release.py licensing` from the repository root
 before creating native distributions.

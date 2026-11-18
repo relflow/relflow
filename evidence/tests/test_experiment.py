@@ -39,6 +39,40 @@ def test_decorator_retains_original_function_without_execution():
     assert decorated.experiment == Experiment("P001", 123)
 
 
+def test_provenance_binds_shared_tooling_and_selected_script_without_sibling_experiments(tmp_path, monkeypatch):
+    directory = tmp_path / "experiments"
+    directory.mkdir()
+    script = directory / "P001.py"
+    script.write_text("value = 1\n")
+    sibling = directory / "P002.py"
+    sibling.write_text("raise RuntimeError('sibling must never execute')\n")
+    shared = directory / "policies.py"
+    shared.write_text("raise RuntimeError('shared sources must never execute while hashing')\n")
+    package = tmp_path / "package/relflow"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("value = 1\n")
+    monkeypatch.setattr(reporting, "ROOT", tmp_path)
+    monkeypatch.setattr(reporting, "__file__", str(directory / "reporting.py"))
+    monkeypatch.setitem(sys.modules, "relflow", SimpleNamespace(__file__=str(package / "__init__.py")))
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(version=SimpleNamespace(cuda=None), cuda=SimpleNamespace(is_available=lambda: False)),
+    )
+    monkeypatch.setattr(reporting.importlib.metadata, "version", lambda name: "fixture")
+    monkeypatch.setenv("EVIDENCE_REVISION", "fixture")
+    original = reporting.provenance(script)
+    sibling.write_text("raise RuntimeError('a different unrelated study')\n")
+    assert reporting.provenance(script) == original
+    sibling.unlink()
+    assert reporting.provenance(script) == original
+    shared.write_text("changed_policy = 1\n")
+    assert reporting.provenance(script)["source_sha256"] != original["source_sha256"]
+    assert reporting.provenance(script)["script_sha256"] == original["script_sha256"]
+    script.write_text("value = 2\n")
+    assert reporting.provenance(script)["script_sha256"] != original["script_sha256"]
+
+
 @pytest.mark.parametrize("identifier,seed", [("P1", 0), ("P001", 123), ("P999", 2**32 - 1)])
 def test_decorator_accepts_stable_identifiers_and_seed_boundaries(identifier, seed):
     def run(seed, steps, accelerator):

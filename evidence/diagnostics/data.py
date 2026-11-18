@@ -1,6 +1,7 @@
 """Read checksum-bound observations for explicit plot generation."""
 
 from __future__ import annotations
+import __future__
 
 import ast
 import hashlib
@@ -9,6 +10,8 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from pathlib import Path
+
+from evidence.experiments.source import component
 
 
 def check_artifact(directory: Path, identifier: str, item: tuple) -> None:
@@ -140,6 +143,20 @@ class Bundle:
         self.cache = {}
         self.labels = {}
         self.exclude_context = set()
+        self.components = {}
+
+    def component(self, name: str):
+        """Load only the declared diagnostic function; model imports and training code never execute."""
+        if name not in self.components:
+            definition = component(self.source, name)
+            scope = {}
+            syntax = ast.Module(body=[definition], type_ignores=[])
+            exec(
+                compile(syntax, str(self.directory / "proof.py"), "exec", flags=__future__.annotations.compiler_flag),
+                scope,
+            )
+            self.components[name] = scope[name]
+        return self.components[name]
 
     def value(self, value):
         if isinstance(value, dict) and "artifact" in value:

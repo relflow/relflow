@@ -19,17 +19,15 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
-EXPERIMENTS = ("semantic_clusters", "semantic_robustness", "nested_history_clusters")
+EXPERIMENTS = ("P080", "P081", "P082")
 FIELDS = {
-    "semantic_clusters": {"merchant_pattern", "payment_rhythm", "cashflow"},
-    "semantic_robustness": {"channel", "amount", "frequency", "nuisance"},
+    "P080": {"merchant_pattern", "payment_rhythm", "cashflow"},
+    "P081": {"channel", "amount", "frequency", "nuisance"},
 }
 
 
 def load(name):
-    spec = importlib.util.spec_from_file_location(
-        f"semantic_proof_{name}", ROOT / "experiments/representation" / f"{name}.py"
-    )
+    spec = importlib.util.spec_from_file_location(f"semantic_proof_{name}", ROOT / "experiments" / f"{name}.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -85,11 +83,11 @@ def test_latent_labels_are_out_of_band_and_split_streams_are_fresh(name):
 
 
 def test_independently_permuted_views_keep_all_marginals_but_break_their_label_alignment():
-    proof = load("semantic_clusters")
+    proof = load("P080")
     original, labels = proof.sample(rows=4096, seed=51)
     permuted, control_labels = proof.sample(rows=4096, seed=51, permuted=True)
     np.testing.assert_array_equal(labels, control_labels)
-    for field in FIELDS["semantic_clusters"]:
+    for field in FIELDS["P080"]:
         assert Counter(encoded(row[field]) for row in original) == Counter(encoded(row[field]) for row in permuted)
         assert np.mean([left[field] != right[field] for left, right in zip(original, permuted, strict=True)]) > 0.7
     signal = np.asarray([row["cashflow"][:2] for row in original])
@@ -102,7 +100,7 @@ def test_independently_permuted_views_keep_all_marginals_but_break_their_label_a
 
 
 def test_robustness_conditions_change_only_the_declared_views_without_mutating_rows():
-    proof = load("semantic_robustness")
+    proof = load("P081")
     rows, _ = proof.sample(rows=256, seed=61)
     before = copy.deepcopy(rows)
     complete = proof.condition(rows, "complete", seed=62)
@@ -130,7 +128,7 @@ def test_robustness_conditions_change_only_the_declared_views_without_mutating_r
 
 
 def test_history_permutation_moves_whole_records_and_keeps_lengths_and_global_marginals():
-    proof = load("nested_history_clusters")
+    proof = load("P082")
     original, labels = proof.sample(rows=256, seed=71, lengths=(4, 8))
     shuffled, shuffled_labels = proof.sample(rows=256, seed=71, lengths=(4, 8), permuted=True)
     np.testing.assert_array_equal(labels, shuffled_labels)
@@ -146,7 +144,7 @@ def test_history_permutation_moves_whole_records_and_keeps_lengths_and_global_ma
 
 
 def test_history_length_and_reversal_controls_preserve_exact_paired_records():
-    proof = load("nested_history_clusters")
+    proof = load("P082")
     rows, _ = proof.sample(rows=32, seed=81, lengths=(12, 12))
     before = copy.deepcopy(rows)
     field = next(key for key, value in rows[0].items() if isinstance(value, list))
@@ -226,12 +224,12 @@ def test_embedding_reader_keeps_row_alignment_and_ignores_leaf_representation_no
     np.testing.assert_array_equal(actual, expected)
 
 
-@pytest.mark.parametrize("name", ("semantic_clusters", "nested_history_clusters"))
+@pytest.mark.parametrize("name", ("P080", "P082"))
 def test_real_frozen_exports_preserve_all_state_and_work_across_batch_sizes(name):
     proof = load(name)
     rows, _ = proof.sample(rows=8, seed=111)
     model = proof.build()
-    leaf_type = "vector" if name == "semantic_clusters" else "number"
+    leaf_type = "vector" if name == "P080" else "number"
     model.update(rf.where("type") == leaf_type, embed=True)
     model.encode(pa.Table.from_pylist(rows), strata="train")
     model.eval()
@@ -247,7 +245,7 @@ def test_real_frozen_exports_preserve_all_state_and_work_across_batch_sizes(name
     assert_same(before, after)
 
 
-@pytest.mark.parametrize("name", ("semantic_robustness", "nested_history_clusters"))
+@pytest.mark.parametrize("name", ("P081", "P082"))
 def test_condition_centroids_never_fit_test_variants_or_evaluator_labels(monkeypatch, name):
     proof = load(name)
     training = np.repeat(np.eye(4), 8, axis=0)
@@ -299,7 +297,7 @@ def test_root_reader_rejects_ambiguous_or_misaligned_exports(name, malformed):
 
 
 def test_semantic_evaluator_fits_centroids_without_training_or_test_labels(monkeypatch):
-    proof = load("semantic_clusters")
+    proof = load("P080")
     training_labels = np.repeat(np.arange(4), 8)
     training = np.repeat(np.eye(4), 8, axis=0)
     query_labels = np.tile(np.arange(4), 4)
@@ -330,7 +328,7 @@ def test_semantic_evaluator_fits_centroids_without_training_or_test_labels(monke
 @pytest.mark.parametrize("name", EXPERIMENTS)
 def test_freeze_check_includes_buffers_and_extension_owned_nested_state(name):
     proof = load(name)
-    equal = proof.same_state if name == "semantic_clusters" else proof.equal
+    equal = proof.same_state if name == "P080" else proof.equal
     state = {
         "parameter": torch.tensor([1.0, 2.0]),
         "normalizer": {"count": torch.tensor(8), "moments": np.array([3.0, 4.0])},

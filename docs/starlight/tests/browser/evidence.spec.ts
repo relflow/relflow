@@ -166,7 +166,7 @@ test('every Evidence page renders its own reviewed question, setup, and scope', 
     'Full catalog text audit once; shared mobile and theme behavior is checked above.',
   );
   test.setTimeout(120_000);
-  const { reviews } = await import('../../src/evidence/reviews');
+  const { evidenceEntries } = await import('../../src/evidence/data');
   await page.goto('/evidence/');
   const ids = await page
     .locator('[data-evidence-entry]')
@@ -174,7 +174,7 @@ test('every Evidence page renders its own reviewed question, setup, and scope', 
   for (const id of ids) {
     await test.step(id, async () => {
       await page.goto(`/evidence/${id}/`);
-      const content = reviews[id];
+      const content = evidenceEntries.find((entry) => entry.id === id)!.review!;
       await expect(page.locator('h1')).toHaveText(content.question);
       const setup = page.locator('#modeling-title').locator('..');
       await expect(setup).toContainText(content.modeling);

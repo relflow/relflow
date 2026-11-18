@@ -70,64 +70,32 @@ def duration(value: object) -> float | None:
 
 
 def scheduling(suite: Path) -> dict:
-    """Freeze operative costs; timing provenance is data, never an execution proof."""
+    """Freeze script-owned scheduling estimates; they never establish learning results."""
     entries = registry(suite)
     published = {
         identifier: duration((entry["run"] or {}).get("duration_seconds")) for identifier, entry in entries.items()
     }
-    path = suite / "timings.json"
-    hints = None
-    if path.is_symlink() or path.exists():
-        if path.is_symlink() or not path.is_file() or path.stat().st_size > 1024 * 1024:
-            raise ValueError(f"Scheduling hints at '{path}' require a regular file no larger than one MiB")
-        try:
-            hints = json.loads(path.read_text())
-        except (ValueError, UnicodeError) as error:
-            raise ValueError(f"Scheduling hints at '{path}' must contain valid JSON") from error
-        if (
-            not isinstance(hints, dict)
-            or type(hints.get("schema")) is not int
-            or hints["schema"] != 1
-            or not isinstance(hints.get("tasks"), dict)
-        ):
-            raise ValueError(f"Scheduling hints at '{path}' require schema 1 and a task-cost mapping")
-        source = hints.get("source")
-        if not isinstance(source, dict) or not isinstance(source.get("artifact"), dict):
-            raise ValueError(f"Scheduling hints at '{path}' require retained source and artifact provenance labels")
-        artifact = source["artifact"]
-        if (
-            source.get("repository") != "relflow/relflow"
-            or any(type(source.get(name)) is not int or source[name] < 1 for name in ("run_id", "run_attempt"))
-            or any(
-                not isinstance(source.get(name), str) or not re.fullmatch(r"[0-9a-f]{40}", source[name])
-                for name in ("head_sha", "executor_sha")
+    estimates = {}
+    for identifier, entry in entries.items():
+        roles = entry["header"].get("evidence-cost", {})
+        if not isinstance(roles, dict) or set(roles) - {"baseline", "candidate"}:
+            raise ValueError(f"{identifier}: evidence-cost must map baseline/candidate roles to estimated seconds")
+        if any(duration(value) is None for value in roles.values()):
+            raise ValueError(
+                f"{identifier}: evidence-cost estimates must be finite positive seconds up to {MAX_HINT_SECONDS}"
             )
-            or type(artifact.get("id")) is not int
-            or artifact["id"] < 1
-            or not isinstance(artifact.get("name"), str)
-            or not artifact["name"]
-            or not isinstance(artifact.get("digest"), str)
-            or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"])
-        ):
-            raise ValueError(f"Scheduling hints at '{path}' contain invalid source or artifact provenance labels")
-        for identifier, roles in hints["tasks"].items():
-            if not isinstance(identifier, str) or not isinstance(roles, dict) or set(roles) - {"baseline", "candidate"}:
-                raise ValueError(f"Scheduling hints at '{path}' require per-ID baseline/candidate costs")
-            if any(duration(value) is None for value in roles.values()):
-                raise ValueError(
-                    f"Scheduling hints for '{identifier}' must be finite positive seconds no greater than {MAX_HINT_SECONDS}"
-                )
-    measured = hints["tasks"] if hints is not None else {}
-    known = [value for identifier, roles in measured.items() if identifier in entries for value in roles.values()]
+        estimates[identifier] = roles
+    known = [value for roles in estimates.values() for value in roles.values()]
     historical = [value for value in published.values() if value is not None]
     fallback = max(historical) if historical else float(statistics.median(known)) if known else 1.0
-    costs = {}
-    for identifier in sorted(entries):
-        roles = measured.get(identifier, {})
-        costs[identifier] = {
-            role: float(roles.get(role, published[identifier] or fallback)) for role in ("baseline", "candidate")
+    costs = {
+        identifier: {
+            role: float(estimates[identifier].get(role, published[identifier] or fallback))
+            for role in ("baseline", "candidate")
         }
-    return {"schema": 1, "timings_sha256": digest(path) if hints is not None else None, "costs": costs}
+        for identifier in sorted(entries)
+    }
+    return {"schema": 1, "costs": costs}
 
 
 def schedule(tasks: list[dict], costs: dict) -> list[dict]:
@@ -136,7 +104,7 @@ def schedule(tasks: list[dict], costs: dict) -> list[dict]:
 
 
 def assignments(manifest: dict, suite: Path) -> list[list[str]]:
-    """Balance whole pairs using immutable historical durations as hints only."""
+    """Balance whole pairs using experiment-owned cost estimates."""
     costs = scheduling(suite)["costs"]
     durations = {}
     for task in manifest["tasks"]:

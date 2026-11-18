@@ -8,7 +8,7 @@ from evidence_ci import identity, plan, runtime_inputs
 
 
 def source(root):
-    script = root / "experiments/family/signal.py"
+    script = root / "experiments/P901.py"
     script.parent.mkdir(parents=True, exist_ok=True)
     script.write_text(
         "# %% [markdown]\n# ---\n# title: Signal\n# ---\n# %%\n"
@@ -122,7 +122,7 @@ def test_environment_records_actual_image_and_cpu_runtime(tmp_path, monkeypatch)
 def test_worker_inputs_exclude_unbound_files_and_preserve_shared_data(tmp_path):
     suite = tmp_path / "suite"
     script = source(suite)
-    other = script.with_name("other.py")
+    other = script.with_name("P902.py")
     other.write_text(script.read_text().replace("P901", "P902"))
     data = suite / "experiments/data.bin"
     data.write_bytes(b"\x00training input")

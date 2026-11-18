@@ -1,13 +1,13 @@
 [project]
 name = "relflow"
-version = "0.5.0"
+version = "0.5.1"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
     { name = "Grantham Taylor" },
     { name = "Reid Taylor" },
 ]
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = [
@@ -123,7 +123,7 @@ output = "coverage.json"
 
 [tool.ruff]
 line-length = 120
-extend-exclude = ["docs", "evidence", "research/**/output", "research/**/attempts", "research/**/evidence-plots"]
+extend-exclude = ["docs", "evidence"]
 lint.extend-select = ["I"]
 
 [tool.pyrefly]
@@ -165,9 +165,9 @@ files = [
     "docs/starlight/AGENTS.md",
     "docs/starlight/README.md",
     "docs/starlight/astro.config.mjs",
-    "docs/starlight/branding/README.md",
-    "docs/starlight/branding/header.typ",
-    "docs/starlight/branding/render.py",
+    "docs/assets/branding/site/README.md",
+    "docs/assets/branding/site/header.typ",
+    "docs/assets/branding/site/render.py",
     "docs/starlight/ec.config.mjs",
     "docs/starlight/package-lock.json",
     "docs/starlight/package.json",
@@ -181,7 +181,6 @@ files = [
     "evidence/SPEC.md",
     "evidence/assets.py",
     "evidence/diagnostics/README.md",
-    "evidence/diagnostics/views.json",
     "evidence/evidence_ci.py",
     "evidence/experiments/policies.py",
     "evidence/experiments/reporting.py",
@@ -194,10 +193,8 @@ files = [
     "evidence/record.py",
     "evidence/releases.py",
     "evidence/resolve.py",
-    "evidence/reuse.py",
     "evidence/runtime.py",
     "evidence/templates/experiment.py.txt",
-    "evidence/timings.json",
     "evidence/visuals.py",
     "evidence/worker.py",
     "native/Cargo.lock",
@@ -230,6 +227,10 @@ blocked = [
     "**/target/**",
     "evidence/runs/**",
     "evidence/archives/**",
+    "evidence/research/**",
+    "evidence/diagnostics/views.json",
+    "evidence/timings.json",
+    "docs/starlight/src/evidence/reviews.ts",
     "docs/site/**",
     "docs/evidence/**",
     "docs/assets/diagrams/**",
@@ -248,8 +249,7 @@ blocked = [
 "docs/starlight/scripts/*" = [".ts", ".mjs"]
 "docs/starlight/public/benchmarks/*" = [".csv", ".json"]
 "docs/starlight/public/examples/*/*" = [".py", ".json", ".txt"]
-"evidence/experiments/*/*" = [".py"]
-"evidence/research/*/*" = [".py"]
+"evidence/experiments/P[0-9]*" = [".py"]
 "evidence/diagnostics/*" = [".py"]
 "evidence/tests/**/test_*" = [".py"]
 "native/src/**" = [".rs"]

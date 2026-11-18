@@ -63,6 +63,7 @@ def prepare(reports: Path, observations: Path, destination: Path) -> dict:
         if task["role"] == "candidate":
             unpack(path, destination / task["id"], receipt)
     return {
+        "expected": sorted(catalog),
         "run_id": manifest["run_id"],
         "evidence_revision": manifest["evidence_sha"],
         "candidate_revision": manifest["candidate"]["revision"],

@@ -9,6 +9,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
+from string import Formatter
 
 from evidence_ci import ROOT, digest, evaluate
 from experiments.source import registry
@@ -45,7 +46,7 @@ def validate(reports: Path, inputs: Path | None = None, *, root: Path | None = N
     return manifest, records, summary
 
 
-def metric(entry: dict, *path: str) -> float:
+def metric(entry: dict, *path: str | int) -> float:
     """Read one finite numerical measurement from the selected full run."""
     identifier = entry["header"]["evidence-id"]
     run = entry["run"]
@@ -55,15 +56,63 @@ def metric(entry: dict, *path: str) -> float:
     try:
         for part in path:
             measured = measured[part]
-    except (KeyError, TypeError) as error:
-        raise ValueError(f"{identifier}: selected run is missing README metric {'.'.join(path)}") from error
+    except (KeyError, IndexError, TypeError) as error:
+        raise ValueError(f"{identifier}: selected run is missing README metric {'.'.join(map(str, path))}") from error
     if isinstance(measured, bool) or not isinstance(measured, (int, float)) or not math.isfinite(measured):
-        raise ValueError(f"{identifier}: README metric {'.'.join(path)} must be a finite number, got {measured!r}")
+        raise ValueError(
+            f"{identifier}: README metric {'.'.join(map(str, path))} must be a finite number, got {measured!r}"
+        )
     return measured
 
 
+def highlights(entries: dict) -> list[tuple[str, dict, dict]]:
+    """Select and order publication highlights declared by the experiments themselves."""
+    selected = []
+    for identifier, entry in entries.items():
+        plan = entry["header"].get("evidence-highlight")
+        if plan is None:
+            continue
+        if (
+            not isinstance(plan, dict)
+            or type(plan.get("order")) is not int
+            or plan["order"] < 0
+            or not isinstance(plan.get("title"), str)
+            or not plan["title"].strip()
+        ):
+            raise ValueError(f"{identifier}: evidence-highlight requires a nonnegative order and title")
+        selected.append((identifier, entry, plan))
+    if len({plan["order"] for _, _, plan in selected}) != len(selected):
+        raise ValueError("README highlights require experiment-owned declarations with distinct orders")
+    return sorted(selected, key=lambda row: row[2]["order"])
+
+
+def highlight(entry: dict, plan: dict) -> str:
+    """Format one bounded recorded value without evaluating expressions from source metadata."""
+    path, text = plan.get("metric"), plan.get("text")
+    if (
+        not isinstance(path, list)
+        or not path
+        or any(not ((isinstance(part, str) and part) or (type(part) is int and part >= 0)) for part in path)
+        or not isinstance(text, str)
+    ):
+        raise ValueError("README highlight requires a metric path and text with one value field")
+    fields = [(field, spec, conversion) for _, field, spec, conversion in Formatter().parse(text) if field is not None]
+    if len(fields) != 1 or fields[0][0] != "value" or fields[0][2] is not None or "{" in fields[0][1]:
+        raise ValueError("README highlight text must contain exactly one simple {value} field")
+    measured = metric(entry, *path)
+    for name in ("minimum", "maximum", "scale"):
+        value = plan.get(name)
+        if value is not None and (
+            isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value)
+        ):
+            raise ValueError(f"README highlight {name} must be finite")
+    if measured < plan.get("minimum", -math.inf) or measured > plan.get("maximum", math.inf):
+        raise ValueError("README highlight metric is outside its declared bounds")
+    return text.format(value=measured * plan.get("scale", 1))
+
+
 def readme_content(entries: dict, source: str) -> str:
-    """Render the three measured comparisons inside unique, standalone markers."""
+    """Render experiment-owned highlights inside unique, standalone markers."""
     start = "<!-- evidence-results:start -->"
     end = "<!-- evidence-results:end -->"
     if (
@@ -74,40 +123,17 @@ def readme_content(entries: dict, source: str) -> str:
         or source.index(end) < source.index(start)
     ):
         raise ValueError("README requires one standalone evidence-results:start marker followed by one end marker")
-    missing = {"P021", "P025", "P038"} - entries.keys()
-    if missing:
-        raise ValueError(f"README measurements require catalog experiments: {', '.join(sorted(missing))}")
-    identity, recall, states = (entries[identifier] for identifier in ("P021", "P025", "P038"))
-    hash_auc = metric(identity, "hash_auc")
-    category_auc = metric(identity, "category_oov_auc")
-    intact = metric(recall, "median", "intact_nrmse")
-    broken = metric(recall, "median", "broken_nrmse")
-    state_accuracy = metric(states, "state_accuracy")
-    prefilled_accuracy = metric(states, "prefilled_accuracy")
-    if any(not 0 <= value <= 1 for value in (hash_auc, category_auc, state_accuracy, prefilled_accuracy)):
-        raise ValueError("README AUC and accuracy measurements must be between zero and one")
-    if intact < 0 or broken < 0:
-        raise ValueError("README normalized RMSE measurements must be nonnegative")
-    urls = {
-        identifier: f"https://www.relflow.ai/latest/evidence/{identifier}/" for identifier in ("P021", "P025", "P038")
-    }
+    rows = []
+    for identifier, entry, plan in highlights(entries):
+        url = f"https://www.relflow.ai/latest/evidence/{identifier}/"
+        result, control = (highlight(entry, plan[name]) for name in ("result", "control"))
+        rows.append(f"| [{plan['title']}]({url}) | {result} | {control} |")
     table = (
-        "| Experiment | relflow result | Control |\n"
-        "| --- | --- | --- |\n"
-        f"| [Match IDs absent from training]({urls['P021']}) | **{hash_auc:.4f} AUC** with `Hash` | "
-        f"{category_auc:.4f} with unknown `Category` labels |\n"
-        f"| [Recall a value by an unfamiliar ID]({urls['P025']}) | **{intact:.3f} normalized RMSE**, "
-        f"median of three seeds | {broken:.3f} after corrupting the lookup IDs |\n"
-        f"| [Distinguish nulls from zero]({urls['P038']}) | **{state_accuracy * 100:.4g}% accuracy** "
-        f"with value states preserved | {prefilled_accuracy * 100:.4g}% after filling nulls with zero |"
+        "| Experiment | relflow result | Control |\n| --- | --- | --- |\n" + "\n".join(rows)
+        if rows
+        else "No publication highlights are declared for this catalog."
     )
     return source[: source.index(start) + len(start)] + "\n\n" + table + "\n\n" + source[source.index(end) :]
-
-
-def readme(root: Path, target: Path) -> None:
-    """Render an explicitly requested comparison table from the selected results."""
-    content = readme_content(registry(root), target.read_bytes().decode("utf-8"))
-    target.write_bytes(content.encode("utf-8"))
 
 
 def select(

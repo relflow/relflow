@@ -61,6 +61,10 @@ as retired in the manifest. The collector independently verifies these identitie
 and plots identify candidate-only measurements. Once a proof exists in the
 baseline, it runs as a pair on subsequent comparisons.
 
+Every current study lives under `experiments/` and belongs to the same required
+catalog. Directory placement and metadata never opt an experiment out of CI.
+The planner and collector verify that the complete declared catalog ran.
+
 Keep helper and executor pins immutable. To update trusted mechanics, first
 review and freeze the executor commit, then freeze a helper commit pointing to
 it, then update the consumer to that helper. A suite-only revision does not
@@ -97,14 +101,12 @@ change a seed, shorten a budget, or change a named check. The collector requires
 the entire catalog, including baseline-unmet checks and every declared internal
 seed panel.
 
-`timings.json` retains per-role duration hints from a verified hosted run and
-identifies its source commit, executor, and authenticated report artifact. Assign
-whole pairs longest first using the sum of their role costs, then schedule
-individual roles longest first within each runner. The plan freezes the timing
-file digest and resolved costs so preparation, execution, and collection agree.
-Missing timings use positive fallback costs, preventing unmeasured experiments
-from accumulating on a runner at zero estimated cost. Refresh hints from validated
-reports while retaining their source receipt; forecasts never replace measurements.
+Each experiment may declare per-role `evidence-cost` estimates in its own
+frontmatter. Assign whole pairs longest first using their summed role costs,
+then schedule individual roles longest first on each runner. The plan binds the
+source bytes and resolved costs; execution and collection verify them again.
+Missing estimates use positive fallback costs. These forecasts affect scheduling
+only; measured durations remain in run records and never become learning proof.
 
 ## Caches and attempts
 
@@ -117,10 +119,9 @@ archive digest and expected image identity. Wheels and source snapshots remain
 exact run inputs. Neither candidate wheels nor learning results enter the
 dependency cache; both measurement roles execute freshly.
 
-Historical authenticated reports remain valid descriptions of their original
-executions. They cannot become hosted measurements by replacing a host field or
-copying an old metric into a new record. Any future result reuse must preserve
-original records and prove the current request's full execution equivalence.
+Historical reports remain descriptions of their original executions. They
+cannot become current measurements by replacing a host field or copying an old
+metric into a new record. Publication requires the exact successful CI attempt.
 
 Only bounded infrastructure setup failures and eligible Docker launch failures
 before a worker record exists may retry. Retain every launch receipt and log.

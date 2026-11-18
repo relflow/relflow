@@ -12,16 +12,20 @@ without executing models.
 ## Experimental contract
 
 Each experiment is a self-contained annotated script under
-`experiments/<category>/`. It owns its generator, model, training budget,
+`experiments/Pxxx.py`. It owns its generator, model, training budget,
 held-out evaluation, matched controls, measured metrics, and named Boolean
 checks. Preserve those semantics when changing packaging or presentation.
 Share reporting and CLI plumbing, not generators, datasets, or model helpers.
 The shared immutable architecture configuration in `experiments/policies.py`
 is a narrow exception. It may declare and register frozen preset values, but
 must not define model factories, fields, generators, data, or training routines.
-Fixed schemas belong in experiment-owned classes; generated mappings remain
-visible in the experiment that needs them. Declare static contracts at module
-scope and allocate neural models during execution.
+Models use experiment-owned class declarations. Branches may use named classes
+or inline `rf.Branch(...)` definitions, especially for a small local structure.
+Declare fixed contracts at module scope, use subclasses for fixed variants, and
+use function-local declarations for arm-dependent field options. Constructors
+of classes with declared children configure architecture and placement; allocate
+neural models during execution. Static authoring checks require class-based
+models and permit inline branches.
 Never reuse a stable identifier for a different experiment.
 
 The internal `CONTROL` policy preserves the historical XS architecture,
@@ -52,44 +56,63 @@ internal seed panels already implemented by an experiment.
 
 ## Authoring scaffold
 
-`experiments/run.py --new <category>/<name>` creates a new annotated Python file
+`experiments/run.py --new --title "A new question?"` creates a new annotated Python file
 from `templates/experiment.py.txt`. It allocates an ID above the current maximum
-without reusing retired gaps and writes a literal default seed of `0`. Optional
-title, group, ID, and seed arguments configure the declaration and presentation.
+without reusing retired gaps and writes a literal default seed of `0`. The title
+is required; optional group, ID, and seed arguments configure presentation and execution.
+The filename must match the declared ID. Tags and frontmatter own categorization.
 Discovery remains static, and creation imports no experiments or model packages.
 Existing files, unsafe paths, and duplicate explicit IDs are rejected.
 
-The scaffold supplies the header, example/comparison/result sections, model-tree
-illustration, decorator, and reporting entrypoint. Its scientific body raises
+The scaffold supplies the header, example/comparison/result sections, decorator,
+and reporting entrypoint. Its scientific body raises
 `NotImplementedError`; it must never return fabricated passing measurements or
 checks. Authors own the generator, independent splits, model, budgets, controls,
 evaluation, and numerical criteria. A scaffold is not a recorded experiment.
 Once created under `experiments/`, it joins the catalog and must be completed
 before authoring and full paired checks can pass.
 
+## Self-contained experiment files
+
+One file owns each experiment, including its declaration, uv environment,
+learning protocol, and presentation. Adding or removing a script updates discovery,
+planning, documentation, and optional publication highlights automatically. No
+shared table may assign metadata or rendering behavior by experiment ID.
+
+YAML frontmatter declares `evidence-review`, `evidence-plot`, optional
+`evidence-highlight`, and optional `evidence-cost` estimates. Classification
+continues to use the script's PEP 723 `[tool.relflow.evidence]` table. Shared
+schemas and vocabulary validate these fields without listing experiment IDs.
+
+A plot selects one built-in `mode` or one script-owned `renderer`. Renderer
+functions have signature `(bundle, spec)`, with imports and helpers inside the
+function. Return `(figure, caption, interactive)`, where `figure` is a Matplotlib
+figure, `caption` is text, and `interactive` is a portable data mapping (or `{}`).
+The plot container loads only that component from the exact captured
+source; it does not import the experiment module or rerun training. Supplements
+select components in the same way. Static documentation never executes them.
+The centralized review/view/timing formats are removed, without compatibility
+fallbacks for authoring them.
+
 ## Execution
 
-The required hosted catalog is the **core** lane under `experiments/<category>/`.
-It always includes every core declaration. Studies requiring additional model
-artifacts, optional solvers, or an unreleased datatype wheel live separately in
-`research/<category>/` and declare an `evidence-requires` list in frontmatter.
-Their stable IDs share the same namespace. Directory placement owns the lane;
-frontmatter cannot reclassify a required core experiment. Both lanes use the same
-standalone protocol, immutable records, and static documentation renderer.
+Every current study lives directly in `experiments/` as `Pxxx.py` and is part of the
+required hosted catalog. There are no lanes or optional experiment exclusions.
+The runner defaults to all declarations; passing IDs selects an explicit local
+run, and `--list` lists the same catalog. Dependency environments remain owned
+by each script. Missing execution or failed checks remain visible failures.
 
-The local runner defaults to core. Select research explicitly with
-`--lane research`; `--lane all --list` lists both. Documentation lists both lanes
-and marks research pages, including their provisioning requirements under
-Reproduce. A missing research result remains Missing; excluding optional
-resources from hosted core execution never creates a passing result.
+Current scripts use plain Markdown Example, Comparison, Result, and Method
+sections with illustrative records. The website supplies measured results,
+disclosures, and reproduction commands. Do not add unused diagram source or
+presentation metadata. Do not embed Quarto options or
+shortcodes in current sources. Retained sources remain immutable and readable.
 
 Each script exposes a decorated `run(seed, steps, accelerator)` and calls
 `report(run)` under a main guard. Registration attaches immutable metadata and
 returns the original function; it never runs the experiment. There is no mutable
 process-wide catalog. Static discovery rejects duplicate IDs, multiple decorated
 entrypoints, nonliteral IDs or seeds, and unsupported function signatures.
-Historical undecorated suites retain their frontmatter and reporter-call reader
-for archived execution and publication validation.
 Execution produces a new immutable JSON record,
 including failures. It never edits sources or a selected publication. A `--steps`
 cap always identifies a smoke run and cannot establish learning capability.
@@ -98,7 +121,6 @@ Run these commands from the repository root with the intended wheel:
 
 ```sh
 uv run evidence/experiments/run.py --list
-uv run evidence/experiments/run.py --lane all --list
 uv run evidence/experiments/run.py --wheel /path/to/matching-relflow.whl P001 --steps 2
 uv run evidence/experiments/run.py --wheel /path/to/matching-relflow.whl P001
 uv run --project docs --with /path/to/matching-relflow.whl pytest -c docs/pyproject.toml evidence/tests/runtime
@@ -152,15 +174,6 @@ either side, changed check sets, missing or duplicate records, altered tasks,
 invalid provenance, cancellation, timeout, partial coverage, or a smoke budget
 must prevent a successful gate. Preserve the named numerical checks unchanged.
 
-Historical single-host reports may contain authenticated reuse after proving
-source, actual wheel payloads, comparison, and execution runtime equivalent.
-Their original records and measured revisions remain unchanged, with a separate
-receipt for the request and explicit role mapping. Retained baseline references
-carry the original immutable execution. These historical proofs remain
-verifiable; they do not authorize hosted shards to skip fresh measurements.
-Every logical slot still requires a validated full-budget execution, and
-publication must exactly match the archived candidate results and provenance.
-
 The hosted workflow assigns whole baseline/candidate experiment pairs to twelve
 GitHub-hosted CPU shards. Each shard runs at most two task containers at a time;
 each container retains its two-CPU ceiling, 4 GiB memory limit, 512 PIDs, and
@@ -173,11 +186,11 @@ The collector requires the exact planned union, unchanged task identities,
 matching within-pair execution policy, and a complete passing comparison.
 Duplicate, missing, unexpected, or altered shards fail closed.
 
-Scheduling uses the per-role costs in `timings.json`, with a reference to their
-verified source report. Freeze their file digest and resolved costs in the plan.
-Balance pairs by summed role cost; missing timings must have a positive fallback.
-These forecasts affect placement and ordering only. They cannot change the task
-catalog, seeds, training steps, checks, or measurement provenance.
+Scheduling reads optional per-role `evidence-cost` estimates from each script's
+frontmatter and freezes the resolved costs in the plan. Source checksums bind the
+estimates. Balance pairs by summed role cost and use positive fallbacks when an
+estimate is absent. Forecasts affect placement and ordering only; they cannot
+change the catalog, seeds, training steps, checks, or measurement provenance.
 
 Workers have no network, a read-only root, and no host home or Docker socket
 mount. Install runtime packages in the image, never on the host. Keep credentials
@@ -188,10 +201,8 @@ GitHub-hosted execution workflow.
 
 Hosted measurements execute freshly for both roles. Dependency-image caches
 accelerate setup without substituting for any experiment. Preserve historical
-authenticated reports and their original runtime identities; a historical
-execution must not be relabeled as a hosted measurement. Any future hosted
-result reuse still requires the complete equivalence and authentication proof
-above.
+reports and their original runtime identities; an older execution must not be
+relabeled as a current measurement.
 
 Infrastructure setup and a container launch that produced no worker record may
 be retried within a fixed bound, retaining every launch receipt and log. A
@@ -220,7 +231,7 @@ integrity before rendering a review site from the selected data.
 
 The immutable `evidence-v<version>` Release retains the frozen publication,
 comparison table, complete report and input archives, execution provenance,
-checksums, plots, and the reuse receipt when applicable. New download names
+checksums, and plots. New download names
 share the prefix `relflow-<version>-evidence`; earlier published files retain
 their original names and bytes. The
 publication must exist before the package's `v<version>` tag can be published.
@@ -231,8 +242,8 @@ credential is required.
 Publication JSON uses schema 1 with `version`, `revision`, `report`, and
 `results` keyed by stable P identifiers. Keep metrics, checks, source
 fingerprints, package versions, and execution provenance bound to the selected
-execution. A reused report keeps its original measured revision and separate
-current-request receipt; `revision` identifies the verified release request.
+execution. Publication requires the exact successful main CI attempt and its
+input request; `revision` identifies that tested commit.
 Smoke, incomplete, or regressing reports cannot be selected. A source edit or
 output-reader update does not establish a fresh learning measurement.
 
@@ -241,10 +252,8 @@ output-reader update does not establish a fresh learning measurement.
 Author prose in `# %% [markdown]` comment cells and Python in `# %%` cells.
 Static discovery supplies `evidence-id` from the decorator; an explicitly
 supplied frontmatter ID must agree with it. The Starlight adapter reads these
-cells as static source data. Existing diagram source and presentation annotations
-remain part of the retained script bytes; the website extracts authored captions
-without executing diagram code. No Jupyter or model dependency belongs in the
-documentation build.
+cells as static source data. Retained release scripts remain immutable.
+No Jupyter or model dependency belongs in the documentation build.
 
 Each experiment asks one question and shows an Example, Comparison, and Result,
 with one YAML observation and a schema-faithful description of modeled records.
@@ -306,7 +315,7 @@ pages as a second source. `make check` validates static sources and tooling;
 Torch, or Lightning. `make clean` removes generated output and caches while
 retaining canonical sources and current measurements.
 
-## Execution equivalence
+## Execution identity
 
 The complete source snapshot retains its raw integrity hash. Separate runtime
 fingerprints bind each experiment and shared runtime files under `experiments/`;
@@ -317,7 +326,7 @@ file, including the policy module, without importing it during provenance
 collection. Static catalog discovery reads declarations without importing any
 experiment or shared model configuration.
 The installed wheel payload, dependency export, seed, budget, trusted executor,
-and actual resource/thread policy must also match before baseline reuse.
+and actual resource/thread policy remain bound to each fresh execution.
 
 Scheduling order and cached image layers never reduce budgets or remove seeds.
 Independent seed trials may execute in isolated processes when their original

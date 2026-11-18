@@ -92,12 +92,12 @@ def test_paired_execution_archives_the_canonical_record_without_a_second_run(tmp
     from evidence.observations import read
 
     root = tmp_path / "suite"
-    family = root / "experiments/fixtures"
+    family = root / "experiments"
     family.mkdir(parents=True)
     canonical = Path(__file__).resolve().parents[2] / "experiments"
     for name in ["reporting.py", "source.py"]:
         shutil.copy2(canonical / name, root / "experiments" / name)
-    source = family / "paired_capture_fixture.py"
+    source = family / "P901.py"
     source.write_text(
         "# %% [markdown]\n# ---\n# title: Capture fixture\n# ---\n# %%\n"
         "import numpy as np\nfrom reporting import experiment, report\n"

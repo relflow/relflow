@@ -11,9 +11,9 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
 
 
-@pytest.mark.parametrize("name", ["plain_input_is_dormant", "reconstructing_category_labels"])
+@pytest.mark.parametrize("name", ["P109", "P110"])
 def test_label_group_replacement_has_independent_context_and_known_identities(name):
-    spec = importlib.util.spec_from_file_location("group_label_recovery", ROOT / f"experiments/group/{name}.py")
+    spec = importlib.util.spec_from_file_location("group_label_recovery", ROOT / f"experiments/{name}.py")
     proof = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(proof)
     train = list(proof.records(1090101))
@@ -26,9 +26,7 @@ def test_label_group_replacement_has_independent_context_and_known_identities(na
 
 
 def test_nonlinear_group_recovery_control_preserves_observations():
-    spec = importlib.util.spec_from_file_location(
-        "nonlinear_group_recovery", ROOT / "experiments/group/hidden_regression_regimes.py"
-    )
+    spec = importlib.util.spec_from_file_location("nonlinear_group_recovery", ROOT / "experiments/P108.py")
     proof = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(proof)
     options = {"rows": 4096, "seed": 1080101, "partition_seed": 1080100}

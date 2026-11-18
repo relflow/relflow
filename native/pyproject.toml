@@ -7,7 +7,7 @@ name = "relflow-native"
 dynamic = ["version"]
 description = "Native kernels and shared local runtimes for relflow"
 readme = "README.md"
-license = "AGPL-3.0-only"
+license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
 dependencies = ["numpy>=2.2.6", "pyarrow>=20"]

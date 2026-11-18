@@ -81,6 +81,8 @@ def test_existing_capability_miss_is_visible_and_improvement_allowed(paired):
         "partial",
         "executor",
         "schema",
+        "baseline-reference",
+        "borrowed-result",
     ],
 )
 def test_incomplete_or_invalid_execution_never_passes(paired, fault):
@@ -106,7 +108,11 @@ def test_incomplete_or_invalid_execution_never_passes(paired, fault):
     elif fault == "executor":
         manifest["executor_sha"] = "another-executor"
     elif fault == "schema":
-        manifest["schema"] = 1
+        manifest["schema"] = 2
+    elif fault == "baseline-reference":
+        records[0] = {"task": records[0]["task"], "reuse": {"report": "previous-attempt"}}
+    elif fault == "borrowed-result":
+        records[0]["reused_from"] = {"report": "previous-attempt"}
     else:
         manifest["full_catalog"] = False
     assert not evaluate(manifest, records)["passed"]

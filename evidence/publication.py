@@ -3,27 +3,37 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
+import io
 import json
 import os
 import re
 import shutil
+import stat
 import subprocess
+import tarfile
 import tempfile
 import tomllib
-from pathlib import Path
+import zipfile
+from pathlib import Path, PurePosixPath
 
+import yaml
 from evidence_ci import task_key
-from experiments.source import describe, fingerprint, frontmatter, metadata
 from record import select, validate
-from releases import VERSION, filenames
-from reuse import SHA, archive, artifact_name, attempt, helper_sha, trusted, verify_receipt
-from reuse import artifact as verified_artifact
+from releases import VERSION, comparison, filenames
 
 REPOSITORY = "relflow/relflow"
-EXECUTOR = "de18256bbbe034c7ab9c05640fb10fec167da4eb"
-RESULTS = {"evidence-result", "evidence-report"}
-MARKERS = ("<!-- evidence-results:start -->", "<!-- evidence-results:end -->")
+SHA = re.compile(r"[0-9a-f]{40}")
+LIMIT = 512 * 1024 * 1024
+HELPER = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/evidence.yml").read_text())["jobs"][
+    "run"
+]["uses"].rsplit("@", 1)[1]
+EXECUTOR = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/evidence-hosted.yml").read_text())[
+    "env"
+]["EVIDENCE_EXECUTOR"]
+if not isinstance(EXECUTOR, str) or not SHA.fullmatch(EXECUTOR):
+    raise ValueError("The hosted Evidence workflow must declare one immutable EVIDENCE_EXECUTOR SHA")
 
 
 def api(path: str, *, missing: bool = False, paginate: bool = False) -> dict | list:
@@ -67,71 +77,129 @@ def check_report(manifest: dict, summary: dict, run: dict, main: str, *, baselin
         raise ValueError("Report identity, complete passing result, or tested revisions differ from trusted main CI")
 
 
-def outside_results(text: str) -> tuple[str, str]:
-    if any(text.count(marker) != 1 for marker in MARKERS):
-        raise ValueError("README requires one ordered evidence-results marker pair")
-    before, remaining = text.split(MARKERS[0])
-    _, after = remaining.split(MARKERS[1])
-    return before, after
+def helper_sha(run: dict) -> str:
+    """Authenticate the exact reusable hosted workflow from GitHub's run metadata."""
+    prefix = REPOSITORY + "/.github/workflows/evidence-hosted.yml@"
+    references = []
+    for row in run.get("referenced_workflows", []):
+        if not row.get("path", "").startswith(prefix):
+            continue
+        revision = row.get("sha", "")
+        if not SHA.fullmatch(revision) or row["path"] != prefix + revision:
+            raise ValueError("CI must identify one immutable trusted Evidence helper")
+        references.append(revision)
+    if len(references) != 1:
+        raise ValueError("CI must identify one immutable trusted Evidence helper")
+    return references[0]
 
 
-def selection_changes(before: dict[str, str], after: dict[str, str]) -> bool:
-    """Accept only selected result headers and the explicitly bounded README table."""
-    if not before or before.keys() != after.keys():
-        return False
-    try:
-        for path, old in before.items():
-            new = after[path]
-            if path == "README.md":
-                if outside_results(old) != outside_results(new):
-                    return False
-            elif re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", path):
-                left, right = metadata(old), metadata(new)
-                if describe(old)["evidence-id"] != describe(new)["evidence-id"]:
-                    return False
-                left = {key: value for key, value in left.items() if key not in RESULTS}
-                right = {key: value for key, value in right.items() if key not in RESULTS}
-                if left != right or fingerprint(old) != fingerprint(new):
-                    return False
-                if frontmatter(old, left) != frontmatter(new, right):
-                    return False
-            else:
-                return False
-    except (ValueError, SyntaxError, KeyError):
-        return False
-    return True
-
-
-def compatible(root: Path, tested: str, checkout: str) -> None:
-    """A bootstrap checkout may change publication tooling, but not tested runtime inputs."""
-    changed = (
-        subprocess.check_output(
-            [
-                "git",
-                "diff",
-                "--name-only",
-                "-z",
-                tested,
-                checkout,
-                "--",
-                "src",
-                "pyproject.toml",
-                "uv.lock",
-                "evidence/experiments",
-            ],
-            cwd=root,
-        )
-        .decode()
-        .strip("\0")
-        .split("\0")
+def trusted(run: dict, manifest: dict, request: dict, root: Path) -> None:
+    """Bind publication to this main CI attempt and its successful hosted collector."""
+    if (
+        manifest.get("backend") != "github-hosted-docker"
+        or helper_sha(run) != HELPER
+        or manifest.get("executor_sha") != EXECUTOR
+        or manifest.get("run_id") != f"gh-{run['id']}-{run['run_attempt']}"
+    ):
+        raise ValueError("Publication requires the current immutable hosted Evidence helper and executor")
+    expected = {
+        "candidate": manifest["candidate"]["revision"],
+        "baseline": manifest["baseline"]["revision"],
+        "suite": manifest["evidence_sha"],
+        "run_id": run["id"],
+        "run_attempt": run["run_attempt"],
+        "event": run["event"],
+    }
+    if request != expected or request["candidate"] != run["head_sha"]:
+        raise ValueError("Evidence input request differs from its exact main CI attempt")
+    selection = manifest["comparison"]
+    selected = comparison(
+        root,
+        request["candidate"],
+        selection["event_base"],
+        forced=run["event"] == "push" and selection.get("reason") == "rewritten-push",
     )
-    for name in filter(None, changed):
-        if not re.fullmatch(r"evidence/experiments/[^/]+/[^/]+\.py", name):
-            raise ValueError(f"Bootstrap checkout changes tested runtime input: {name}")
-        old = subprocess.check_output(["git", "show", f"{tested}:{name}"], cwd=root, text=True)
-        new = (root / name).read_text()
-        if not selection_changes({name: old}, {name: new}):
-            raise ValueError(f"Bootstrap checkout changes tested experiment source: {name}")
+    if selection != selected or selection["baseline"] != request["baseline"]:
+        raise ValueError("Evidence comparison differs from its supported baseline policy")
+    path = f"repos/{REPOSITORY}/actions/runs/{run['id']}/attempts/{run['run_attempt']}/jobs?per_page=100"
+    listing = api(path)
+    jobs = list(listing["jobs"])
+    for page in range(2, (listing.get("total_count", len(jobs)) + 99) // 100 + 1):
+        jobs.extend(api(path + f"&page={page}")["jobs"])
+    collectors = [job for job in jobs if job["name"].endswith("/ Collect full paired suite")]
+    if (
+        len(collectors) != 1
+        or collectors[0].get("status") != "completed"
+        or collectors[0].get("conclusion") != "success"
+    ):
+        raise ValueError("The current attempt has no complete successful Evidence collector")
+
+
+def unpack(payload: bytes, destination: Path) -> None:
+    """Extract one bounded GitHub artifact without links or path traversal."""
+    destination.mkdir(parents=True, exist_ok=False)
+    with zipfile.ZipFile(io.BytesIO(payload)) as bundle:
+        total, names = 0, set()
+        for entry in bundle.infolist():
+            path = PurePosixPath(entry.filename)
+            if (
+                not path.parts
+                or path.is_absolute()
+                or ".." in path.parts
+                or "\\" in entry.filename
+                or entry.filename in names
+                or path.as_posix() != entry.filename.rstrip("/")
+            ):
+                raise ValueError("Evidence archive contains unsafe or duplicate paths")
+            names.add(entry.filename)
+            if stat.S_IFMT(entry.external_attr >> 16) not in {0, stat.S_IFREG, stat.S_IFDIR}:
+                raise ValueError("Evidence archive contains special files")
+            total += entry.file_size
+            if total > LIMIT:
+                raise ValueError("Evidence archive exceeds its size bound")
+            target = destination / entry.filename
+            if entry.is_dir():
+                target.mkdir(parents=True, exist_ok=True)
+            else:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(bundle.read(entry))
+
+
+def artifact(run: dict, name: str, destination: Path) -> dict:
+    """Download and authenticate one artifact from the exact CI attempt."""
+    name = f"{name}-attempt-{run['run_attempt']}"
+    path = f"repos/{REPOSITORY}/actions/runs/{run['id']}/artifacts?per_page=100"
+    listing = api(path)
+    artifacts = list(listing["artifacts"])
+    for page in range(2, (listing.get("total_count", len(artifacts)) + 99) // 100 + 1):
+        artifacts.extend(api(path + f"&page={page}")["artifacts"])
+    matches = [row for row in artifacts if row["name"] == name and not row["expired"]]
+    if len(matches) != 1:
+        raise ValueError("Publication requires one unexpired immutable artifact per name")
+    row = matches[0]
+    expected = row.get("digest", "")
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected) or row.get("size_in_bytes", 0) > LIMIT:
+        raise ValueError("Publication requires an API-authenticated artifact digest")
+    payload = subprocess.check_output(["gh", "api", f"repos/{REPOSITORY}/actions/artifacts/{row['id']}/zip"])
+    if len(payload) > LIMIT or "sha256:" + hashlib.sha256(payload).hexdigest() != expected:
+        raise ValueError("Downloaded artifact differs from its GitHub digest")
+    unpack(payload, destination)
+    return {key: row[key] for key in ("id", "name", "digest")}
+
+
+def archive(source: Path, destination: Path) -> None:
+    """Produce reproducible report bytes without following links or special files."""
+    with destination.open("wb") as output, gzip.GzipFile(fileobj=output, mode="wb", filename="", mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode="w") as bundle:
+            for path in sorted(source.rglob("*")):
+                if path.is_symlink() or not (path.is_file() or path.is_dir()):
+                    raise ValueError(f"Evidence artifact must contain regular files: {path}")
+                if path.is_file():
+                    content = path.read_bytes()
+                    entry = tarfile.TarInfo(path.relative_to(source).as_posix())
+                    entry.size = len(content)
+                    entry.mode = 0o644
+                    bundle.addfile(entry, io.BytesIO(content))
 
 
 def integrity(reports: Path) -> None:
@@ -244,19 +312,14 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     workflow = api(f"repos/{REPOSITORY}/actions/workflows/ci.yml")
     if run.get("workflow_id") != workflow["id"]:
         raise ValueError("Evidence run belongs to a different CI workflow")
-    compatible(root, main, checkout)
+    if checkout != main:
+        raise ValueError("Publication checkout must be the exact tested main commit")
     output.mkdir(parents=True, exist_ok=False)
     reports, inputs = output / "retained", output / "retained-inputs"
-    verified_artifact(run_id, artifact_name(run, "relflow-evidence"), reports)
+    artifact(run, "relflow-evidence", reports)
     retained_manifest = json.loads((reports / "manifest.json").read_text())
-    current_inputs = output / "current-inputs"
-    verified_artifact(run_id, artifact_name(run, "evidence-inputs"), current_inputs)
-    request = json.loads((current_inputs / "request.json").read_text())
-    run = attempt(run, request.get("run_attempt"))
-    reused = retained_manifest["run_id"] != f"gh-{run_id}-{run['run_attempt']}"
-    if not reused:
-        current_inputs.rename(inputs)
-        current_inputs = inputs
+    artifact(run, "evidence-inputs", inputs)
+    request = json.loads((inputs / "request.json").read_text())
     baseline = request.get("baseline", "")
     expected_request = {
         "candidate": main,
@@ -268,21 +331,9 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
     }
     if not SHA.fullmatch(baseline) or request != expected_request:
         raise ValueError("Authenticated input request does not bind the exact current main CI attempt")
-    if retained_manifest.get("backend") == "github-hosted-docker":
-        trusted(run, retained_manifest, helper=helper_sha(run), executor=EXECUTOR, root=root, request=request)
-    names = [("evidence-reused-inputs", inputs)] if reused else []
-    if reused:
-        names.append(("evidence-reuse", output / "reuse-context"))
-    for name, target in names:
-        verified_artifact(run_id, name, target)
+    check_report(retained_manifest, json.loads((reports / "summary.json").read_text()), run, main, baseline=baseline)
+    trusted(run, retained_manifest, request, root)
     integrity(reports)
-    execution_run = run
-    if reused:
-        reuse_receipt = json.loads((output / "reuse-context/reuse.json").read_text())
-        execution_run = verify_receipt(
-            root, reports, inputs, reuse_receipt, run, baseline, current_inputs=current_inputs, executor=EXECUTOR
-        )
-        (output / files["reuse"]).write_text(json.dumps(reuse_receipt, sort_keys=True, indent=2) + "\n")
     suite_revision = retained_manifest["evidence_sha"]
     with tempfile.TemporaryDirectory() as temporary:
         tested = Path(temporary) / "evidence"
@@ -302,20 +353,17 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
         manifest, records, summary = validate(reports, inputs, root=tested)
         if json.loads((reports / "summary.json").read_text()) != summary:
             raise ValueError("Retained report summary differs from the validated task records")
-        if not reused:
-            check_report(manifest, summary, run, main, baseline=baseline)
+        check_report(manifest, summary, run, main, baseline=baseline)
         receipt = {
-            key: execution_run[key]
+            key: run[key]
             for key in ("run_attempt", "head_sha", "head_branch", "event", "html_url", "workflow_id", "path")
         }
-        receipt["run_id"] = execution_run["id"]
+        receipt["run_id"] = run["id"]
         github_run = output / files["provenance"]
         github_run.write_text(json.dumps(receipt, sort_keys=True, indent=2) + "\n")
         archive(reports, output / files["reports"])
         archive(inputs, output / files["inputs"])
         assets = [files["reports"], files["inputs"], files["provenance"]]
-        if reused:
-            assets.append(files["reuse"])
         measurements = output / files["measurements"]
         measurements.write_text(
             f"# relflow {version} evidence\n\n<!-- evidence-results:start -->\n<!-- evidence-results:end -->\n"
@@ -335,7 +383,7 @@ def publish(root: Path, output: Path, run_id: int, *, version: str | None = None
             from visuals import install, verify
 
             figures = output / "plots"
-            verified_artifact(execution_run["id"], artifact_name(execution_run, "evidence-plots"), figures)
+            artifact(run, "evidence-plots", figures)
             bundle = figures / "proof-visualizations.zip"
             verify(bundle, manifest, records)
             published_bundle = output / files["plots"]

@@ -21,12 +21,7 @@ const entries = evidenceEntries.map((entry) => ({
   capability: capabilityFor(entry),
   conditions: conditionsFor(entry),
 }));
-const groups = [
-  ...capabilities,
-  ...(entries.some((entry) => entry.capability.id === 'archived')
-    ? [{ id: 'archived', label: 'Archived experiments' }]
-    : []),
-];
+const groups = capabilities;
 const states = [...new Map(entries.map((entry) => [entry.state.id, entry.state])).values()];
 const stateCount = (id: string) => entries.filter((entry) => entry.state.id === id).length;
 const fullRuns = stateCount('met') + stateCount('not_met');
@@ -182,13 +177,12 @@ const lastRecorded = recorded
             data-conditions={entry.conditions.map((condition) => condition.id).join(' ')}
             data-status={entry.state.id}
             data-types={entry.types.join(' ')}
-            data-search={`${entry.id} ${entry.family} ${entry.conditions.map((condition) => condition.label).join(' ')} ${family} ${entry.question} ${entry.title} ${entry.types.join(' ')} ${description(entry)} ${entry.lane} ${entry.archived ? 'archived' : ''} ${entry.requirements.join(' ')}`.toLowerCase()}
+            data-search={`${entry.id} ${entry.family} ${entry.conditions.map((condition) => condition.label).join(' ')} ${family} ${entry.question} ${entry.title} ${entry.types.join(' ')} ${description(entry)} ${entry.requirements.join(' ')}`.toLowerCase()}
           >
             <article aria-labelledby={`${entry.id}-title`}>
               <div class="entry-labels">
                 <span class="entry-id">{entry.id}</span>
                 <span>{family}</span>
-                {entry.archived && <span>Archived experiment</span>}
               </div>
               <h3 id={`${entry.id}-title`}>
                 <a href={experimentURL(entry.id)}>{entry.question}</a>

@@ -94,113 +94,76 @@ def test_static_declaration_rejects_nested_async_and_class_entrypoints(source):
 
 
 def test_catalog_discovers_new_files_on_each_call_and_supplies_presentation_id(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    first = family / "first.py"
+    first = family / "P901.py"
     first.write_text(script())
     entries = registry(tmp_path, measurements=False)
     assert list(entries) == ["P901"]
     assert entries["P901"]["header"]["evidence-id"] == "P901"
-    assert entries["P901"]["script"] == "experiments/family/first.py"
-    (family / "second.py").write_text(script('@experiment("P902", seed=456)'))
+    assert entries["P901"]["script"] == "experiments/P901.py"
+    (family / "P902.py").write_text(script('@experiment("P902", seed=456)'))
     assert list(registry(tmp_path, measurements=False)) == ["P901", "P902"]
 
 
 def test_catalog_rejects_duplicate_decorated_ids(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    for name in ("first", "second"):
+    for name in ("P901", "P902"):
         (family / f"{name}.py").write_text(script())
     with pytest.raises(ValueError, match="duplicate evidence ID"):
         registry(tmp_path, measurements=False)
 
 
 def test_catalog_rejects_disagreeing_header_and_decorator(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    (family / "first.py").write_text(script().replace("# title:", "# evidence-id: P902\n# title:"))
+    (family / "P901.py").write_text(script().replace("# title:", "# evidence-id: P902\n# title:"))
     with pytest.raises(ValueError, match="differs from @experiment"):
         registry(tmp_path, measurements=False)
 
 
+def test_catalog_requires_filename_to_match_declared_id(tmp_path):
+    directory = tmp_path / "experiments"
+    directory.mkdir()
+    (directory / "P902.py").write_text(script())
+    with pytest.raises(ValueError, match="filename must be P901.py"):
+        registry(tmp_path, measurements=False)
+
+
+def test_catalog_rejects_nested_experiments(tmp_path):
+    directory = tmp_path / "experiments/structure"
+    directory.mkdir(parents=True)
+    (directory / "P901.py").write_text(script())
+    with pytest.raises(ValueError, match="must live directly"):
+        registry(tmp_path, measurements=False)
+
+
 def test_malformed_declaration_cannot_fall_back_to_archived_header(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    (family / "first.py").write_text(script("@experiment").replace("# title:", "# evidence-id: P901\n# title:"))
+    (family / "P901.py").write_text(script("@experiment").replace("# title:", "# evidence-id: P901\n# title:"))
     with pytest.raises(ValueError, match="Declare @experiment"):
         registry(tmp_path, measurements=False)
 
 
 def test_archived_catalog_can_still_be_read_without_importing_it(tmp_path):
-    family = tmp_path / "experiments/family"
+    family = tmp_path / "experiments"
     family.mkdir(parents=True)
-    (family / "archive.py").write_text(
+    (family / "P901.py").write_text(
         "# %% [markdown]\n# ---\n# evidence-id: P901\n# ---\n# %%\n"
         "raise RuntimeError('must not execute')\nreport(PROOF_ID, run, seed=123)\n"
     )
-    assert declaration((family / "archive.py").read_text()) is None
+    assert declaration((family / "P901.py").read_text()) is None
     assert list(registry(tmp_path, measurements=False)) == ["P901"]
 
 
 def test_complete_catalog_uses_one_declaration_per_experiment():
     root = Path(__file__).resolve().parents[2] / "evidence"
-    entries = registry(root, measurements=False, lane="all")
+    entries = registry(root, measurements=False)
     assert entries
     for identifier, entry in entries.items():
         text = (root / entry["script"]).read_text()
         assert declaration(text).id == identifier
         assert "PROOF_ID =" not in text
         assert "# evidence-id:" not in text
-
-
-def test_lanes_are_explicit_static_and_default_to_complete_core(tmp_path):
-    core = tmp_path / "experiments/family/core.py"
-    research = tmp_path / "research/family/research.py"
-    core.parent.mkdir(parents=True)
-    research.parent.mkdir(parents=True)
-    core.write_text(script())
-    research.write_text(
-        script('@experiment("P902", seed=456)').replace(
-            "# title:", '# evidence-requires: ["offline encoder snapshot"]\n# title:'
-        )
-    )
-
-    assert list(registry(tmp_path, measurements=False)) == ["P901"]
-    selected = registry(tmp_path, measurements=False, lane="research")
-    assert list(selected) == ["P902"]
-    assert selected["P902"]["lane"] == "research"
-    assert selected["P902"]["script"] == "research/family/research.py"
-    assert set(registry(tmp_path, measurements=False, lane="all")) == {"P901", "P902"}
-    assert not (tmp_path / "executed").exists()
-
-
-def test_research_ids_cannot_collide_with_core_or_be_reclassified_by_metadata(tmp_path):
-    core = tmp_path / "experiments/family/core.py"
-    research = tmp_path / "research/family/research.py"
-    core.parent.mkdir(parents=True)
-    research.parent.mkdir(parents=True)
-    core.write_text(script())
-    research.write_text(script().replace("# title:", '# evidence-requires: ["extra"]\n# title:'))
-    with pytest.raises(ValueError, match="duplicate evidence ID"):
-        registry(tmp_path, measurements=False)
-    research.unlink()
-    core.write_text(script().replace("# title:", "# evidence-lane: research\n# title:"))
-    with pytest.raises(ValueError, match="directory owns its lane"):
-        registry(tmp_path, measurements=False)
-
-
-@pytest.mark.parametrize("requirement", [None, '"extra"', "[]", '[""]', "[1]"])
-def test_research_requires_explicit_nonempty_provisioning_descriptions(tmp_path, requirement):
-    path = tmp_path / "research/family/research.py"
-    path.parent.mkdir(parents=True)
-    text = script()
-    if requirement is not None:
-        text = text.replace("# title:", f"# evidence-requires: {requirement}\n# title:")
-    path.write_text(text)
-    with pytest.raises(ValueError, match="evidence-requires"):
-        registry(tmp_path, measurements=False, lane="research")
-
-
-def test_invalid_lane_does_not_silently_select_an_empty_suite(tmp_path):
-    with pytest.raises(ValueError, match="Evidence lane"):
-        registry(tmp_path, measurements=False, lane="typo")

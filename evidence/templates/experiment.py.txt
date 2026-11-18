@@ -1,18 +1,30 @@
 # %% [markdown]
 # ---
 # title: ${title}
-# categories: [${category}]
 # description: "TODO: State the information boundary and held-out comparison."
-# execute:
-#   enabled: false
-#   eval: false
-# code-fold: true
-# toc: false
 # evidence-readout:
 # - label: "TODO: Name the measurement"
 #   metric: [score]
 #   format: number
 # evidence-group: ${group}
+# evidence-review:
+#   question: "TODO: What held-out behavior does this experiment test?"
+#   modeling: "TODO: Describe the inputs, hidden target, independent splits, model, and matched comparison."
+#   comparison:
+#     kind: Recorded measurement
+#     metric: RMSE
+#     definition: "TODO: Define the measurement and its units."
+#     direction: Lower error is better
+#     conditions:
+#     - label: "TODO: Name the measured condition"
+#       path: [score]
+#       format: number
+#   note: "TODO: State the limits of the comparison."
+# evidence-plot:
+#   mode: summary
+#   focus: "TODO: State the diagnostic question."
+#   comparison: "TODO: Name the retained observations to compare."
+#   limit: "TODO: State what the diagnostic cannot establish."
 # ---
 #
 # TODO: Explain the question in plain language: what does the model receive,
@@ -21,7 +33,7 @@
 #
 # ## Example
 #
-# Replace this illustrative record and diagram with the observation and schema
+# Replace this illustrative record with the observation and schema
 # used by the experiment. The target must be hidden from model inputs.
 #
 # ```yaml
@@ -34,15 +46,6 @@
 # fields are hidden during prediction. Illustrative answers are not measured
 # model predictions.
 #
-# ```{typst}
-# //| label: fig-evidence-${number}
-# //| fig-cap: "Replace these fields with the experiment's schema."
-# //| fig-alt: "A record contains a visible numeric feature and a hidden numeric target."
-# #tree(node("record", kind: "root", children: (
-#   node("feature", type: "Number"),
-#   node("target", kind: "target", type: "Number"),
-# )))
-# ```
 #
 # ## Comparison
 #
@@ -53,22 +56,11 @@
 #
 # ## Result
 #
-# {{< evidence ${number} status >}}
-#
 # No learning result is claimed until this experiment is implemented and recorded.
 # TODO: Explain what larger or smaller scores mean, how the checks answer the
 # original question, and which generalizations the experiment does not test.
 #
-# <details class="evidence-details">
-# <summary>Experiment details and code</summary>
-#
-# {{< evidence ${number} evidence >}}
-#
-# ### Run this experiment
-#
-# {{< evidence ${number} script >}}
-#
-# ### Complete experiment code
+# ## Method
 #
 
 # %%
@@ -88,12 +80,19 @@ import sys
 from pathlib import Path
 
 # Shared reporting and frozen policies travel with the evidence checkout.
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "experiments"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import relflow as rf
 from reporting import experiment, report
 
 
-# Declare the experiment's typed Model and Branch contracts at module scope.
+# Small collections may be inline, such as items = rf.Branch(length=8, value=rf.Number).
+class Model(rf.Model):
+    feature = rf.Number
+    target = rf.Number(mask=True)
+
+
+# Replace the illustrative fields above with the experiment's data contract.
 # Select an Evidence-owned architecture policy when it matches the study;
 # keep generators, fit budgets, controls, and scientific checks in this file.
 @experiment(${identifier}, seed=${seed})
@@ -107,6 +106,3 @@ def run(seed, steps, accelerator):
 
 if __name__ == "__main__":
     report(run)
-
-# %% [markdown]
-# </details>

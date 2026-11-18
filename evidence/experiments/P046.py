@@ -1,0 +1,336 @@
+# %% [markdown]
+# ---
+# title: Do harmless schema edits preserve predictions?
+# description: Train a useful predictor, then make edits that should not alter its visible information or learned
+#   state.
+# evidence-readout:
+# - label: Trained model
+#   metric:
+#   - source
+#   - nrmse
+#   format: error
+# - label: Completely reset
+#   metric:
+#   - controls
+#   - complete_reset
+#   - nrmse
+#   format: error
+# evidence-group: Mutations
+# evidence-review:
+#   question: Do harmless schema edits preserve predictions?
+#   modeling: Train a predictor, then change metadata or add and remove inactive fields without changing its useful
+#     inputs. Compare predictions on the same test records before and after each edit. The primary chart shows the
+#     largest prediction change for each edit in the first cycle.
+#   comparison:
+#     kind: Recorded conditions
+#     metric: Prediction drift
+#     conditions:
+#     - label: Metadata edit
+#       path:
+#       - edits
+#       - 0
+#       - max_prediction_drift
+#       format: number
+#     - label: Inactive extension
+#       path:
+#       - edits
+#       - 1
+#       - max_prediction_drift
+#       format: number
+#     - label: Inactive deletion
+#       path:
+#       - edits
+#       - 2
+#       - max_prediction_drift
+#       format: number
+#     definition: Absolute change in predictions after an operation, on the scale named in each condition. Zero means
+#       no change.
+#     direction: Task-specific interpretation
+#   note: Zero drift means identical predictions for that edit. Repeated cycles, equivalent key changes, checkpoint
+#     round-trips, and rejected edits are checked separately.
+# evidence-plot:
+#   target: y
+#   focus: Which schema edits preserve the learned function immediately?
+#   comparison: Inspect paired output changes for neutral edits, serialization, and destructive controls.
+#   limit: A downstream preservation check is interpretable only after its source model meets the declared prerequisite.
+#   renderer: plot
+# evidence-cost:
+#   baseline: 19
+#   candidate: 19
+# ---
+#
+# ## Example
+#
+# The original predictor receives a number and one of four category codes, then predicts their hidden offset
+# sum. The offsets for `code-0` through `code-3` are `-0.75`, `-0.25`, `0.25`, and `0.75`. Thus the
+# illustrative `x: 0.5` with `code-0` gives `y = 0.5 - 0.75 = -0.25`. A model must first learn this
+# relationship before unchanged predictions across an edit can demonstrate preservation of useful behavior.
+#
+# ```yaml
+# x: 0.5
+# code: code-0
+# y: -0.25
+# ```
+#
+# The answer is shown here for explanation; it is hidden from the model when scored.
+#
+# ## Comparison
+#
+# The experiment records predictions and learned state before editing, then changes metadata, adds and
+# removes an inactive field, and rebinds the numeric input to an equivalent renamed source key. No fitting
+# follows these edits. It also checks rejection of a duplicate field name and a save/load round trip.
+# Repeating the edits tests more than one successful mutation. A complete reset supplies the opposite
+# control: intentionally discarding learned state should lose the trained relationship.
+#
+# Repeat metadata changes, inactive-field additions and deletions, equivalent input-key changes, and save/load. Compare with a complete reset.
+#
+# ## Result
+#
+# The compact errors compare the trained predictor with the reset control, while detailed edit records
+# contain prediction drift, preserved vocabulary, and changed or missing state entries. Those are separate
+# questions: unchanged parameters alone would not prove that an input was still read correctly. These edits
+# are chosen to preserve the available information. The result does not promise unchanged predictions after
+# adding active evidence, changing model capacity, or adapting the model with further training.
+#
+# These edits preserve predictions; a reset loses the learned relationship. Changes to visible context or model size need separate checks.
+#
+# ## Method
+#
+# ### Remaining work
+#
+# Three GPU seeds support these edits. Calibrate on ten separate seeds before
+# freezing numerical gates. Test inactive nested branches separately.
+# Renaming schema addresses and resizing learned tensors require separate
+# experiments; matching physical input values does not make those neutral edits.
+#
+
+# %%
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["matplotlib>=3.10",
+#     "lightning",
+#     "numpy",
+#     "polars",
+#     "pyyaml>=6",
+#     "relflow>=0.5.0",
+#     "torch",
+# ]
+#
+# [tool.relflow.evidence]
+# capability = "training"
+# types = []
+# conditions = ["training-updates"]
+# ///
+
+"""P046: preserve a trained function across neutral public schema edits."""
+
+import sys
+from collections.abc import Iterator
+from copy import deepcopy
+from functools import partial
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+# Shared reporting and frozen policies travel with the evidence checkout.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import lightning.pytorch as lit
+import numpy as np
+import polars as pl
+import relflow as rf
+import torch
+from policies import CONTROL
+from reporting import experiment, report
+
+OFFSETS = (-0.75, -0.25, 0.25, 0.75)
+
+
+def records(*, rows: int, seed: int) -> Iterator[dict]:
+    rng = np.random.default_rng(seed)
+    for _ in range(rows):
+        x = float(rng.uniform(-1, 1))
+        code = int(rng.integers(len(OFFSETS)))
+        yield {"x": x, "code": f"code-{code}", "y": x + OFFSETS[code]}
+
+
+def prediction(model: rf.Model, rows: list[dict], *, key: str = "x") -> np.ndarray:
+    output = pl.DataFrame(model.predict([{key: row["x"], "code": row["code"]} for row in rows]))[
+        "predictions"
+    ].to_list()
+    return np.asarray([row["y"]["content"] for row in output], dtype=np.float64)
+
+
+def equal(first, second) -> bool:
+    """Compare learned tensors and extension-owned nested state exactly."""
+    if isinstance(first, torch.Tensor):
+        return isinstance(second, torch.Tensor) and torch.equal(first, second)
+    if isinstance(first, dict):
+        return (
+            isinstance(second, dict)
+            and first.keys() == second.keys()
+            and all(equal(value, second[name]) for name, value in first.items())
+        )
+    if isinstance(first, (tuple, list)):
+        return (
+            type(first) is type(second)
+            and len(first) == len(second)
+            and all(equal(a, b) for a, b in zip(first, second, strict=True))
+        )
+    return type(first) is type(second) and first == second
+
+
+def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
+    rmse = float(np.sqrt(np.mean((actual - predicted) ** 2)))
+    return {"rmse": rmse, "baseline_rmse": baseline, "nrmse": rmse / baseline}
+
+
+class Model(rf.Model):
+    x = rf.Number
+    code = rf.Category(p_unavailable=0.0)
+    y = rf.Number(mask=True, objective="mse")
+
+
+@experiment("P046", seed=4601)
+def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
+    lit.seed_everything(seed, workers=True)
+    budget = 512 if steps is None else min(steps, 512)
+    train = list(records(rows=2048, seed=seed + 1))
+    test = list(records(rows=1024, seed=seed + 3))
+    actual = np.asarray([row["y"] for row in test])
+    baseline = float(np.sqrt(np.mean((actual - np.mean([row["y"] for row in train])) ** 2)))
+    scale = float(np.std([row["y"] for row in train]))
+
+    model = Model(preset=CONTROL.name)
+    data = rf.SyntheticDataModule(
+        train=partial(records, rows=2048, seed=seed + 1),
+        validate=partial(records, rows=512, seed=seed + 2),
+        seed=seed,
+    )
+    model.fit(
+        data,
+        batch_size=128,
+        learning_rate=0.003,
+        fused=False,
+        early_stopping=False,
+        rollback=False,
+        precision="32-true",
+        strategy="auto",
+        accelerator=accelerator,
+        devices=1,
+        max_epochs=-1,
+        max_steps=budget,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+        enable_checkpointing=False,
+        deterministic=True,
+        num_sanity_val_steps=0,
+    )
+    trainer = model.trainer
+    model.eval()
+    reference = prediction(model, test)
+    state = deepcopy(model.state_dict())
+    vocabulary = list(rf.Category.vocabulary(model, rf.Address("code")))
+    root = rf.where("address") == "/"
+    source = rf.where("address") == "/x"
+    measured = errors(actual, reference, baseline)
+    edits = []
+    checks = {"Source learns the relationship below 0.25 nRMSE": measured["nrmse"] < 0.25}
+
+    def observe(label: str, *, key: str = "x") -> None:
+        result = prediction(model, test, key=key)
+        current = model.state_dict()
+        missing = [name for name, value in state.items() if name not in current or not equal(value, current[name])]
+        preserved = bool(np.allclose(reference, result, rtol=1e-5, atol=1e-6 * scale))
+        same_vocabulary = list(rf.Category.vocabulary(model, rf.Address("code"))) == vocabulary
+        edits.append(
+            {
+                "edit": label,
+                "max_prediction_drift": float(np.max(np.abs(reference - result))),
+                "nrmse": errors(actual, result, baseline)["nrmse"],
+                "changed_or_missing_state_entries": missing,
+                "vocabulary_preserved": same_vocabulary,
+            }
+        )
+        checks[f"{label}: predictions survive"] = preserved
+        checks[f"{label}: all original state and vocabulary survive"] = not missing and same_vocabulary
+
+    for cycle in range(3):
+        model.update(source, description=f"Equivalent input, cycle {cycle + 1}")
+        observe(f"cycle {cycle + 1} metadata")
+        model.extend(root, unused=rf.Number(active=False))
+        observe(f"cycle {cycle + 1} inactive extension")
+        model.delete(rf.where("address") == "/unused")
+        observe(f"cycle {cycle + 1} inactive deletion")
+    model.update(source, query="renamed_x")
+    observe("equivalent source rebind", key="renamed_x")
+    model.update(source, query=None)
+    observe("source rebind restoration")
+    rejected = False
+    try:
+        model.extend(root, x=rf.Number)
+    except ValueError:
+        rejected = True
+    checks["Duplicate-name edit is rejected"] = rejected
+    observe("rejected duplicate extension")
+
+    with TemporaryDirectory(prefix="relflow-mutation-") as directory:
+        path = Path(directory) / "edited.ckpt"
+        model.save(path)
+        loaded = rf.Model.load(path).to(model.device).eval()
+        restored = prediction(loaded, test)
+        checks["Edited checkpoint preserves schema"] = loaded.schema.model_dump() == model.schema.model_dump()
+        checks["Edited checkpoint preserves learned state"] = equal(model.state_dict(), loaded.state_dict())
+        checks["Edited checkpoint preserves predictions"] = bool(
+            np.allclose(reference, restored, rtol=1e-5, atol=1e-6 * scale)
+        )
+        lit.seed_everything(seed + 100, workers=True)
+        loaded.reset(root, descendants=True)
+        reset = errors(actual, prediction(loaded.eval(), test), baseline)
+    checks["Complete reset loses the learned relationship"] = (
+        reset["nrmse"] > 0.8 and reset["nrmse"] > 3 * measured["nrmse"]
+    )
+    return {
+        "source": measured,
+        "source_prerequisite_met": measured["nrmse"] < 0.25,
+        "downstream_interpretable": measured["nrmse"] < 0.25,
+        "source_steps": trainer.global_step,
+        "edits": edits,
+        "controls": {"complete_reset": reset},
+        "source_vocabulary": vocabulary,
+        "test_rows": len(test),
+        "optimizer_policy": "Fresh AdamW for source training; no post-edit fitting",
+    }, checks
+
+
+def plot(bundle, spec):
+    """Render the captured observations for this experiment."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    m = bundle.record["metrics"]
+    fig, axes = axes_pair(width=10, height=4.8)
+    edits = m["edits"]
+    labels = [row["edit"] for row in edits]
+    dots(
+        axes[0],
+        labels,
+        {"Maximum paired drift": [row["max_prediction_drift"] for row in edits]},
+        xlabel="Maximum absolute output change",
+    )
+    dots(
+        axes[1],
+        ["Learned source", "Complete reset"],
+        {"Normalized RMSE": [m["source"]["nrmse"], m["controls"]["complete_reset"]["nrmse"]]},
+        xlabel="Test RMSE / constant-guess RMSE",
+        reference=(1, "Constant guess"),
+    )
+    fig.set_size_inches(10, max(4.8, len(edits) * 0.3))
+    return (
+        fig,
+        "Each edit is evaluated on matched held-out records without post-edit fitting. Exact restoration is a paired output test; destructive controls and the source prerequisite remain separate.",
+        {},
+    )
+
+
+if __name__ == "__main__":
+    report(run)

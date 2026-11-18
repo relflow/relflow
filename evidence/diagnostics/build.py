@@ -15,6 +15,7 @@ from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 from evidence.diagnostics.data import Bundle
+from evidence.experiments.source import registry, view
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -54,7 +55,7 @@ def typography(output: Path, entries: dict) -> None:
 
 
 def package(output: Path, destination: Path) -> None:
-    """Archive only the complete checksum-bound static review, excluding PNGs."""
+    """Archive only the complete checksum-bound static review."""
     review = json.loads((output / "review.json").read_text())
     if review["errors"] or set(review["entries"]) != set(review["expected"]):
         raise ValueError("Only a complete diagnostic review can become a preview bundle")
@@ -76,13 +77,13 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
     renderer_digest = hashlib.sha256(Path(__file__).with_name("plots.py").read_bytes()).hexdigest()
     from evidence.diagnostics.plots import render
 
-    specs = json.loads(Path(__file__).with_name("views.json").read_text())
+    expected = set(ci["expected"] if ci else registry(ROOT / "evidence", measurements=False))
     output.mkdir(parents=True, exist_ok=True)
     paths = {}
     for manifest in bundles.rglob("manifest.json"):
         value = json.loads(manifest.read_text())
         identifier = value.get("id")
-        if identifier not in specs:
+        if identifier not in expected:
             continue
         if identifier in paths:
             raise ValueError(f"Two diagnostic bundles claim {identifier}; select an immutable input set")
@@ -97,18 +98,19 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
         try:
             errors.pop(identifier, None)
             bundle = Bundle(directory)
+            spec = view((directory / "proof.py").read_text())
             record = bundle.record
             if record["outcome"] == "error":
                 result = {
                     "id": identifier,
-                    "focus": specs[identifier]["focus"],
+                    "focus": spec["focus"],
                     "comparison": "This execution failed before complete evaluation. The exact error is retained in its run record.",
-                    "limit": specs[identifier]["limit"],
+                    "limit": spec["limit"],
                     "figures": [],
                     "interactive": {},
                 }
             else:
-                result = render(bundle, specs[identifier], output)
+                result = render(bundle, spec, output)
             result.update(
                 record=record,
                 record_sha256=hashlib.sha256((directory / "record.json").read_bytes()).hexdigest(),
@@ -158,60 +160,6 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
             entries.pop(identifier, None)
             errors[identifier] = traceback.format_exc()
             print(json.dumps({"id": identifier, "error": errors[identifier].splitlines()[-1]}), flush=True)
-    if not identifiers:
-        import matplotlib.pyplot as plt
-
-        from evidence.diagnostics.illustrations import illustrate
-        from evidence.experiments.source import fingerprint, registry
-
-        catalog = registry(ROOT / "evidence", measurements=False, lane="all")
-        for identifier, spec in specs.items():
-            if spec["mode"] != "research" or identifier in paths:
-                continue
-            source = ROOT / "evidence" / catalog[identifier]["script"]
-            note = ""
-            for theme, bg, ink in [("light", "#f8faf7", "#243b35"), ("dark", "#181e1c", "#e6eee8")]:
-                with plt.rc_context(
-                    {
-                        "figure.facecolor": bg,
-                        "axes.facecolor": bg,
-                        "savefig.facecolor": bg,
-                        "text.color": ink,
-                        "axes.labelcolor": ink,
-                        "xtick.color": ink,
-                        "ytick.color": ink,
-                        "axes.edgecolor": "#85958c",
-                        "grid.color": "#85958c",
-                    }
-                ):
-                    fig, note = illustrate(identifier)
-                    fig.savefig(output / f"{identifier}-{theme}.svg", bbox_inches="tight", metadata={"Date": None})
-                    if theme == "light":
-                        fig.savefig(output / f"{identifier}.png", bbox_inches="tight", dpi=130)
-                    plt.close(fig)
-            result = {
-                "id": identifier,
-                "focus": spec["focus"],
-                "comparison": spec["comparison"],
-                "limit": spec["limit"],
-                "record": None,
-                "interactive": {},
-                "requires": catalog[identifier]["header"].get("evidence-requires", []),
-                "figures": [{"name": identifier, "caption": note}],
-                "scope": "Generator illustration; no recorded learning execution",
-            }
-            save(output / f"{identifier}.json", result)
-            entries[identifier] = {
-                "data": f"{identifier}.json",
-                "figures": result["figures"],
-                "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
-                "code_sha256": fingerprint(source.read_text()),
-                "record_sha256": None,
-                "assets": {
-                    name: hashlib.sha256((output / name).read_bytes()).hexdigest()
-                    for name in [f"{identifier}.json", f"{identifier}-light.svg", f"{identifier}-dark.svg"]
-                },
-            }
     typography(output, entries)
     save(output / "build-errors.json", errors)
     save(
@@ -219,7 +167,7 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
         {
             "schema": 1,
             "entries": entries,
-            "expected": sorted(specs),
+            "expected": sorted(expected),
             "errors": errors,
             "ci": ci,
             "revision": next(
@@ -235,7 +183,7 @@ def build(bundles: Path, output: Path, identifiers: list[str] | None = None, *, 
     return {
         "rendered": len(entries),
         "failed": len(errors),
-        "missing": sorted(set(specs) - set(entries)),
+        "missing": sorted(expected - set(entries)),
         "errors": errors,
     }
 

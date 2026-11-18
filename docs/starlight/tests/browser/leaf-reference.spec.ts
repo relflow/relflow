@@ -38,6 +38,7 @@ test('all leaf references follow Number, show standalone output trees, and repor
   const response = await request.get('/evidence/selected.json');
   expect(response.ok()).toBeTruthy();
   const publication: Publication = await response.json();
+  const { evidenceEntries } = await import('../../src/evidence/data');
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
 
@@ -90,11 +91,17 @@ test('all leaf references follow Number, show standalone output trees, and repor
         'Status per release version',
       ]);
       const rows = evidence.locator('tr[data-proof]');
-      expect(await rows.count()).toBeGreaterThan(0);
-      if (leaf === 'vector') {
-        await expect(rows).toHaveCount(1);
-        await expect(rows.first()).toHaveAttribute('data-proof', 'P091');
-      }
+      const expectedIds = evidenceEntries
+        .filter((entry) => entry.tags?.types.some((type) => type.toLowerCase() === leaf))
+        .map((entry) => entry.id);
+      expect(await rows.count()).toBe(expectedIds.length);
+      expect(
+        await rows.evaluateAll((elements) => elements.map((row) => row.getAttribute('data-proof'))),
+      ).toEqual(expectedIds);
+      if (!expectedIds.length)
+        await expect(evidence).toContainText(
+          'No dedicated learning experiment is declared for this leaf type.',
+        );
       for (const row of await rows.all()) {
         const id = (await row.getAttribute('data-proof'))!;
         const record = publication.results[id];
