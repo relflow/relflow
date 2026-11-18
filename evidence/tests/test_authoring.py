@@ -1,8 +1,8 @@
 """Scaffolding writes safe, discoverable sources without executing experiments."""
 
+import ast
 import builtins
 import hashlib
-import importlib.util
 import json
 import shutil
 import subprocess
@@ -11,6 +11,7 @@ import zipfile
 
 import pytest
 from experiments import run as authoring
+from reporting import experiment
 from source import Experiment, declaration, environment, metadata, registry
 
 
@@ -162,14 +163,17 @@ def test_symlink_directories_cannot_redirect_scaffolding(root, tmp_path, compone
     assert contents(tmp_path) == before
 
 
-def test_generated_experiment_is_importable_but_cannot_claim_a_passing_result(root):
+def test_generated_experiment_declares_a_model_and_cannot_claim_a_passing_result(root):
     path = authoring.create(root, title="An unimplemented question?")
-    spec = importlib.util.spec_from_file_location("unimplemented_scaffold", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    assert module.run.experiment == Experiment("P001", 0)
+    syntax = ast.parse(path.read_text())
+    model = next(node for node in syntax.body if isinstance(node, ast.ClassDef))
+    assert model.name == "Model" and ast.unparse(model.bases[0]) == "rf.Model"
+    run = next(node for node in syntax.body if isinstance(node, ast.FunctionDef) and node.name == "run")
+    namespace = {"experiment": experiment}
+    exec(compile(ast.Module(body=[run], type_ignores=[]), str(path), "exec"), namespace)
+    assert namespace["run"].experiment == Experiment("P001", 0)
     with pytest.raises(NotImplementedError):
-        module.run(0, None, "cpu")
+        namespace["run"](0, None, "cpu")
 
 
 @pytest.mark.parametrize("explicit", [False, True])

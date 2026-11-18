@@ -9,10 +9,14 @@ Read prediction output with Polars DataFrames and Series. Use
 coerce predictions back to Arrow for metric checks. IPC diagnostic artifacts
 remain a separate persistence boundary.
 
-Keep fixed field and branch contracts visible in experiment-owned `Model` and
-`Branch` classes. Put declarations at module scope when they do not depend on a
-local experimental arm; instantiate the neural model only during execution.
-Generated field mappings remain appropriate for parameterized schemas.
+Declare each experiment's model as an `rf.Model` subclass. Use named `Branch`
+classes for reusable or substantial structures; inline `rf.Branch(...)` is also
+appropriate, especially for a small branch with one leaf. Put fixed declarations
+at module scope and instantiate neural models only during execution. Use
+subclasses for fixed schema variants and function-local declarations when field
+options depend on an experimental arm. Constructor arguments on classes with
+declared children configure architecture and placement. Static checks require
+class-based models without restricting inline branches.
 
 `experiments/policies.py` is the narrow shared-configuration exception: its
 immutable `CONTROL` policy freezes the historical XS architecture under the

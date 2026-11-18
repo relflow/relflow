@@ -140,25 +140,16 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
         for node in ast.walk(module):
             if not isinstance(node, ast.Call):
                 continue
-            if isinstance(node.func, ast.Name) and node.func.id in model_classes:
-                constructors.add("Model")
-                continue
             if not isinstance(node.func, ast.Attribute):
                 continue
             constructor = node.func
-            if (
-                constructor.attr in {"xs", "sm", "md", "lg", "xl"}
-                and isinstance(constructor.value, ast.Attribute)
-                and constructor.value.attr == "Model"
-            ):
-                constructor = constructor.value
             if isinstance(constructor.value, ast.Name) and constructor.value.id in relflow_names:
                 constructors.add(constructor.attr)
                 if constructor.attr.endswith("DataModule"):
                     assert not node.args and all(keyword.arg != "model" for keyword in node.keywords), (
                         f"{path}:{node.lineno}: let the model or Trainer loop bind the data module automatically"
                     )
-        assert "Model" in constructors and constructors & {"SyntheticDataModule", "ArrowDataModule"}, (
+        assert model_classes and constructors & {"SyntheticDataModule", "ArrowDataModule"}, (
             f"{path}: include the model and independently generated splits"
         )
         assert any(isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(module)), (
@@ -168,6 +159,18 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test_")
             for node in module.body
         ), f"{path}: expose an experiment rather than a collected test"
+
+
+def test_experiments_declare_models_in_classes():
+    for entry in registry(ROOT, measurements=False).values():
+        path = ROOT / entry["script"]
+        syntax = ast.parse(path.read_text())
+        for node in ast.walk(syntax):
+            if isinstance(node, ast.Call):
+                assert ast.unparse(node.func) != "rf.Model", (
+                    f"{path}:{node.lineno}: declare the model's children in a Model class; "
+                    "inline Branch definitions remain valid inside that declaration"
+                )
 
 
 def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
@@ -201,7 +204,7 @@ def test_experiments_keep_explicit_training_protocols_on_model_fit() -> None:
             ), path
         assert ("optimizer" in options) != ("learning_rate" in options), path
         for call in calls:
-            if ast.unparse(call.func) in {"rf.Model", "resolve", *model_classes}:
+            if ast.unparse(call.func) in model_classes:
                 assert all(keyword.arg not in {"optimizer", "batch_size"} for keyword in call.keywords), path
             if ast.unparse(call.func) == "rf.Group":
                 options = {keyword.arg: keyword.value for keyword in call.keywords}

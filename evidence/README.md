@@ -68,10 +68,13 @@ retired entries appear as archived, without inferred tags.
 
 ## Define an experiment
 
-Keep each experiment's typed data contract visible in its own `Model` and
-`Branch` classes. Module-level declarations allocate no neural weights; the
-experiment constructs the model when it runs. Programmatically generated field
-mappings remain useful when an arm changes the schema.
+Declare each experiment's typed data contract in an `rf.Model` subclass. Branches
+may use named classes or inline `rf.Branch(...)` definitions; inline branches are
+useful for small local structures. Module-level declarations allocate no neural
+weights; the experiment constructs the model when it runs. Use subclasses for
+fixed variants and function-local declarations when field options depend on an
+experimental arm. Constructor arguments on declared classes configure architecture
+and placement. Static checks require class-based models and permit inline branches.
 
 Experiments that share the historical XS capacity use `CONTROL` from
 `experiments/policies.py`:
@@ -83,6 +86,7 @@ from policies import CONTROL
 
 class Model(rf.Model):
     value = rf.Number
+    history = rf.Branch(length=8, value=rf.Number)
     target = rf.Boolean(mask=True)
 
 

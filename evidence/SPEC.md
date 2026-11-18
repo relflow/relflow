@@ -19,9 +19,13 @@ Share reporting and CLI plumbing, not generators, datasets, or model helpers.
 The shared immutable architecture configuration in `experiments/policies.py`
 is a narrow exception. It may declare and register frozen preset values, but
 must not define model factories, fields, generators, data, or training routines.
-Fixed schemas belong in experiment-owned classes; generated mappings remain
-visible in the experiment that needs them. Declare static contracts at module
-scope and allocate neural models during execution.
+Models use experiment-owned class declarations. Branches may use named classes
+or inline `rf.Branch(...)` definitions, especially for a small local structure.
+Declare fixed contracts at module scope, use subclasses for fixed variants, and
+use function-local declarations for arm-dependent field options. Constructors
+of classes with declared children configure architecture and placement; allocate
+neural models during execution. Static authoring checks require class-based
+models and permit inline branches.
 Never reuse a stable identifier for a different experiment.
 
 The internal `CONTROL` policy preserves the historical XS architecture,

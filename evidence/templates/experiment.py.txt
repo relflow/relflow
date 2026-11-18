@@ -92,10 +92,17 @@ from pathlib import Path
 # Shared reporting and frozen policies travel with the evidence checkout.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import relflow as rf
 from reporting import experiment, report
 
 
-# Declare the experiment's typed Model and Branch contracts at module scope.
+# Small collections may be inline, such as items = rf.Branch(length=8, value=rf.Number).
+class Model(rf.Model):
+    feature = rf.Number
+    target = rf.Number(mask=True)
+
+
+# Replace the illustrative fields above with the experiment's data contract.
 # Select an Evidence-owned architecture policy when it matches the study;
 # keep generators, fit budgets, controls, and scientific checks in this file.
 @experiment(${identifier}, seed=${seed})
