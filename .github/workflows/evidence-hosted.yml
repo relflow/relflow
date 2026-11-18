@@ -20,7 +20,7 @@ permissions:
   actions: read
 
 env:
-  EVIDENCE_EXECUTOR: '3c5b29879c37007028372ffb4dff85b4db8b3c23'
+  EVIDENCE_EXECUTOR: '8c789d97336ada38021d11b101670b9a2549ae10'
 
 jobs:
   prepare:

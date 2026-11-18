@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import publication
@@ -114,6 +115,23 @@ def test_suite_revision_cannot_replace_the_trusted_host_executor():
     assert re.fullmatch(r"[0-9a-f]{40}", CONFIG["env"]["EVIDENCE_EXECUTOR"])
     assert suite["ref"] == "${{ inputs.suite_ref }}"
     assert executor["persist-credentials"] is suite["persist-credentials"] is False
+
+
+def test_pinned_executor_accepts_current_project_licensing(tmp_path):
+    revision = CONFIG["env"]["EVIDENCE_EXECUTOR"]
+    source = subprocess.check_output(
+        ["git", "show", revision + ":scripts/release.py"], cwd=WORKFLOW.parents[2], text=True
+    )
+    validator = tmp_path / "release.py"
+    validator.write_text(source)
+    checked = subprocess.run(
+        [sys.executable, str(validator), "licensing"], cwd=WORKFLOW.parents[2], capture_output=True, text=True
+    )
+    assert checked.returncode == 0, (
+        f"Evidence executor {revision} rejects current project licensing; update the executor and helper pins.\n"
+        + checked.stdout
+        + checked.stderr
+    )
 
 
 @pytest.mark.parametrize(
