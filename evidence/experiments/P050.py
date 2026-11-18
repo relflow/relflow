@@ -167,14 +167,20 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         yield {"a": a, "b": b, "y": a + b}
 
 
+class Model(rf.Model):
+    a = rf.Number
+    b = rf.Number
+    y = rf.Number(mask=True, objective="mse")
+
+
+class RestrictedModel(rf.Model):
+    a = rf.Number
+    y = rf.Number(mask=True, objective="mse")
+
+
 def build(*, restricted: bool = False) -> rf.Model:
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        fields={"a": rf.Number, **({} if restricted else {"b": rf.Number}), "y": rf.Number(mask=True, objective="mse")},
-    )
+    model_type = RestrictedModel if restricted else Model
+    return model_type(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def prediction(model: rf.Model, rows: list[dict], *, include_b: bool = True, corrupt: bool = False) -> np.ndarray:

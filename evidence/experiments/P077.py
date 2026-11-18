@@ -244,15 +244,19 @@ def build(representation: str, task: str, objective: str = "mse") -> rf.Model:
             group = rf.Enum(values=GROUPS, p_unavailable=0.0)
             target = scalar(objective=objective, mask=True)
 
-        model = Model(preset=CONTROL.name)
+    elif task == "rank":
+
+        class Model(rf.Model):
+            rank = rf.Enum(values=("lower", "upper"), p_unavailable=0.0, mask=True)
+            x = scalar
+
     else:
-        target = (
-            rf.Enum(values=("lower", "upper"), p_unavailable=0.0, mask=True)
-            if task == "rank"
-            else rf.Number(objective="mse", mask=True)
-        )
-        model = rf.Model(preset=CONTROL.name, x=scalar, fields={task: target})
-    return model
+
+        class Model(rf.Model):
+            amount = rf.Number(objective="mse", mask=True)
+            x = scalar
+
+    return Model(preset=CONTROL.name)
 
 
 def fit(model: rf.Model, train, validate, seed: int, steps: int | None, accelerator: str) -> int:

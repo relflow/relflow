@@ -297,13 +297,22 @@ def median(task: str, rows: list[dict]) -> np.ndarray:
 
 def build(task: str, inputs: str, target: str) -> rf.Model:
     scalar = rf.Quantile if inputs == "rank" else rf.Number
-    fields: dict[str, object] = {name: scalar for name in INPUTS[task]}
-    if target == "rank":
-        fields[TARGETS[task]] = rf.Quantile(objective="mae", mask=True)
+    response = rf.Quantile(objective="mae", mask=True) if target == "rank" else rf.Number(mask=True)
+    if task in ("heavy", "moderate"):
+
+        class Model(rf.Model):
+            price = scalar
+            rate = scalar
+            ltv = response
+
     else:
-        fields[TARGETS[task]] = rf.Number(mask=True)
-    model = rf.Model(preset=CONTROL.name, fields=fields)
-    return model
+
+        class Model(rf.Model):
+            left = scalar
+            right = scalar
+            total = response
+
+    return Model(preset=CONTROL.name)
 
 
 def fit(model: rf.Model, train, validate, seed: int, steps: int | None, accelerator: str, budget: int) -> int:

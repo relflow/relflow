@@ -185,18 +185,19 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         yield {"x": float(value), "y": float(2 * value + 0.3), "hide_x": False, "hide_y": False}
 
 
-def build() -> rf.Model:
-    model = rf.Model(
-        preset=CONTROL.name,
-        fields={
-            name: rf.Number(
-                objective="mse",
-                mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query=f"hide_{name}", reconstruct=True)),
-            )
-            for name in ("x", "y")
-        },
+class Model(rf.Model):
+    x = rf.Number(
+        objective="mse",
+        mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query="hide_x", reconstruct=True)),
     )
-    return model
+    y = rf.Number(
+        objective="mse",
+        mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query="hide_y", reconstruct=True)),
+    )
+
+
+def build() -> rf.Model:
+    return Model(preset=CONTROL.name)
 
 
 def prediction(model: rf.Model, rows: list[dict], target: str) -> np.ndarray:

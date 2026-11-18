@@ -260,33 +260,33 @@ def permute(rows: list[dict], seed: int) -> list[dict]:
     ]
 
 
+class Source(rf.Branch):
+    entity_id = rf.Hash(n_hashes=4, n_bands=8)
+    value = rf.Number
+
+
+class Target(rf.Branch):
+    entity_id = rf.Hash(n_hashes=4, n_bands=8)
+    value = rf.Number(mask=True, objective="mse")
+
+
+class Link(rf.Branch):
+    entity_id = rf.Hash(n_hashes=4, n_bands=8)
+    source_id = rf.Hash(n_hashes=4, n_bands=8)
+
+
+class Model(rf.Model):
+    source = Source(length=16, reduction=None, n_layers=2)
+    target = Target(length=2, reduction=None, n_layers=2)
+
+
+class LinkedModel(Model):
+    links = Link(length=16, reduction=None, n_layers=2)
+
+
 def build(hops: int) -> rf.Model:
-    fields = {
-        "source": rf.Branch(
-            length=16,
-            reduction=None,
-            n_layers=2,
-            entity_id=rf.Hash(n_hashes=4, n_bands=8),
-            value=rf.Number,
-        ),
-        "target": rf.Branch(
-            length=2,
-            reduction=None,
-            n_layers=2,
-            entity_id=rf.Hash(n_hashes=4, n_bands=8),
-            value=rf.Number(mask=True, objective="mse"),
-        ),
-    }
-    if hops == 2:
-        fields["links"] = rf.Branch(
-            length=16,
-            reduction=None,
-            n_layers=2,
-            entity_id=rf.Hash(n_hashes=4, n_bands=8),
-            source_id=rf.Hash(n_hashes=4, n_bands=8),
-        )
-    model = rf.Model(preset=CONTROL.name, n_layers=2, n_heads=4, reduction=None, fields=fields)
-    return model
+    model_type = LinkedModel if hops == 2 else Model
+    return model_type(preset=CONTROL.name, n_layers=2, n_heads=4, reduction=None)
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

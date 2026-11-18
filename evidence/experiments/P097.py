@@ -169,12 +169,18 @@ def records(*, rows: int, seed: int, count: int = 4, extrapolate: bool = False) 
         }
 
 
+class Model(rf.Model):
+    query = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
+class ContextModel(Model):
+    examples = rf.Branch(length=8, overflow="error", reduction=None, x=rf.Number, y=rf.Number)
+
+
 def build(context: bool) -> rf.Model:
-    fields = {"query": rf.Number, "answer": rf.Number(mask=True, objective="mse")}
-    if context:
-        fields["examples"] = rf.Branch(length=8, overflow="error", reduction=None, x=rf.Number, y=rf.Number)
-    model = rf.Model(preset=CONTROL.name, fields=fields)
-    return model
+    model_type = ContextModel if context else Model
+    return model_type(preset=CONTROL.name)
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

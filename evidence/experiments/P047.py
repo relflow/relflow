@@ -211,19 +211,20 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         yield {"a": a, "b": b, "u": a + 2 * b, "v": 2 * a - b, "w": 3 * a + b}
 
 
+class Model(rf.Model):
+    a = rf.Number
+    b = rf.Number
+    u = rf.Number(mask=True, objective="mse")
+    v = rf.Number(mask=True, objective="mse")
+
+
+class ExtendedModel(Model):
+    w = rf.Number(mask=True, objective="mse")
+
+
 def build(*, extended: bool = False) -> rf.Model:
-    targets = TARGETS if extended else TARGETS[:2]
-    return rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        fields={
-            "a": rf.Number,
-            "b": rf.Number,
-            **{name: rf.Number(mask=True, objective="mse") for name in targets},
-        },
-    )
+    model_type = ExtendedModel if extended else Model
+    return model_type(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def prediction(model: rf.Model, rows: list[dict], targets: tuple[str, ...], *, corrupt: bool = False) -> dict:

@@ -228,12 +228,18 @@ def records(*, rows: int, seed: int, withheld: bool = False) -> Iterator[dict]:
         }
 
 
+class Model(rf.Model):
+    query = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
+class ContextModel(Model):
+    examples = rf.Branch(length=4, reduction=None, x=rf.Number, y=rf.Number)
+
+
 def build(*, context: bool = True) -> rf.Model:
-    fields = {"query": rf.Number, "answer": rf.Number(mask=True, objective="mse")}
-    if context:
-        fields["examples"] = rf.Branch(length=4, reduction=None, x=rf.Number, y=rf.Number)
-    model = rf.Model(preset=CONTROL.name, fields=fields)
-    return model
+    model_type = ContextModel if context else Model
+    return model_type(preset=CONTROL.name)
 
 
 def predict(model: rf.Model, rows: list[dict]) -> np.ndarray:

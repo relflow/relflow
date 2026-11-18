@@ -242,16 +242,16 @@ def records(*, rows: int, seed: int, training: bool = False) -> Iterator[dict]:
         }
 
 
+class Model(rf.Model):
+    first = rf.Number(mask=rf.Mask(query="hide_first", skip=True, dropout=False))
+    second = rf.Number(mask=rf.Mask(query="hide_second", skip=True, dropout=False))
+    third = rf.Number(mask=rf.Mask(query="hide_third", skip=True, dropout=False))
+    nuisance = rf.Number
+    target = rf.Number(mask=True, objective="mse")
+
+
 def build() -> rf.Model:
-    model = rf.Model(
-        preset=CONTROL.name,
-        fields={
-            **{name: rf.Number(mask=rf.Mask(query=f"hide_{name}", skip=True, dropout=False)) for name in SENSORS},
-            "nuisance": rf.Number,
-            "target": rf.Number(mask=True, objective="mse"),
-        },
-    )
-    return model
+    return Model(preset=CONTROL.name)
 
 
 def select(rows: list[dict], pattern: tuple[bool, ...]) -> list[dict]:

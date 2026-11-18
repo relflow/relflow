@@ -212,17 +212,16 @@ def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
     return 1.0 if maximum == expected else (joint - expected) / (maximum - expected)
 
 
+class Model(rf.Model):
+    merchant_id = rf.Group(n_groups=5, p_unavailable=0.0)
+    context = rf.Number
+    label = rf.Category(mask=True, p_unavailable=0.0)
+
+
 @experiment("P109", seed=10901)
 def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
-    model = rf.Model(
-        d_model=32,
-        n_layers=1,
-        n_heads=4,
-        merchant_id=rf.Group(n_groups=5, p_unavailable=0.0),
-        context=rf.Number,
-        label=rf.Category(mask=True, p_unavailable=0.0),
-    )
+    model = Model(d_model=32, n_layers=1, n_heads=4)
     data = rf.SyntheticDataModule(
         train=partial(records, seed=seed * 100 + 1),
         validate=partial(records, seed=seed * 100 + 2, repeats=4),

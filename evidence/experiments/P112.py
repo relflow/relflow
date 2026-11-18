@@ -171,26 +171,30 @@ def records(
         yield {"entity": f"id-{entity}", "group": f"group-{group}", "x": float(value), "answer": float(target)}
 
 
+class Model(rf.Model):
+    entity = rf.Group(n_groups=8, mask=rf.Mask(rate=0.1, reconstruct=True), p_unavailable=0.0)
+    x = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
+class CategoryModel(Model):
+    entity = rf.Category(p_unavailable=0.0)
+
+
+class OracleModel(rf.Model):
+    group = rf.Enum(values=tuple(f"group-{i}" for i in range(GROUPS)))
+    x = rf.Number
+    answer = rf.Number(mask=True, objective="mse")
+
+
 def build(kind: str) -> rf.Model:
-    identity = (
-        rf.Group(n_groups=8, mask=rf.Mask(rate=0.1, reconstruct=True), p_unavailable=0.0)
-        if kind == "group"
-        else rf.Category(p_unavailable=0.0)
-    )
-    fields = (
-        {"group": rf.Enum(values=tuple(f"group-{i}" for i in range(GROUPS)))}
-        if kind == "oracle"
-        else {"entity": identity}
-    )
-    return rf.Model(
-        d_model=16,
-        n_layers=1,
-        n_heads=4,
-        dropout=0.0,
-        fields=fields,
-        x=rf.Number,
-        answer=rf.Number(mask=True, objective="mse"),
-    )
+    if kind == "oracle":
+        model_type = OracleModel
+    elif kind == "group":
+        model_type = Model
+    else:
+        model_type = CategoryModel
+    return model_type(d_model=16, n_layers=1, n_heads=4, dropout=0.0)
 
 
 def predict(model: rf.Model, rows: list[dict], kind: str) -> np.ndarray:
