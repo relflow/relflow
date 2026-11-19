@@ -132,6 +132,10 @@ export const apiCatalog: ApiSection[] = [
         "guide": "/data-types/text/"
       },
       {
+        "name": "rf.Image",
+        "guide": "/data-types/image/"
+      },
+      {
         "name": "rf.Vector",
         "guide": "/data-types/vector/"
       },

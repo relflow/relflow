@@ -50,7 +50,7 @@ values for tensorization and does not establish that populated nested records
 or leaf values are valid.
 
 `--execute` opts into sampled preprocessing and tensorization. It can construct
-the model and initialize optional text encoders or caches. `--sample` requires
+the model and initialize optional pretrained encoders and their caches. `--sample` requires
 that flag and caps source rows, with a default of 128; it does not cap nested
 values or preprocessing expansion. Choose `--stage train`, `validate`, `test`,
 or `predict` when checking an explicit input's split contract. The saved

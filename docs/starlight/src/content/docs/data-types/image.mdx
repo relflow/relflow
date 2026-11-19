@@ -1,0 +1,96 @@
+---
+title: Image
+description: Use the visual content of a photo or scan alongside the other fields in a record.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Image` when an inspection photo, product image, or scan should help predict another field. Each image supplies one vector. The rest of the model learns how much that visual evidence matters for the task.
+
+<DataTypePage name="Image">
+
+## Input values
+
+Supply one path per image, such as `"/mnt/catalog/42.jpg"` or `"s3://catalog/photos/42.jpg"`. Use `base` to resolve relative names such as `"42.jpg"` against a directory or object-store prefix. Train and predict in environments with access to those files. Use a repeated [Branch](/concepts/branches/) for a collection of photos.
+
+A null value takes the null field state and costs no image read. An empty path, a missing file, and unreadable image data raise errors. Install the [image extra](/installation/#optional-dependencies) and provision the encoder on each training or prediction host.
+
+## Standardization and processor pipelines
+
+Pillow reads the first frame, applies EXIF orientation, and converts it to RGB. The checkpoint's image processor applies its resize, crop, and normalization settings. The default [DINOv2 small encoder](https://huggingface.co/facebook/dinov2-small) supplies its first token as the image vector. For the standard DINOv2 processor, resizing and cropping use Pillow directly before converting the smaller crop to a tensor. Alternative vision transformers must accept `pixel_values`, expose `config.hidden_size`, and return a CLS token at the first position of `last_hidden_state`.
+
+For large JPEGs, `jpeg_short_edge=256` asks the JPEG decoder to choose a native reduction that retains at least 256 pixels along the short side when possible. This can reduce CPU work and intermediate memory. Reduction changes the decoded pixels and can change embeddings. Full-resolution decoding is the default.
+
+On a cold cache, a bounded thread pool opens and prepares distinct images. The frozen model processes them in batches on the model device. The cache stores the pristine vector before the learned projection or training jitter. Fields using the same image version, processor, encoder weights, and execution precision can reuse that vector across epochs and runs sharing a store.
+
+Ordinary local paths are checked against file identity, size, and timestamps. Mutable object-store URIs require a content read to compute their SHA-256 digest on each lookup. A cold lookup decodes that same download. For a dataset that uses immutable object names, set `immutable=True`. A warm hit then needs zero accesses to the source file, including metadata requests.
+
+## How is this leaf trained?
+
+Downstream targets train a field-specific projection into the model's representation space. The vision encoder stays frozen. A reconstructing mask adds state classification and an L1 or L2 objective against the pristine vision vector. Jitter applies only to eligible training inputs.
+
+### Predictions
+
+An image ordinarily provides context for other predictions. Set `embed=True` to export its learned representation in the `representations` column. An image reconstruction objective predicts a vector internally.
+
+<ValueTree
+  id="image-predictions"
+  {...outputs.image}
+  predictions
+  heading="Illustrative prediction output"
+  label="Image representation output"
+/>
+
+## Leaf-specific parameters
+
+```python
+import relflow as rf
+
+class Inspection(rf.Model):
+    photo = rf.Image(base="s3://inspections/by-content/", immutable=True)
+    fault = rf.Category(mask=True)
+
+model = Inspection(preset="small")
+```
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `model` | `"facebook/dinov2-small"` | Select a compatible Hugging Face vision encoder and processor, or their local directory. |
+| `base` | `None` | Resolve relative file names against this directory or URI prefix. Relative local names otherwise use the working directory. |
+| `immutable` | `False` | Treat each resolved path as a permanent identity for a single version of the bytes. |
+| `jpeg_short_edge` | `None` | Opt into decoder-side JPEG downsampling before the checkpoint processor. The value is a target minimum short edge in pixels. |
+| `read_workers` | `4` | Bound concurrent reads and CPU image preparation per encoder process. |
+| `encoder_batch_size` | `16` | Bound the number of images in one vision-model call. |
+| `cache` | `True` | Enable automatic reuse. A positive integer also caps hot entries. `False` disables the cache tiers. |
+| `store` | `None` | Choose the local cache directory. The default honors `RELFLOW_CACHE_DIR` and otherwise uses the platform cache. |
+| `memory` | `None` | Set the shared RAM budget in MiB. The default is 64 MiB. |
+| `resident` | `None` | Set the device table budget in MiB. CUDA defaults to one eighth of free memory up to 512 MiB. Other devices default to zero. |
+| `objective` | `"l2"` | Choose `"l1"` or `"l2"` coordinate error for a reconstruction objective. |
+| `jitter` | `rf.Jitter()` | Perturb pooled image vectors during training. |
+
+### Request methods
+
+To prepare a cache ahead of training, call `model.nodes["/photo"].embedder.warm(paths)` with a file name or a sequence of file names on the intended device and precision.
+
+## Errors raised
+
+A failed file read identifies the affected path. A local file that changes between selection and cold decoding raises an error so the batch can be encoded again. An incompatible encoder fails when its hidden size or token output cannot supply one vector per image.
+
+### Footguns
+
+- **Reusing a mutable filename with `immutable=True`.** Training can reuse an earlier photo even after its bytes change. Use distinct names per version or keep the default freshness policy. See [input values](#input-values).
+- **Measuring only the first epoch.** Source latency, resizing, and vision inference all contribute to a cold pass. Measure cold and warm passes separately when tuning [reader and encoder batch sizes](#leaf-specific-parameters).
+- **Serving paths supplied by callers.** The prediction process opens those paths with its storage access. Validate references at the application boundary and scope the service's storage access to its media collection. See [HTTP serving](/advanced/inference-and-deployment/).
+
+## Relevant evidence
+
+<LeafEvidence type="Image" />
+
+### Related types
+
+[Vector](/data-types/vector/) accepts image embeddings already produced by an upstream pipeline. [Text](/data-types/text/) supplies semantic context from prose.
+
+</DataTypePage>
