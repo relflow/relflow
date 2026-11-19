@@ -39,7 +39,7 @@ def test_ragged_field_distinguishes_value_null_and_missing():
         schema=pa.schema([pa.field("value", pa.float64())]),
     )
 
-    field = coalesce(source, schema=schema, strata=Strata.predict).fields["/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.predict).fields["/value"].single().pristine
 
     assert field.shape == (3, 1)
     assert field.batch_size == 3
@@ -74,8 +74,8 @@ def test_sibling_fields_share_branch_geometry_without_sharing_leaf_state():
         strata=Strata.train,
     ).fields
 
-    left = fields["/items/left"].pristine
-    right = fields["/items/right"].pristine
+    left = fields["/items/left"].single().pristine
+    right = fields["/items/right"].single().pristine
     assert left.dense.tolist() == [[[Tokens.valued.value, Tokens.padded.value, Tokens.null.value]]]
     assert right.dense.tolist() == [[[Tokens.null.value, Tokens.padded.value, Tokens.valued.value]]]
     assert left.values.to_pylist() == [1.0]
@@ -129,7 +129,7 @@ def test_union_leaf_uses_selected_child_validity(values):
     model = rf.Model(preset="small", d_model=8, value=rf.Number)
     source = convert(pa.table({"value": values}))
 
-    field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/value"].pristine
+    field = coalesce(source, schema=model.schema, strata=Strata.train).fields["/value"].single().pristine
 
     assert field.dense.tolist() == [
         [Tokens.valued.value],
@@ -172,6 +172,7 @@ def test_structured_leaf_mask_spelling_is_ordinary_codec_input():
             strata=Strata.predict,
         )
         .fields["/labels"]
+        .single()
         .pristine
     )
 
@@ -190,6 +191,7 @@ def test_tail_overflow_finishes_before_leaf_codec_observes_values():
             strata=Strata.train,
         )
         .fields["/items/value"]
+        .single()
         .pristine
     )
 
@@ -227,6 +229,7 @@ def test_branch_overflow_precedes_queries_on_discarded_children():
             strata=Strata.train,
         )
         .fields["/items/value"]
+        .single()
         .pristine
     )
 
@@ -265,6 +268,7 @@ def test_all_empty_deep_branches_resolve_zero_extents():
             strata=Strata.train,
         )
         .fields["/outer/inner/deep/value"]
+        .single()
         .pristine
     )
 
@@ -284,6 +288,7 @@ def test_typed_empty_nested_batch_preserves_row_axis_with_zero_extent():
             strata=Strata.train,
         )
         .fields["/items/value"]
+        .single()
         .pristine
     )
 
@@ -302,6 +307,7 @@ def test_singleton_branch_accepts_one_item_list():
             strata=Strata.train,
         )
         .fields["/details/value"]
+        .single()
         .pristine
     )
 
@@ -323,7 +329,7 @@ def test_singleton_branch_lists_nest_inside_repeated_branch():
             }
         ]
     )
-    field = coalesce(source, schema=schema, strata=Strata.train).fields["/items/details/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/items/details/value"].single().pristine
 
     assert field.dense.tolist() == [
         [
@@ -352,7 +358,7 @@ def test_coalesce_ignores_unmodeled_arrow_columns():
     schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, identifier=rf.Hash)
     source = table([{"identifier": "A", "metadata": {"tags": [1, 2]}}])
 
-    field = coalesce(source, schema=schema, strata=Strata.train).fields["/identifier"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/identifier"].single().pristine
 
     assert source["metadata"].to_pylist() == [{"tags": [1, 2]}]
     assert field.values.to_pylist() == ["A"]
@@ -362,7 +368,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
     schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number, unused=rf.Hash(active=False))
     source = table([{"value": 1.0, "unused": {"opaque": True}}])
 
-    field = coalesce(source, schema=schema, strata=Strata.train).fields["/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/value"].single().pristine
 
     assert source["unused"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
@@ -402,7 +408,7 @@ def test_inactive_only_branch_does_not_ingest_same_named_source_value():
     )
     source = table([{"value": 1.0, "synthetic": {"opaque": True}}])
 
-    field = coalesce(source, schema=schema, strata=Strata.train).fields["/value"].pristine
+    field = coalesce(source, schema=schema, strata=Strata.train).fields["/value"].single().pristine
 
     assert source["synthetic"].to_pylist() == [{"opaque": True}]
     assert field.values.to_pylist() == [1.0]
@@ -418,6 +424,7 @@ def test_datetime_leaf_remains_arrow_backed():
             strata=Strata.train,
         )
         .fields["/created"]
+        .single()
         .pristine
     )
 
@@ -479,6 +486,7 @@ def test_place_validates_encoded_count_and_value_shape():
             strata=Strata.train,
         )
         .fields["/value"]
+        .single()
         .pristine
     )
 
@@ -517,9 +525,11 @@ def test_root_combines_only_the_columns_the_schema_reads():
     records = resolved.layouts["/"].records
     assert isinstance(records, pa.StructArray)
     assert [field.name for field in records.type] == ["amount", "eligible", "events"]
-    assert resolved.fields["/amount"].pristine.values.to_pylist() == [1.0, 2.0, 3.0]
-    assert resolved.fields["/amount"].trainable.tolist() == combined.fields["/amount"].trainable.tolist()
-    assert resolved.fields["/amount"].trainable.tolist() == [True, False, True]
+    assert resolved.fields["/amount"].single().pristine.values.to_pylist() == [1.0, 2.0, 3.0]
+    assert (
+        resolved.fields["/amount"].single().trainable.tolist() == combined.fields["/amount"].single().trainable.tolist()
+    )
+    assert resolved.fields["/amount"].single().trainable.tolist() == [True, False, True]
     assert (
         resolved.layouts["/events"].lengths.tolist() == combined.layouts["/events"].lengths.tolist() == [[1], [0], [0]]
     )
@@ -532,12 +542,15 @@ def test_rate_masks_vary_by_batch_ordinal_and_reproduce():
     table = pa.table({"amount": [float(value) for value in range(16)]})
 
     patterns = [
-        coalesce(table, schema, Strata.train, seed=3, epoch=1, ordinal=ordinal).fields["/amount"].trainable.tolist()
+        coalesce(table, schema, Strata.train, seed=3, epoch=1, ordinal=ordinal)
+        .fields["/amount"]
+        .single()
+        .trainable.tolist()
         for ordinal in range(3)
     ]
 
     assert len({tuple(pattern) for pattern in patterns}) == 3
     replay = coalesce(table, schema, Strata.train, seed=3, epoch=1, ordinal=1)
-    assert replay.fields["/amount"].trainable.tolist() == patterns[1]
+    assert replay.fields["/amount"].single().trainable.tolist() == patterns[1]
     with pytest.raises(ValueError, match="ordinal"):
         coalesce(table, schema, Strata.train, ordinal=-1)

@@ -18,7 +18,7 @@ from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
-from relflow.tensorfields.base import TENSORFIELDS, TensorInput
+from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.number import (
     Decoder,
     Embedder,
@@ -55,10 +55,7 @@ def tensorfield(rows: list[list[Any]], *, schema: Schema, strata: Strata) -> Ten
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["number"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
     )
 
 

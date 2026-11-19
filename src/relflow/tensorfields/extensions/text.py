@@ -6,7 +6,7 @@ import json
 import math
 from collections.abc import Sequence
 from dataclasses import InitVar, dataclass
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -28,6 +28,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.extensions.text_cache.context import Encoding
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
@@ -38,6 +40,7 @@ if TYPE_CHECKING:
     from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
     from relflow.architecture.root import Model
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -269,16 +272,15 @@ class TensorField(TensorFieldBase[TensorDict]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
         request: Request = cast(Request, schema.requests[address])
 
         def encode(field: RaggedField) -> TensorDict:
@@ -336,7 +338,7 @@ class TensorField(TensorFieldBase[TensorDict]):
 
         state_tensor = torch.from_numpy(input.dense)
 
-        return cls(
+        result = cls(
             state=state_tensor,
             content=encode(input),
             present=present,
@@ -353,6 +355,7 @@ class TensorField(TensorFieldBase[TensorDict]):
             ),
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @text.register(Component.Embedder)

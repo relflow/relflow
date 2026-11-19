@@ -39,7 +39,37 @@ Inside a branch, `../` begins a path to an ancestor source. A shipment's
 `shipped_at` can pair with its parent's `reviewed_at` through this syntax.
 The explicit branch retains record alignment and broadcasts the matching
 parent cutoff. Declare a branch for repeated endpoint records rather than
-expecting a wildcard path to create a new axis.
+expecting a wildcard path to create a new axis. An absolute path can name an
+ancestor branch from the selected model root, for example
+`/accounts/reviewed_at` from a shipment inside `/accounts`.
+
+Inside a branch, `delta=True` measures the gap from the previous timestamp
+in the same collection:
+
+```python
+class Transaction(rf.Branch):
+    """One card transaction; each account lists them oldest first."""
+
+    since_previous = rf.Duration(query="booked_at", delta=True, granularity="hours")
+    amount = rf.Number
+
+
+class Account(rf.Model):
+    """One account's recent card history."""
+
+    trxns = Transaction(length=32, overflow="tail")
+```
+
+Records keep their source order; `delta=True` never sorts or infers chronology, so
+out-of-order timestamps produce negative gaps. The earlier record is found
+before `length` and `overflow` cropping: with `overflow="tail"`, the oldest
+retained transaction still measures from its predecessor in the source, and
+random training windows keep every record's gap. A branch `query` slice such
+as `"trxns[-32:]"` instead selects the candidate records, so the first record
+of the slice has no predecessor. A record without a predecessor has a null
+duration, preserving its position alongside the other branch fields. Lookups
+never reach another parent record, observation, or batch. A null timestamp on
+either record produces a null gap, and a null item still occupies its position.
 
 Endpoints accept dates, timestamps, and strings. A date represents naive
 midnight. Aware timestamps represent absolute instants, so an offset change
@@ -58,6 +88,8 @@ supported units.
 
 Duration first selects the endpoint sources, computes signed
 `end - start`, and converts the result into the configured fixed unit.
+With `delta=True`, the start endpoint is the same source read from the previous
+record of the collection.
 This derivation runs before the derived field is masked; endpoints are
 not separate model inputs unless the schema also declares them.
 
@@ -108,9 +140,10 @@ including its numeric precision behavior; see
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `query` | `None` | Select an ordered `(start_path, end_path)`, or one source path with exactly one fixed endpoint. |
+| `query` | `None` | Select an ordered `(start_path, end_path)`, or one source path with exactly one fixed endpoint or `delta=True`. |
 | `start` | `None` | Configure a fixed start as a date, datetime, or timestamp string. |
 | `end` | `None` | Configure a fixed end as a date, datetime, or timestamp string. |
+| `delta` | `False` | Measure from the preceding record's timestamp in the same branch collection. |
 | `granularity` | `"days"` | Choose `"seconds"`, `"minutes"`, `"hours"`, `"days"`, or `"weeks"` for elapsed values and predictions. |
 | `pattern` | `None` | Parse string endpoints using the specified timestamp format. |
 | `mask` | `False` | Set `mask=True` to hide the derived value and learn it as a supervised target. |
@@ -121,7 +154,8 @@ including its numeric precision behavior; see
 | `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
 
 Choose a valid endpoint combination: two query paths without constants, one
-source with exactly one constant, or two constants without queries. The
+source with exactly one constant, one source with `delta=True` inside a
+branch, or two constants without queries. The
 numeric options operate on the derived duration and follow
 [Number's semantics](/data-types/number/#leaf-specific-parameters).
 
@@ -155,11 +189,14 @@ not change the model.
 | An unsupported endpoint/query combination | `ValueError` rejects an ambiguous or incomplete derivation. | Use two source paths, one source with one fixed endpoint, or two fixed endpoints. |
 | Mixed aware/naive endpoints, invalid timestamps, or unsafe range conversion | `ValueError` reports that elapsed time cannot be derived. | Use compatible time semantics, a supported format, and representable endpoints. |
 | Months, years, or another unsupported granularity | Configuration validation rejects the unit. | Choose seconds, minutes, hours, days, or weeks. |
+| `delta=True` combined with a query pair or fixed endpoint | Configuration validation rejects the option. | Use one timestamp query without fixed endpoints. |
+| `delta=True` on a root field or an ancestor source | `ValueError` when the model binds its schema. | Declare the field inside a branch with a local query. |
 
 ### Footguns
 
 - **Relying on an implicit “now.”** Duration never reads the wall clock, and using today's cutoff for historical records changes their elapsed values. Supply each observation's decision-time cutoff explicitly and check the `(start, end)` order; the [endpoint contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/duration.py#L24) defines `end - start`.
 - **Leaking a target endpoint through another input.** `mask=True` hides the derived duration, not a separately declared field or query reading its future endpoint. Keep future outcome timestamps out of every context path, as well as omitting them from new requests. Duration [derives values before masking](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/duration.py#L130); the schema decides which other fields are inputs.
+- **Assuming chronological order.** `delta=True` follows source order and does not sort records. If a timestamp is earlier than its predecessor, the duration is negative. Sort the source first when your task requires chronological order.
 - **Treating elapsed days as local calendar steps.** A day is exactly 86,400 seconds; daylight-saving transitions can make consecutive local midnights less or more than one elapsed day apart. Use consistently aware endpoints for absolute elapsed time, and Period for calendar cycles. Mixed aware and naive endpoints are rejected; inspect the [time-semantics checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_duration_time.py#L46) with representative offsets from your data.
 
 ## Relevant evidence
@@ -170,8 +207,11 @@ The upstream [Duration API tests](https://github.com/relflow/relflow/blob/a1d0be
 cover endpoint derivation, masking, ancestor broadcasting, normalization,
 persistence, and numeric output. The
 [time-semantics tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_duration_time.py)
-cover offsets, precision, missingness, and rejected timestamp inputs. These
-are API checks, separate from predictive-quality measurements.
+cover offsets, precision, missingness, and rejected timestamp inputs.
+`tests/tensorfields/extensions/test_duration_delta.py` covers gaps between
+records with `delta=True`, and `tests/data/test_duration_delta_geometry.py` covers their
+collection boundaries, cropping, and nulls. These are API checks, separate
+from predictive-quality measurements.
 
 ### Related types
 

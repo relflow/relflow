@@ -149,9 +149,11 @@ def test_experiments_keep_generation_and_modeling_in_their_own_script() -> None:
                     assert not node.args and all(keyword.arg != "model" for keyword in node.keywords), (
                         f"{path}:{node.lineno}: let the model or Trainer loop bind the data module automatically"
                     )
-        assert model_classes and constructors & {"SyntheticDataModule", "ArrowDataModule"}, (
-            f"{path}: include the model and independently generated splits"
-        )
+        assert model_classes and constructors & {
+            "SyntheticDataModule",
+            "ArrowDataModule",
+            "PolarsDataModule",
+        }, f"{path}: include the model and independently generated splits"
         assert any(isinstance(node, (ast.Yield, ast.YieldFrom)) for node in ast.walk(module)), (
             f"{path}: include the synthetic record generator"
         )

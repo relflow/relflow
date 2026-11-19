@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 import pyarrow as pa
+import pyarrow.compute as pc
 import pytest
 
 import relflow as rf
-from relflow.data.query import Index, Literal, Member, Slice, Traverse, bind, compile, query
+from relflow.data.query import (
+    Index,
+    Literal,
+    Lookup,
+    Member,
+    Slice,
+    Traverse,
+    bind,
+    compile,
+    gather,
+    origin,
+    query,
+    scope,
+)
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, Tokens
 
@@ -33,6 +47,38 @@ def test_compile_index_and_slice():
 
 
 @pytest.mark.parametrize(
+    ("expression", "owner", "local"),
+    [
+        ("amount", 0, "amount"),
+        ("../amount", 1, "amount"),
+        ("../../records[-2:][*].value", 2, "records[-2:][*].value"),
+        ('/["a/b"]', (), '["a/b"]'),
+        ('/groups/_2/["a/b"]', ("groups", "_2"), '["a/b"]'),
+        ('/groups/events/éclair["a\\"/b"]', ("groups", "events"), 'éclair["a\\"/b"]'),
+        ("/groups/events/flags[true]", ("groups", "events"), "flags[true]"),
+        ("../é²z", 1, "é²z"),
+    ],
+)
+def test_scoped_query_retains_the_parsed_local_path(expression, owner, local):
+    actual, parsed = scope(expression)
+
+    assert actual == owner
+    assert parsed.text == local
+    assert parsed.steps == compile(local).steps
+    address = "/groups/events/value" if isinstance(owner, int) else "/" + "/".join((*owner, "value"))
+    assert origin(expression, address=address)[1] is parsed
+
+
+def test_one_parsed_bracket_binds_to_list_or_typed_map():
+    _, parsed = scope("../values[1]")
+    list_type = pa.struct([("values", pa.list_(pa.int64()))])
+    map_type = pa.struct([("values", pa.map_(pa.int64(), pa.int64()))])
+
+    assert bind(parsed, list_type).steps[-1] == Index(value=1, segment="[1]")
+    assert bind(parsed, map_type).steps[-1] == Lookup(value=1, segment="[1]")
+
+
+@pytest.mark.parametrize(
     ("expression", "reason"),
     [
         ("[*].value", "must not begin"),
@@ -48,6 +94,30 @@ def test_compile_index_and_slice():
 def test_compile_rejects_expression_language_features(expression: str, reason: str):
     with pytest.raises(ValueError, match=reason):
         compile(expression)
+
+
+@pytest.mark.parametrize(
+    ("expression", "reason"),
+    [
+        ("../[*].value", "must not begin"),
+        ("/groups/[*].value", "must not begin"),
+        ("../$value", "must not begin"),
+        ("../[1]", "a query must begin with a field name"),
+        ("../[true]", "a query must begin with a field name"),
+        ("../..oops", "expected an identifier beginning with a letter"),
+        ("../ x", "whitespace is not allowed"),
+        ("éⅫz", r"expected '\.' or '\['"),
+        ("events[1:2:3]", "slice steps are not supported"),
+        ("events[1.5:]", "slice bounds must be integers"),
+        ("events[1,2]", "multiselects are not supported"),
+        ("events[", "unterminated bracket"),
+        ('events["broken]', "invalid JSON string literal"),
+        ("/groups//value", "invalid absolute query"),
+    ],
+)
+def test_scoped_query_reports_invalid_syntax(expression: str, reason: str):
+    with pytest.raises(ValueError, match=reason):
+        scope(expression)
 
 
 def test_query_selects_struct_and_quoted_members_with_presence():
@@ -69,6 +139,49 @@ def test_query_selects_struct_and_quoted_members_with_presence():
 
     assert selected.values.to_pylist() == ["Ada", None, None]
     assert selected.present.to_pylist() == [True, True, False]
+
+
+def test_gather_preserves_missing_records_and_nested_struct_presence():
+    source = pa.array(
+        [None, {"profile": None}, {"profile": {"at": None}}, {"profile": {"at": 10}}],
+        type=pa.struct([("profile", pa.struct([("at", pa.int64())]))]),
+    )
+    indices = pa.array([3, None, 2, 1, 0, 3], type=pa.int64())
+
+    selected = gather(source, "profile.at", indices)
+    expected = query(pc.take(source, indices), "profile.at")
+
+    assert selected.values.equals(expected.values)
+    assert selected.present.equals(expected.present)
+    assert selected.present.to_pylist() == [True, False, True, False, False, True]
+
+
+def test_gather_resolves_list_and_map_operations_only_for_selected_records():
+    source = pa.array(
+        [
+            {"attributes": [("score", 1), ("score", 2)]},
+            {"attributes": [("score", 3)]},
+            {"attributes": None},
+        ],
+        type=pa.struct([("attributes", pa.map_(pa.string(), pa.int64()))]),
+    )
+    selected = gather(source, 'attributes["score"]', pa.array([1, None, 2], type=pa.int64()))
+
+    assert selected.values.to_pylist() == [3, None, None]
+    assert selected.present.to_pylist() == [True, False, False]
+    with pytest.raises(ValueError, match="duplicate key 'score'"):
+        gather(source, 'attributes["score"]', pa.array([0], type=pa.int64()))
+
+    items = pa.array(
+        [{"items": [{"value": 1}, None, {"value": None}]}, {"items": []}, {"items": None}],
+        type=pa.struct([("items", pa.list_(pa.struct([("value", pa.int64())])))]),
+    )
+    indices = pa.array([2, 0, None, 1], type=pa.int64())
+    selected = gather(items, "items[*].value", indices)
+    expected = query(pc.take(items, indices), "items[*].value")
+
+    assert selected.values.equals(expected.values)
+    assert selected.present.equals(expected.present)
 
 
 def test_query_traverses_lists_without_compacting_coordinates():
@@ -265,8 +378,8 @@ def test_root_and_branch_queries_feed_coalesce_from_arrow():
     )
 
     fields = coalesce(table, schema, Strata.predict).fields
-    sku = fields[rf.Address("/events/sku")].pristine
-    risk = fields[rf.Address("/events/risk")].pristine
+    sku = fields[rf.Address("/events/sku")].single().pristine
+    risk = fields[rf.Address("/events/risk")].single().pristine
 
     assert schema.fields.query == "payload"
     assert schema.branches[rf.Address("/events")].query == "events[-2:]"
@@ -291,7 +404,7 @@ def test_arrow_query_treats_mask_spelling_as_ordinary_content():
     )
     table = pa.table({"payload": pa.array([{"amount": "<MASK>"}, {"amount": None}])})
 
-    field = coalesce(table, schema, Strata.predict).fields["/amount"].pristine
+    field = coalesce(table, schema, Strata.predict).fields["/amount"].single().pristine
 
     assert field.dense.tolist() == [[Tokens.valued.value], [Tokens.null.value]]
     assert field.values.to_pylist() == ["<MASK>"]

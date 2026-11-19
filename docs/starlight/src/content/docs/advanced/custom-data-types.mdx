@@ -25,7 +25,7 @@ names do not select their roles.
 | Capability | Components and responsibility |
 | --- | --- |
 | Declare a field | `Request`: a `rf.RequestBase` subclass with a stable `type` discriminator and declared configuration fields. |
-| Derive a field from source values | Optional `derive`: validate source projections and return one Arrow value and presence flag per owner record before observation and masking. |
+| Combine source values | Override `TensorField.new` to interpret resolved sources before observation, masking, and tensorization. |
 | Supply input context | `TensorField`: encode prepared Arrow values and retain state and routing masks. `Embedder`: turn compact field coordinates into a neural parcel. |
 | Learn a supervised target | Add `Decoder` and `loss` together. The decoder produces the extension’s tensor payload; the objective trains the selected field coordinates. |
 | Return a decoded result | `output` declares the extension-owned Arrow fields; `write` materializes that exact schema. |
@@ -37,6 +37,55 @@ supervised decoder simply because its request accepts the common `mask` and
 `embed` options. relflow checks the requested capabilities when constructing or
 mutating the graph. The [extension contract tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L223)
 cover missing decoder/loss pairs and the separate leaf-embedding requirement.
+
+## Specialize an existing type
+
+`Extension.inherit` starts from a registered public field constructor. The new
+extension gets its own request discriminator and inherits the parent's options,
+validators, Arrow contract, components, callbacks, and package requirements.
+Register only the parts that change. For example:
+
+```python
+import pydantic
+import relflow as rf
+
+measurement = rf.Extension.inherit(rf.Number, name="acme_measurement")
+number_loss = rf.TENSORFIELDS["number"].loss
+
+
+@measurement.register(rf.Component.Request)
+class Measurement(measurement.Request):
+    loss_scale: float = pydantic.Field(default=1.0, gt=0)
+
+
+@measurement.register(rf.Component.loss)
+def loss(model, prediction, batch, strata):
+    request = model.schema.requests[prediction.address]
+    return request.loss_scale * number_loss(model, prediction, batch, strata)
+
+
+model = rf.Model(
+    preset="small",
+    distance=Measurement,
+    cost=Measurement(mask=True, loss_scale=2),
+)
+```
+
+The example shows a component override; for ordinary loss weighting, the common
+field `weight` option is sufficient. An unchanged specialization can use
+`measurement.Request` directly. Each model and field still owns its own learned
+state. A child can itself be passed to `Extension.inherit`.
+
+Components registered on a parent later are visible to its children until a
+child registers that role itself; child registrations do not change the parent
+or siblings. Register `None` for `output` or `write` to disable an inherited
+optional role. Inherited request classes and metadata are captured when the
+child is created. `types` and `queries` replace the inherited declarations;
+`arrow` adds or replaces matchers for the selected types. Extra `callbacks` append
+to the parent's factories, and `requires` merges requirements by import name,
+with a child value taking precedence for a repeated name. Import the extension's
+registration module before loading its schema or checkpoint and in worker
+processes, just as for an independently implemented type.
 
 ## Define a source contract
 
@@ -63,7 +112,7 @@ Nulls remain field states; they do not become a zero-degree bearing.
 }} />
 
 `Extension.types` declares **canonical Arrow terminal families**, using their
-Python equivalents after any extension-owned derivation. `types=(int | float,)` permits a numeric family; it does
+Python equivalents of the values passed to tensorization. `types=(int | float,)` permits a numeric family; it does
 not validate a bearing’s range or make an Arrow list a valid scalar bearing.
 The tensorizer owns those semantic checks.
 
@@ -78,7 +127,12 @@ are prepared before tensorization. These boundaries are enforced by the
 
 Save this module as `bearing.py`. Importing it registers the type; it does not
 construct a model. The example uses the same tensorfield and compact-embedder
-protocols as the [third-party extension fixture](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L27).
+protocols as the [third-party extension fixture](https://github.com/relflow/relflow/blob/1e657b1d87f266d9c256e0000cb0df554dedc125/tests/architecture/test_extension_contract.py#L50).
+
+The pipeline passes selected query values and their geometry in `sources`, and
+resources in `context`. Resolve a single source to capture observations and
+resource bindings, then split its projection into inputs and targets. Return the
+observation and binding with the tensorfield so the data pipeline can apply them.
 
 ```python
 from __future__ import annotations
@@ -93,6 +147,7 @@ from tensordict import TensorDict, tensorclass
 
 import relflow as rf
 from relflow.structs.packages import Parcel
+from relflow.tensorfields.base import masks, resolve
 
 
 bearing = rf.Extension(name="acme_bearing", types=(int | float,))
@@ -118,18 +173,13 @@ class BearingField(rf.TensorFieldBase[torch.Tensor]):
     targets: TensorDict
 
     @classmethod
-    def new(
-        cls,
-        input: rf.RaggedField,
-        target: rf.RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: rf.Address,
-        schema: rf.Schema,
-        strata: rf.Strata,
-        context: rf.Context,
-    ) -> BearingField:
+    def new(cls, sources, *, schema, context):
+        address = sources.address
+        projection, context, observation, binding = resolve(
+            sources, schema=schema, context=context
+        )
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
         values = input.values
         encoded = np.empty((0, 2), dtype=np.float32)
         if len(values):
@@ -155,7 +205,7 @@ class BearingField(rf.TensorFieldBase[torch.Tensor]):
                 (np.sin(radians), np.cos(radians))
             ).astype(np.float32)
 
-        return cls(
+        result = cls(
             content=torch.from_numpy(
                 input.place(encoded, fill=0.0, value_shape=(2,))
             ),
@@ -166,6 +216,7 @@ class BearingField(rf.TensorFieldBase[torch.Tensor]):
             targets=TensorDict({}, batch_size=input.shape),
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @bearing.register(rf.Component.Embedder)
@@ -312,27 +363,27 @@ representation for Decimal. The
 [custom atom tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/test_base_extension.py#L186)
 also cover Arrow extension types and storage fallback.
 
-## Derive a value from several source fields
+## Combine several source fields
 
-Register `rf.Component.derive` when derivation is part of the field type's
-meaning. For example, [Duration](/data-types/duration/) owns the interpretation
-of two timestamp operands. Application-specific joins and business-window
-calculations still belong in source preparation or a preprocessor. The bearing
-example consumes one numeric source directly and does not need this hook.
+A tensorfield can interpret one or more source queries in its `new`
+classmethod. For example, [Duration](/data-types/duration/) converts timestamp
+sources into elapsed time before Number observes or tensorizes it.
+Application-specific joins and business-window calculations belong in source
+preparation or a preprocessor.
 
-A deriving request can declare a tuple of `query` paths. The callable receives
-their Arrow source projections in that order, plus the request, address, and
-owner-row count. It validates its operand types and returns a source projection
-with exactly one value and one non-null Boolean presence flag per owner row.
-The extension's `types` contract applies to those derived values.
+A request can declare a tuple of `query` paths. `new` receives a `Sources` object
+whose `inputs` contain the resolved Arrow values and presence flags in query
+order. It can pass a converted projection to its parent constructor, which
+observes and tensorizes it. The extension's `types` contract applies to the
+converted values. An extension's `queries` option declares the allowed query
+counts: an integer, a tuple of counts, or a Python slice; the default is one. A
+request validator owns any rules that also depend on the datatype's other options.
 
 Each `../` prefix selects a source from one enclosing branch, aligned with the
 retained child records. It does not perform a relational join, and a path cannot
-ascend past the model root. Tuple queries require a registered derive component;
-an ordinary field uses one source query. The
-[derivation protocol](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/base.py#L76)
-and [source projection checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L567)
-define this boundary.
+ascend past the model root. Absolute paths name the model root and ancestor
+branches: from `/accounts/events`, `/accounts/opened_at` reads the parent
+account's source and `/created_at` reads the selected model root.
 
 ## Check the extension boundary
 

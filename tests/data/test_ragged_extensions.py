@@ -255,7 +255,7 @@ schema = rf.Schema.from_tree(
     n_layers=1,
     n_heads=2,
 )
-field = coalesce(convert(source), schema, Strata.predict).fields["/value"].pristine
+field = coalesce(convert(source), schema, Strata.predict).fields["/value"].single().pristine
 assert field.shape == (0, 1)
 assert pa.types.is_null(field.values.type)
 assert source.schema.field("payload").type == pa.map_(pa.string(), pa.float64())
@@ -301,7 +301,7 @@ def test_coalesce_returns_arrow_backed_projections():
     )
     source = arrow_table([{"items": [{"value": 1.0}, {"value": None}]}])
 
-    projection = coalesce(source, schema=schema, strata=Strata.predict).fields["/items/value"]
+    projection = coalesce(source, schema=schema, strata=Strata.predict).fields["/items/value"].single()
     field = projection.pristine
 
     assert isinstance(projection, Projection)

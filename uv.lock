@@ -696,6 +696,15 @@ wheels = [
 ]
 
 [[package]]
+name = "lark"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/34/28fff3ab31ccff1fd4f6c7c7b0ceb2b6968d8ea4950663eadcb5720591a0/lark-1.3.1.tar.gz", hash = "sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905", size = 382732, upload-time = "2025-10-27T18:25:56.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl", hash = "sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12", size = 113151, upload-time = "2025-10-27T18:25:54.882Z" },
+]
+
+[[package]]
 name = "lightning"
 version = "2.6.4"
 source = { registry = "https://pypi.org/simple" }
@@ -1965,11 +1974,12 @@ wheels = [
 
 [[package]]
 name = "relflow"
-version = "0.5.1"
+version = "0.5.2"
 source = { editable = "." }
 dependencies = [
     { name = "anytree" },
     { name = "beartype" },
+    { name = "lark" },
     { name = "lightning" },
     { name = "numpy" },
     { name = "polars" },
@@ -2033,6 +2043,7 @@ requires-dist = [
     { name = "beartype", specifier = ">=0.21.0" },
     { name = "duckdb", marker = "extra == 'duckdb'", specifier = ">=1.5.0" },
     { name = "fastapi", marker = "extra == 'serving'", specifier = ">=0.124.0" },
+    { name = "lark", specifier = ">=1.3.1,<2" },
     { name = "lightning", specifier = ">=2.6.4" },
     { name = "moka-py", marker = "extra == 'text'", specifier = ">=0.5,<0.6" },
     { name = "numpy", specifier = ">=2.2.6" },

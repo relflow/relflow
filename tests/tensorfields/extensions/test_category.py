@@ -12,7 +12,7 @@ from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
-from relflow.tensorfields.base import TENSORFIELDS, Context
+from relflow.tensorfields.base import Context
 from relflow.tensorfields.extensions.category import (
     Decoder,
     Embedder,
@@ -66,10 +66,7 @@ def tensorfield(
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["category"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
         context=Context(state=state),
     )
 

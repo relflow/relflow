@@ -1,0 +1,110 @@
+---
+title: Coordinates
+description: Represent latitude and longitude and measure error along the Earth's surface.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Coordinates` to represent a position on Earth and predict positions
+using a distance that accounts for the shape of the globe.
+
+<DataTypePage name="Coordinates">
+
+## Input values
+
+Supply a `[latitude, longitude]` pair in degrees, or select two scalar
+source fields in that order:
+
+```python
+class Stop(rf.Model):
+    current = rf.Coordinates
+    destination = rf.Coordinates(query=("destination_lat", "destination_lon"), mask=True)
+```
+
+Latitude must be within `[-90, 90]` and longitude within `[-180, 180]`.
+The two query paths can refer to an ancestor with `../` or an absolute path.
+A whole pair or an individual coordinate may be null; either makes the
+position null. NaN and infinity make the position `other`.
+
+## Standardization and processor pipelines
+
+Coordinates uses the latitude and longitude to locate a point on a unit
+sphere. This representation makes the two sides of the date line adjacent
+and gives all longitudes the same position at a pole. The decoder tracks the
+center and spread of training targets in this representation, including across
+the date line. Training jitter, if configured, perturbs input degrees while
+preserving the original target.
+
+Source coordinates and the geographic readout use float64 on CPU and CUDA;
+MPS uses float32. The model's learned representations still use its configured
+computation precision, so this does not guarantee sub-meter prediction accuracy.
+
+## How is this leaf trained?
+
+The state head uses cross-entropy. The content objective minimizes the
+great-circle angle between predicted and observed positions, scaled by the
+training-target spread; MAE and RMSE report distances in meters. Distances use a
+[mean Earth radius of 6,371,009 meters](https://www.emc.ncep.noaa.gov/HWRF/scripts/namespacehwrf_1_1constants.html).
+This spherical surface distance does not include roads, obstacles, terrain,
+or elevation and is not a pedestrian route length.
+
+### Predictions
+
+With `mask=True`, historical answers supply the target coordinates and
+prediction requests can omit them. The result's `content` contains a
+latitude and longitude in degrees, together with `state` and `inferred`.
+The writer fills content with zeros when the most likely state is not valued.
+For sparse results with null containers, use `rf.Writer(..., format="ipc")`;
+the default Parquet writer rejects the affected fixed-width lists.
+
+<ValueTree
+  id="coordinates-predictions"
+  {...outputs.coordinates}
+  predictions
+  heading="Illustrative prediction output"
+  label="Coordinates prediction output"
+/>
+
+## Leaf-specific parameters
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `query` | Same-named field | Select one pair or two scalar paths, in latitude/longitude order. |
+| `jitter` | `rf.Jitter()` | Add training-only noise in degrees. |
+
+### Request methods
+
+This type has no type-specific request methods.
+
+## Errors raised
+
+| When | Failure | What to check |
+| --- | --- | --- |
+| A pair has the wrong length or a value is not numeric | `ValueError` identifies the coordinate field. | Supply two numeric degrees or a null. |
+| A finite latitude or longitude is outside its range | `ValueError` identifies the field and coordinate. | Check the order and units of the source values. |
+
+### Footguns
+
+- **Interchanging latitude and longitude.** Inputs and outputs use latitude
+  first. Check source column order in the [API reference](/api/rf-coordinates/).
+- **Reading distance as a road route.** The metric follows the shortest path
+  on a sphere. Compare with a routing service when walkable distance matters.
+- **Ignoring the state probabilities.** Non-valued predictions have zero
+  content; inspect `state` before interpreting the coordinate pair.
+
+## Relevant evidence
+
+<LeafEvidence type="Coordinates" />
+
+The local tests check distance calculations, input alignment, and model
+execution; they do not establish application accuracy.
+
+### Related types
+
+- [Vector](/data-types/vector/) represents fixed-width numbers without a geographic distance.
+- [Number](/data-types/number/) represents a scalar measurement.
+
+</DataTypePage>

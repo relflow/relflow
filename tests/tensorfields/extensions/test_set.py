@@ -11,7 +11,7 @@ from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
-from relflow.tensorfields.base import TENSORFIELDS, Context
+from relflow.tensorfields.base import Context
 from relflow.tensorfields.extensions.set import Decoder, Embedder, TensorField, loss, write
 from relflow.tensorfields.extensions.set import output as output_type
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel
@@ -57,10 +57,7 @@ def tensorfield(
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["set"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
         context=Context(state=state),
     )
 

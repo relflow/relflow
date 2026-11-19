@@ -134,6 +134,10 @@ export const apiCatalog: ApiSection[] = [
       {
         "name": "rf.Vector",
         "guide": "/data-types/vector/"
+      },
+      {
+        "name": "rf.Coordinates",
+        "guide": "/data-types/coordinates/"
       }
     ]
   },
@@ -448,9 +452,6 @@ export const apiCatalog: ApiSection[] = [
       },
       {
         "name": "rf.BatchContext"
-      },
-      {
-        "name": "rf.Derive"
       },
       {
         "name": "rf.TensorInput"

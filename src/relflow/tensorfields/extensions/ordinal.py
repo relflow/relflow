@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Unpack, cast
+from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING, Any, Literal, Self, Unpack, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
 import pydantic
 import torch
-from tensordict import TensorDict
+from tensordict import TensorDict, tensorclass
 
 from relflow.data.query import Projection
 from relflow.helpers.state import compatible
 from relflow.structs.enums import Component, Strata, TensorKey
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Address, FieldOptions
-from relflow.tensorfields.base import Extension, RequestBase, TensorFieldBase
+from relflow.tensorfields.base import Context, Extension, TensorFieldBase
 from relflow.tensorfields.extensions import enum, number
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter
@@ -25,15 +25,16 @@ from relflow.tensorfields.shared.vocabulary import canonical
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.tensorfields.shared.resize import Resize
 
 EXACT = 2**53
-ordinal = Extension("ordinal", types=(int,), callbacks=number.number.callback_factories)
+ordinal = Extension.inherit(number.Request, name="ordinal", types=(int,))
 
 
 @ordinal.register(Component.Request)
-class Request(number.Numeric):
+class Request(number.Request):
     """A numeric rank or one label from an explicitly ordered declaration.
 
     ``values=("low", "medium", "high")`` maps labels to ranks 0, 1, and 2.
@@ -45,7 +46,8 @@ class Request(number.Numeric):
     predictions clamp to the exactly supported range, -2**53 through 2**53.
     """
 
-    type: Literal["ordinal"] = "ordinal"
+    # A specialized Request deliberately replaces its parent's discriminator.
+    type: Literal["ordinal"] = "ordinal"  # pyrefly: ignore [bad-override-mutable-attribute]
     values: tuple[enum.Value, ...] | None = None
 
     if TYPE_CHECKING:
@@ -80,12 +82,6 @@ class Request(number.Numeric):
             if values is None
             else [{"bytes": value.hex()} if isinstance(value, bytes) else value for value in values]
         )
-
-    @pydantic.model_validator(mode="after")
-    def check_source(self) -> Request:
-        if isinstance(self.query, tuple):
-            raise ValueError("Ordinal reads one source; provide one query string rather than a tuple")
-        return self
 
 
 @dataclass(frozen=True)
@@ -159,58 +155,75 @@ def bind(
         raise ValueError(f"Ordinal batch at '{address}' has a different values declaration; encode it again")
 
 
-@ordinal.register(Component.derive)
-def derive(inputs: tuple[Projection, ...], *, request: RequestBase, address: Address, rows: int) -> Projection:
-    """Map labels to ranks before numeric observation, masking, or tensorization."""
-    request = cast(Request, request)
-    if len(inputs) != 1:
-        raise ValueError(f"Ordinal field at '{address}' requires exactly one source query, got {len(inputs)}")
-    selected = inputs[0]
-    values = selected.values
-    if pa.types.is_dictionary(values.type):
-        values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
-    values = pc.if_else(selected.present, values, None)
-    if pa.types.is_null(values.type):
-        return Projection(values=pc.cast(values, pa.int64()), present=selected.present)
-    if request.values is None:
-        if not pa.types.is_integer(values.type):
-            raise ValueError(
-                f"Ordinal field at '{address}' expects integer ranks, got {values.type}; "
-                "provide ordered values for labels or use Number for continuous inputs"
+@ordinal.register(Component.TensorField)
+@tensorclass
+class TensorField(number.TensorField):
+    """Construct numeric tensors from declared labels or integer ranks."""
+
+    @classmethod
+    def new(
+        cls,
+        sources: Sources,
+        *,
+        schema: Schema,
+        context: Context,
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        if sources.vacant:
+            return super().new(sources, schema=schema, context=context)
+        address = sources.address
+        request = cast(Request, schema.requests[address])
+        (selected,) = sources.inputs
+        values = selected.values
+        if pa.types.is_dictionary(values.type):
+            values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
+        values = pc.if_else(selected.present, values, None)
+        if pa.types.is_null(values.type):
+            ranks = pc.cast(values, pa.int64())
+        elif request.values is None:
+            if not pa.types.is_integer(values.type):
+                raise ValueError(
+                    f"Ordinal field at '{address}' expects integer ranks, got {values.type}; "
+                    "provide ordered values for labels or use Number for continuous inputs"
+                )
+            low = (
+                pc.less(values, pa.scalar(-EXACT, type=pa.int64()))
+                if pa.types.is_signed_integer(values.type)
+                else pa.repeat(pa.scalar(False), len(values))
             )
-        low = (
-            pc.less(values, pa.scalar(-EXACT, type=pa.int64()))
-            if pa.types.is_signed_integer(values.type)
-            else pa.repeat(pa.scalar(False), len(values))
+            upper = pa.scalar(EXACT, type=pa.uint64() if pa.types.is_unsigned_integer(values.type) else pa.int64())
+            if pc.any(pc.or_(low, pc.greater(values, upper))).as_py():
+                raise ValueError(
+                    f"Ordinal field at '{address}' has ranks outside [-2**53, 2**53]; "
+                    "rescale ranks or declare an ordered values tuple"
+                )
+            ranks = pc.cast(values, pa.int64(), safe=True)
+        else:
+            kind = type(request.values[0])
+            if not enum.enum.matches(kind, values.type):
+                raise ValueError(
+                    f"Ordinal field at '{address}' expects declared {kind.__name__} labels, got {values.type}"
+                )
+            labels = canonical(pa.array(cast(tuple[Any, ...], request.values)))
+            try:
+                values = canonical(pc.cast(values, labels.type, safe=True))
+                ranks = pc.index_in(values, value_set=labels)
+            except pa.ArrowException as error:
+                raise ValueError(
+                    f"Ordinal field at '{address}' contains labels outside its declared scalar type"
+                ) from error
+            unknown = pc.and_(pc.is_valid(values), pc.is_null(ranks))
+            if pc.any(unknown).as_py():
+                value = pc.filter(values, unknown)[0].as_py()
+                raise ValueError(
+                    f"Ordinal field at '{address}' contains undeclared value {value!r}; "
+                    "declare it in values or normalize the source"
+                )
+            ranks = pc.cast(ranks, pa.int64())
+        return super().new(
+            replace(sources, inputs=(Projection(ranks, selected.present),)),
+            schema=schema,
+            context=context,
         )
-        upper = pa.scalar(EXACT, type=pa.uint64() if pa.types.is_unsigned_integer(values.type) else pa.int64())
-        if pc.any(pc.or_(low, pc.greater(values, upper))).as_py():
-            raise ValueError(
-                f"Ordinal field at '{address}' has ranks outside [-2**53, 2**53]; "
-                "rescale ranks or declare an ordered values tuple"
-            )
-        ranks = pc.cast(values, pa.int64(), safe=True)
-    else:
-        kind = type(request.values[0])
-        if not enum.enum.matches(kind, values.type):
-            raise ValueError(f"Ordinal field at '{address}' expects declared {kind.__name__} labels, got {values.type}")
-        labels = canonical(pa.array(cast(tuple[Any, ...], request.values)))
-        try:
-            values = canonical(pc.cast(values, labels.type, safe=True))
-            ranks = pc.index_in(values, value_set=labels)
-        except pa.ArrowException as error:
-            raise ValueError(
-                f"Ordinal field at '{address}' contains labels outside its declared scalar type"
-            ) from error
-        unknown = pc.and_(pc.is_valid(values), pc.is_null(ranks))
-        if pc.any(unknown).as_py():
-            value = pc.filter(values, unknown)[0].as_py()
-            raise ValueError(
-                f"Ordinal field at '{address}' contains undeclared value {value!r}; "
-                "declare it in values or normalize the source"
-            )
-        ranks = pc.cast(ranks, pa.int64())
-    return Projection(values=ranks, present=selected.present)
 
 
 @ordinal.register(Component.output)
@@ -238,8 +251,3 @@ def write(module: Model, prediction: Prediction, datatype: pa.StructType) -> pa.
     )
     content = indices if request.values is None else pc.take(pa.array(cast(tuple[Any, ...], request.values)), indices)
     return struct({TensorKey.content.name: content}, datatype)
-
-
-for role, component in number.number.components.items():
-    if role not in {Component.Request, Component.Embedder, Component.Decoder, Component.output, Component.write}:
-        ordinal.register(role, component)

@@ -86,6 +86,14 @@ def test_period_is_the_registered_dateparts_request_under_both_public_names():
     assert namespace["Period"] is namespace["DateParts"] is Period
 
 
+def test_tensorfield_source_construction_replaces_the_derive_role():
+    assert not hasattr(relflow, "Sources")
+    assert not hasattr(relflow.Component, "derive")
+    assert not hasattr(relflow, "Derive")
+    with pytest.raises(ValueError):
+        relflow.Component("derive")
+
+
 def test_data_module_constructor_annotations_resolve_at_runtime():
     for module in (
         relflow.ArrowDataModule,

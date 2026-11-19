@@ -1,3 +1,4 @@
+import pickle
 from datetime import datetime, timezone
 
 import pyarrow as pa
@@ -6,6 +7,7 @@ import torch
 import yaml
 
 import relflow as rf
+from relflow.tensorfields.extensions import number as numeric
 from relflow.tensorfields.extensions.duration import duration
 from relflow.tensorfields.extensions.number import number
 
@@ -13,7 +15,6 @@ from relflow.tensorfields.extensions.number import number
 def test_duration_uses_numbers_modeling_components_without_a_second_learner():
     assert rf.TENSORFIELDS["duration"].Request is rf.Duration
     for role in (
-        rf.Component.TensorField,
         rf.Component.Embedder,
         rf.Component.Decoder,
         rf.Component.observe,
@@ -23,7 +24,23 @@ def test_duration_uses_numbers_modeling_components_without_a_second_learner():
         rf.Component.write,
     ):
         assert duration.component(role) is number.component(role)
+    assert issubclass(duration.TensorField, numeric.TensorField)
     assert duration.callback_factories == number.callback_factories
+
+
+def test_numeric_field_subclasses_survive_batch_consolidation_and_pickle():
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        elapsed=rf.Duration(query=("start", "end")),
+        level=rf.Ordinal(values=("low", "high")),
+    )
+    fields = model.encode(pa.table({"start": ["2026-01-01"], "end": ["2026-01-03"], "level": ["high"]}))
+    packed = pickle.loads(pickle.dumps(fields.consolidate()))
+
+    for address, name in (("/elapsed", "duration"), ("/level", "ordinal")):
+        assert type(packed[address]) is rf.TENSORFIELDS[name].TensorField
+        torch.testing.assert_close(packed[address].content, fields[address].content)
 
 
 @pytest.mark.parametrize("mask", [False, True])
@@ -209,3 +226,54 @@ def test_duration_can_train_and_predict_with_number_objectives(tmp_path):
     assert len(output) == 4
     assert "elapsed" in output["predictions"].struct.fields
     assert output.equals(model.predict(poisoned))
+
+
+@pytest.mark.integration
+def test_absolute_ancestor_queries_and_ordinal_train_in_worker_batches(tmp_path):
+    groups = [
+        {
+            "opened_at": "2026-01-01",
+            "events": [{"at": "2026-01-02", "severity": "low"}, {"at": "2026-01-03", "severity": "high"}],
+        },
+        {
+            "opened_at": "2026-01-05",
+            "events": [{"at": "2026-01-08", "severity": "low"}, {"at": "2026-01-09", "severity": "high"}],
+        },
+    ]
+    records = pa.Table.from_pylist([{"groups": groups} for _ in range(4)])
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        groups=rf.Branch(
+            length=2,
+            events=rf.Branch(
+                length=2,
+                level=rf.Ordinal(values=("low", "high"), query="severity"),
+                age=rf.Duration(query=("/groups/opened_at", "/groups/events/at"), mask=True),
+            ),
+        ),
+    )
+    data = rf.ArrowDataModule(
+        train=records, validate=records, num_workers=1, persistent_workers=False, pin_memory=False
+    )
+    model.fit(
+        data,
+        batch_size=2,
+        max_epochs=1,
+        limit_train_batches=1,
+        limit_val_batches=1,
+        logger=False,
+        enable_checkpointing=False,
+        rollback=False,
+        early_stopping=False,
+        enable_progress_bar=False,
+        default_root_dir=str(tmp_path),
+    )
+
+    assert rf.Duration.normalization(model, "/groups/events/age")["count"] == 8
+    assert rf.Duration.normalization(model, "/groups/events/age")["mean"] == pytest.approx(2.5, rel=0, abs=1e-12)
+    assert rf.Ordinal.normalization(model, "/groups/events/level")["count"] == 8
+    rows = model.predict(records, batch_size=2).to_dicts()
+    assert all(
+        event["age"]["inferred"] for row in rows for group in row["predictions"]["groups"] for event in group["events"]
+    )

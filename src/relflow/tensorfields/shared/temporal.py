@@ -14,7 +14,7 @@ import pyarrow.compute as pc
 __all__ = ["Unit", "difference", "parse"]
 
 Temporal: TypeAlias = pa.Array | pa.ChunkedArray | pa.Scalar
-Operand: TypeAlias = Temporal | date | datetime | str | None
+Endpoint: TypeAlias = Temporal | date | datetime | str | None
 Resolution: TypeAlias = Literal["s", "ms", "us", "ns"]
 Unit: TypeAlias = Literal["nanoseconds", "microseconds", "milliseconds", "seconds", "minutes", "hours", "days", "weeks"]
 SECONDS = {
@@ -235,7 +235,7 @@ def common(values: tuple[Temporal, ...]) -> pa.TimestampType[Any, Any]:
     return pa.timestamp(unit, tz="UTC") if aware == {True} else pa.timestamp(unit)
 
 
-def parse(values: Operand, pattern: str | None = None) -> Temporal:
+def parse(values: Endpoint, pattern: str | None = None) -> Temporal:
     """Parse flat endpoints, preserving timestamps' instants and finest resolution.
 
     ISO strings use nanosecond resolution. Custom patterns follow Arrow's
@@ -317,7 +317,7 @@ def parse(values: Operand, pattern: str | None = None) -> Temporal:
     return pc.cast(values, datatype)
 
 
-def difference(start: Operand, end: Operand, *, unit: Unit = "days", pattern: str | None = None) -> Temporal:
+def difference(start: Endpoint, end: Endpoint, *, unit: Unit = "days", pattern: str | None = None) -> Temporal:
     """Return signed ``end - start`` in fixed units as Arrow float64 values.
 
     Scalars broadcast; two arrays must have equal lengths. Subtract integer

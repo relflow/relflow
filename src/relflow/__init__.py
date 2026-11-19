@@ -76,7 +76,6 @@ from relflow.tensorfields import (
     BatchContext,
     Context,
     DecoderBase,
-    Derive,
     EmbedderBase,
     Extension,
     RequestBase,
@@ -85,6 +84,7 @@ from relflow.tensorfields import (
 )
 from relflow.tensorfields.extensions.boolean import Request as Boolean
 from relflow.tensorfields.extensions.category import Request as Category
+from relflow.tensorfields.extensions.coordinates import Request as Coordinates
 from relflow.tensorfields.extensions.dateparts import Request as DateParts
 from relflow.tensorfields.extensions.dateparts import Request as Period
 from relflow.tensorfields.extensions.duration import Request as Duration
@@ -158,6 +158,7 @@ __all__ = [
     "Category",
     "Component",
     "Context",
+    "Coordinates",
     "CustomDataModule",
     "DuckDBDataModule",
     "DateParts",
@@ -183,7 +184,6 @@ __all__ = [
     "Number",
     "Ordinal",
     "Duration",
-    "Derive",
     "Quantile",
     "OptimizerConfig",
     "Overflow",

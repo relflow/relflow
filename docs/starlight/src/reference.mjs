@@ -243,6 +243,10 @@ export const reference = {
       title: 'Elapsed-time unit',
       text: 'Write and model Duration values in this fixed unit. Days are 24 hours and weeks are seven days; months and years are not fixed units.',
     },
+    delta: {
+      title: 'Gap between records',
+      text: 'Subtract the preceding timestamp in the same branch collection, in source order and before cropping. A record without a predecessor has a null duration.',
+    },
     query: {
       title: 'Explicit source paths',
       text: 'Read source values through paths relative to this node’s parent record. Duration accepts a pair of paths in start, end order; ../ selects an ancestor record within branch geometry.',

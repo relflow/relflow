@@ -6,7 +6,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import InitVar, dataclass, field
 from functools import partial
-from typing import TYPE_CHECKING, Any, Literal, Unpack, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, Self, Unpack, cast, overload
 
 import numpy as np
 import pyarrow as pa
@@ -29,6 +29,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.output import array, struct, variable
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
@@ -38,6 +40,7 @@ from relflow.tensorfields.shared.vocabulary import canonical, fold
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.tensorfields.shared.resize import Resize
 
@@ -317,16 +320,16 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
+        strata = sources.strata
         request = cast(Request, schema.requests[address])
         vocabulary = (
             context.state
@@ -348,7 +351,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         if strata == Strata.train and request.p_unavailable:
             unavailable = torch.rand_like(state, dtype=torch.float).lt(request.p_unavailable) & state.eq(Tokens.valued)
             content = content.masked_fill(unavailable, -1)
-        return cls(
+        result = cls(
             state=state,
             content=content,
             present=present,
@@ -357,6 +360,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=targets,
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @enum.register(Component.Embedder)

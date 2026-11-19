@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections.abc import Generator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, Unpack, cast
 from weakref import ReferenceType, ref
 
 import numpy as np
@@ -39,6 +39,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
@@ -57,6 +59,7 @@ from relflow.tensorfields.shared.vocabulary import (
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -285,16 +288,16 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
+        strata = sources.strata
         state = context.state
         if state is not None and not isinstance(state, VocabularyState):
             raise TypeError(f"group field at '{address}' requires VocabularyState context, got {type(state).__name__}")
@@ -327,7 +330,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 selected = torch.rand_like(state_tensor, dtype=torch.float).lt(p_unavailable) & known
                 content = content.masked_fill(selected, unavailable_index)
 
-        return cls(
+        result = cls(
             state=state_tensor,
             content=content,
             present=present,
@@ -336,6 +339,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=targets,
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @group.register(Component.Embedder)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import enum
 import math
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -25,6 +25,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.output import array, fixed, struct
 from relflow.tensorfields.shared.jitter import Jitter
@@ -32,6 +34,7 @@ from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, 
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -84,6 +87,7 @@ class Request(RequestBase):
 @vector.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[torch.Tensor]):
+    dtype: ClassVar[type[np.float32] | type[np.float64]] = np.float32
     content: torch.Tensor
     state: torch.Tensor
     present: torch.Tensor
@@ -100,16 +104,15 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
         request: Request = cast(Request, schema.requests[address])
 
         def encode(field: RaggedField) -> tuple[torch.Tensor, torch.Tensor]:
@@ -121,7 +124,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
             state = field.dense.copy()
             if not len(values):
-                encoded = np.empty((0, request.n_dim), dtype=np.float32)
+                encoded = np.empty((0, request.n_dim), dtype=cls.dtype)
             else:
                 if not (
                     pa.types.is_list(values.type)
@@ -137,9 +140,11 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 if flattened.null_count:
                     raise ValueError(f"vector field at '{address}' expects non-null numeric elements")
                 try:
-                    flattened = pc.cast(flattened, pa.float32(), safe=True)
+                    flattened = pc.cast(flattened, pa.from_numpy_dtype(np.dtype(cls.dtype)), safe=True)
                 except pa.ArrowException as error:
-                    raise ValueError(f"vector field at '{address}' could not be converted to float32") from error
+                    raise ValueError(
+                        f"vector field at '{address}' could not be converted to {cls.dtype.__name__}"
+                    ) from error
                 encoded = flattened.to_numpy(zero_copy_only=False).reshape(-1, request.n_dim).copy()
                 finite = np.isfinite(encoded).all(axis=1)
                 if not finite.all():
@@ -156,7 +161,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
             )
 
-        return cls(
+        result = cls(
             content=content,
             state=state,
             present=present,
@@ -165,6 +170,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=targets,
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @vector.register(Component.Embedder)

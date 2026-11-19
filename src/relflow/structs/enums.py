@@ -101,7 +101,6 @@ class Component(enum.StrEnum):
     Embedder = "Embedder"
     Decoder = "Decoder"
     TensorField = "TensorField"
-    derive = "derive"
     observe = "observe"
     learn = "learn"
     bind = "bind"

@@ -4,7 +4,7 @@ import enum
 import math
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Self, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -28,6 +28,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
@@ -36,6 +38,7 @@ from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, 
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -264,16 +267,15 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
         content, state = encode(input, address=address)
         targets = TensorDict({}, batch_size=input.shape)
         if address in schema.objectives:
@@ -282,7 +284,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
             )
 
-        return cls(
+        result = cls(
             content=content,
             state=state,
             present=present,
@@ -291,6 +293,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=targets,
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 def moments(values: torch.Tensor) -> TensorDict:

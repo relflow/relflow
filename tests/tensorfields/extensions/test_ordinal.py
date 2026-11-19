@@ -33,7 +33,8 @@ def test_ordinal_reuses_numeric_learning_without_a_class_vocabulary():
     assert rf.TENSORFIELDS["ordinal"].Request is rf.Ordinal
     assert issubclass(ordinal.Embedder, number.Embedder)
     assert issubclass(ordinal.Decoder, number.Decoder)
-    for role in (rf.Component.TensorField, rf.Component.observe, rf.Component.learn, rf.Component.loss):
+    assert issubclass(ordinal.TensorField, number.TensorField)
+    for role in (rf.Component.observe, rf.Component.learn, rf.Component.loss):
         assert ordinal.ordinal.component(role) is number.number.component(role)
     configured = model(VALUES, mask=True)
     assert configured.nodes[ADDRESS].decoder.regression.out_features == 1
@@ -48,8 +49,8 @@ def test_ordinal_rejects_ambiguous_or_invalid_label_declarations(values):
 
 @pytest.mark.parametrize("query", [("one", "two"), (), "broken[", "a..b"])
 def test_ordinal_keeps_structural_query_validation(query):
-    with pytest.raises(ValueError, match="query|Ordinal"):
-        rf.Ordinal(query=query)
+    with pytest.raises(ValueError, match="quer|Ordinal"):
+        rf.Model(preset="small", level=rf.Ordinal(query=query))
 
 
 @pytest.mark.parametrize("mask", [False, True])
@@ -145,6 +146,20 @@ def test_query_and_branch_cropping_preserve_record_holes_and_rank_values():
         [rf.Tokens.null, rf.Tokens.padded],
     ]
     assert len(configured.predict(records)) == 4
+
+
+def test_explicit_missing_target_source_is_allowed_during_prediction():
+    configured = rf.Model(
+        preset="small",
+        d_model=8,
+        amount=rf.Number,
+        level=rf.Ordinal(values=VALUES, query="rating", mask=True),
+    )
+
+    output = configured.predict(pa.table({"amount": [1.0, 2.0]}))
+
+    assert output.height == 2
+    assert "level" in output["predictions"].struct.fields
 
 
 @pytest.mark.parametrize("labels", [(False, True), (100, 20, -1), (1.25, -3.5), (b"low", b"high"), VALUES])

@@ -91,6 +91,14 @@ writer = rf.Writer("predictions", format="ipc")`);
   );
 });
 
+test('Duration delta notes stay attached to Duration calls', async () => {
+  const notes = await annotations(
+    'gap = rf.Duration(query="booked_at", delta=True, granularity="hours")',
+  );
+  assert.match(notes.find((note) => note.value === 'delta=True').text, /preceding timestamp/);
+  assert.deepEqual(await annotations('frame.with_columns(other(delta=True))'), []);
+});
+
 test('known model classes, loaded instances, and typed instances retain workflow notes', async () => {
   const notes = await annotations(`class Customer(rf.Model):
     amount = rf.Number

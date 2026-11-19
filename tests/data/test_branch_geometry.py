@@ -35,9 +35,11 @@ def test_null_objects_count_as_slots_before_leaf_values_and_masks():
     assert layout.present.tolist() == [[True], [True], [True]]
     assert layout.valid.tolist() == [[True], [True], [False]]
     assert layout.placement.tolist() == [0, 2]
-    assert all(field.pristine.shape == layout.shape for field in resolved.fields.values())
-    assert resolved.fields["/events/left"].pristine.dense[0].tolist() == [[Tokens.null, Tokens.padded, Tokens.null]]
-    assert not np.asarray(resolved.fields["/events/right"].present).any()
+    assert all(field.single().pristine.shape == layout.shape for field in resolved.fields.values())
+    assert resolved.fields["/events/left"].single().pristine.dense[0].tolist() == [
+        [Tokens.null, Tokens.padded, Tokens.null]
+    ]
+    assert not np.asarray(resolved.fields["/events/right"].single().present).any()
 
 
 @pytest.mark.parametrize("length", [None, 8])
@@ -48,7 +50,7 @@ def test_geometry_grows_and_shrinks_without_rewriting_symbolic_schema(length):
     for rows, width in [([[{"left": 1.0}]], 1), ([[None, None, None]], 3), ([[], None], 0)]:
         resolved = coalesce(events(rows), configured, Strata.predict)
         assert resolved.layouts["/events"].shape == (len(rows), 1, width)
-        assert resolved.fields["/events/left"].pristine.shape == (len(rows), 1, width)
+        assert resolved.fields["/events/left"].single().pristine.shape == (len(rows), 1, width)
         assert configured.model_dump() == before
 
 
@@ -69,7 +71,7 @@ def test_ancestor_retention_precedes_descendant_extent_resolution(policy, expect
 
     assert resolved.layouts["/events"].shape == (1, 1, 1)
     assert resolved.layouts["/events/items"].shape == (1, 1, 1, len(expected))
-    assert resolved.fields["/events/items/value"].pristine.values.to_pylist() == expected
+    assert resolved.fields["/events/items/value"].single().pristine.values.to_pylist() == expected
 
 
 def test_typed_empty_nested_inputs_have_zero_extents_and_keep_the_row_axis():
@@ -83,7 +85,7 @@ def test_typed_empty_nested_inputs_have_zero_extents_and_keep_the_row_axis():
     assert resolved.layouts["/"].shape == (0, 1)
     assert resolved.layouts["/events"].shape == (0, 1, 0)
     assert resolved.layouts["/events/items"].shape == (0, 1, 0, 0)
-    assert resolved.fields["/events/items/value"].pristine.dense.shape == (0, 1, 0, 0)
+    assert resolved.fields["/events/items/value"].single().pristine.dense.shape == (0, 1, 0, 0)
 
 
 def test_tensor_geometry_survives_encoded_cloning_device_transfer_and_row_selection():
@@ -132,7 +134,7 @@ def test_untyped_null_or_absent_collections_do_not_require_descendant_atoms(miss
     assert resolved.layouts["/events"].present.tolist() == [[not missing], [not missing]]
     assert not resolved.layouts["/events"].valid.any()
     assert resolved.layouts["/events/items"].shape == (2, 1, 0, 0)
-    assert resolved.fields["/events/items/value"].vacant
+    assert resolved.fields["/events/items/value"].single().vacant
 
 
 @pytest.mark.parametrize("source", [pa.table({"events": [3]}), pa.table({"events": [[3]]})])
