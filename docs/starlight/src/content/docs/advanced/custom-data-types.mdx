@@ -127,7 +127,7 @@ are prepared before tensorization. These boundaries are enforced by the
 
 Save this module as `bearing.py`. Importing it registers the type; it does not
 construct a model. The example uses the same tensorfield and compact-embedder
-protocols as the [third-party extension fixture](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L27).
+protocols as the [third-party extension fixture](https://github.com/relflow/relflow/blob/1e657b1d87f266d9c256e0000cb0df554dedc125/tests/architecture/test_extension_contract.py#L50).
 
 The pipeline passes selected query values and their geometry in `sources`, and
 resources in `context`. Resolve a single source to capture observations and
@@ -371,13 +371,13 @@ sources into elapsed time before Number observes or tensorizes it.
 Application-specific joins and business-window calculations belong in source
 preparation or a preprocessor.
 
-A request can declare a tuple of `query` paths. `new` receives a tuple of
-resolved Arrow values and presence flags in query order. It can pass a converted
-projection to its parent constructor, which observes and tensorizes it. The
-extension's `types` contract applies to the converted values. An extension's
-`queries` option declares the allowed query counts: an integer, a tuple of
-counts, or a Python slice; the default is one. A request validator owns any
-rules that also depend on the datatype's other options.
+A request can declare a tuple of `query` paths. `new` receives a `Sources` object
+whose `inputs` contain the resolved Arrow values and presence flags in query
+order. It can pass a converted projection to its parent constructor, which
+observes and tensorizes it. The extension's `types` contract applies to the
+converted values. An extension's `queries` option declares the allowed query
+counts: an integer, a tuple of counts, or a Python slice; the default is one. A
+request validator owns any rules that also depend on the datatype's other options.
 
 Each `../` prefix selects a source from one enclosing branch, aligned with the
 retained child records. It does not perform a relational join, and a path cannot

@@ -72,8 +72,8 @@
 #
 # ```yaml
 # events:
-# - {hint: 0.0, at: "2026-01-01T00:00:00Z"}
-# - {hint: 2.5, at: "2026-01-01T00:00:05Z"}
+# - {hint: 0.0, has_previous: false, at: "2026-01-01T00:00:00Z"}
+# - {hint: 2.5, has_previous: true, at: "2026-01-01T00:00:05Z"}
 # ```
 #
 # ## Comparison

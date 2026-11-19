@@ -1,8 +1,8 @@
 # %% [markdown]
 # ---
 # title: Do nested Duration sources preserve learnable elapsed-time signals?
-# description: Compare ancestor and shifted Duration inputs with prepared numeric values and independently shuffled
-#   controls.
+# description: Compare ancestor-based Duration inputs and previous-record gaps with prepared numeric values and
+#   independently shuffled controls.
 # evidence-readout:
 # - label: Duration held-out normalized RMSE
 #   metric:
@@ -69,7 +69,7 @@
 # evidence-plot:
 #   mode: summary
 #   target: target
-#   focus: Do ancestor and shifted Duration inputs retain the right values after cropping?
+#   focus: Do ancestor-based Duration inputs and previous-record gaps retain the right values after cropping?
 #   comparison: Compare Duration with prepared Number inputs and separate shuffled-age and shuffled-gap controls.
 #   limit: The task uses synthetic histories and one retained event.
 # ---
