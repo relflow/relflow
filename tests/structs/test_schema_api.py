@@ -45,7 +45,7 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     job = params.requests["/job_code"]
     assert job.name == "job_code"
     assert job.description == "Job code from OpenML"
-    assert job.query == 'source["job code"]'
+    assert job.query == ('source["job code"]',)
     assert "size" not in job.model_dump()
 
     amount = params.requests["/amount"]
@@ -87,7 +87,7 @@ def test_model_constructor_accepts_branch_nodes_with_optional_leaf_queries():
     merchant = params.requests["/transactions/merchant_code"]
     assert merchant.name == "merchant_code"
     assert merchant.description == "merchant code"
-    assert merchant.query == 'source["merchant code"]'
+    assert merchant.query == ('source["merchant code"]',)
     assert "capacity" not in merchant.model_dump()
 
 

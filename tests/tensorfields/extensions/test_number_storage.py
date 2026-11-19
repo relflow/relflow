@@ -8,7 +8,7 @@ import torch
 import relflow as rf
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
-from relflow.tensorfields.extensions.number import TensorField, number
+from relflow.tensorfields.extensions.number import TensorField
 from tests.tensorfields.helpers import tensorize
 
 
@@ -22,7 +22,7 @@ def tensorfield(values, selected):
     selected = [selected] * len(values) if isinstance(selected, bool) else selected
     table = pa.table({"amount": values, "selected": selected})
     projection = coalesce(table, schema=schema, strata=Strata.train).fields["/amount"]
-    return tensorize(TensorField, projection, number, address="/amount", schema=schema, strata=Strata.train)
+    return tensorize(TensorField, projection, schema=schema)
 
 
 def buffers(values):

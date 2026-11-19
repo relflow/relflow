@@ -14,7 +14,7 @@ from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
-from relflow.tensorfields.base import TENSORFIELDS, TensorInput
+from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.vector import Decoder, Embedder, TensorField, loss, write
 from relflow.tensorfields.extensions.vector import output as output_type
 from relflow.tensorfields.shared.jitter import Jitter
@@ -54,10 +54,7 @@ def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["vector"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
     )
 
 

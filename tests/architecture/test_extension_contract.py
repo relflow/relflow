@@ -21,6 +21,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 
 
@@ -56,18 +58,10 @@ def build_extension(
         targets: TensorDict
 
         @classmethod
-        def new(
-            cls,
-            input: RaggedField,
-            target: RaggedField,
-            present: torch.Tensor,
-            trainable: torch.Tensor,
-            inferred: torch.Tensor,
-            address: Address,
-            schema: rf.Schema,
-            strata: Strata,
-            context: rf.Context,
-        ) -> TensorFieldBase:
+        def new(cls, sources, *, schema, context):
+            projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+            input, target = projection.split()
+            present, trainable, inferred = masks(projection)
             if contexts is not None:
                 contexts.append(context)
 
@@ -86,7 +80,7 @@ def build_extension(
                     batch_size=field.shape,
                 )
 
-            return cls(
+            result = cls(
                 content=encode(input),
                 state=torch.from_numpy(input.dense),
                 present=present,
@@ -101,6 +95,7 @@ def build_extension(
                 ),
                 batch_size=input.batch_size,
             )
+            return result, observation, binding
 
     @extension.register(rf.Component.Embedder)
     class Embedder(EmbedderBase):
@@ -194,6 +189,23 @@ def test_third_party_extension_receives_one_explicit_context_contract():
         assert model.interprocess_encoding_context == {Address("/value"): marker}
         assert len(contexts) == 2  # mocked graph input, then the real batch
         assert contexts[-1] == rf.Context(state=marker, salt=0)
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
+def test_tensorfield_rejects_an_invalid_binding(monkeypatch):
+    extension, Request = build_extension(decoder=False, loss=False)
+    try:
+        model = rf.Model(value=Request(), d_model=8, n_layers=1, n_heads=2)
+        new = extension.TensorField.new
+
+        def invalid(cls, sources, *, schema, context):
+            field, observation, _ = new(sources, schema=schema, context=context)
+            return field, observation, None
+
+        monkeypatch.setattr(extension.TensorField, "new", classmethod(invalid))
+        with pytest.raises(TypeError, match=r"tensorfield at '/value' must return zero or one binding"):
+            model.encode(pa.table({"value": ["abc"]}))
     finally:
         TENSORFIELDS.pop(extension.name, None)
 

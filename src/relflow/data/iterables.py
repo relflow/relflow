@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import Any, cast
 
 import numpy as np
@@ -14,11 +13,11 @@ from tensordict import TensorDict
 
 from relflow.data.arrow import Encoded, Geometry, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
-from relflow.data.ragged import Layout, RaggedField, coalesce
-from relflow.structs.enums import Component, Strata, Tokens
+from relflow.data.ragged import Layout, Sources, coalesce
+from relflow.structs.enums import Component, Strata
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
-from relflow.tensorfields.base import TENSORFIELDS, BatchContext, Context, TensorFieldBase
+from relflow.tensorfields.base import TENSORFIELDS, Context, TensorFieldBase
 
 
 def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
@@ -73,37 +72,23 @@ def encode(
     for address, request in schema.active_requests.items():
         extension = TENSORFIELDS[request.type]
         TensorField = extension.TensorField
-        projection = coalesced.fields.pop(address)
-        pristine = projection.pristine
-        nulls = pristine.state.to_numpy(zero_copy_only=False) == Tokens.null.value
-        if not request.nullable and nulls.any():
-            raise ValueError(
-                f"request '{address}' has nullable=False but input contains {int(nulls.sum())} null value(s)"
+        sources = coalesced.fields.pop(address)
+        field, observation, binding = TensorField.new(
+            sources,
+            schema=schema,
+            context=Context(state=interprocess_encoding_context.get(address), salt=salt),
+        )
+        if not isinstance(field, TensorField):
+            raise TypeError(
+                f"extension '{extension.name}' tensorfield at '{address}' must return {TensorField.__name__}, "
+                f"got {type(field).__name__}"
             )
-
-        values = pa.nulls(0) if projection.vacant else extension.prepare(pristine.values, address=address)
-        state = interprocess_encoding_context.get(address)
-        if isinstance(state, BatchContext):
-            if Component.bind not in extension.components:
-                raise RuntimeError(f"extension '{extension.name}' at '{address}' requires a bind component")
-            state, bindings[address] = state.batch(values)
-        observation = None
-        if strata == Strata.train:
-            canonical = replace(pristine, values=values)
-            observation = extension.observe(
-                field=canonical,
-                address=address,
-                schema=schema,
-                state=state,
-                learn=True,
-            )
-
-        learner = extension.components.get(Component.learn)
         if observation is not None and not isinstance(observation, TensorDict):
             raise TypeError(
                 f"extension '{extension.name}' observer at '{address}' must return a TensorDict or None, "
                 f"got {type(observation).__name__}"
             )
+        learner = extension.components.get(Component.learn)
         if observation is not None and learner is None:
             raise RuntimeError(
                 f"extension '{extension.name}' observer at '{address}' returned an observation without a learner"
@@ -114,24 +99,15 @@ def encode(
             raise RuntimeError(
                 f"extension '{extension.name}' observer at '{address}' returned an observation with learn=False"
             )
+        if not isinstance(binding, tuple) or len(binding) > 1:
+            raise TypeError(f"extension '{extension.name}' tensorfield at '{address}' must return zero or one binding")
+        if binding and Component.bind not in extension.components:
+            raise RuntimeError(f"extension '{extension.name}' at '{address}' requires a bind component")
+        out[address] = field
         if observation is not None:
             observations[address] = observation
-
-        input_field, target_field = projection.split(values)
-        out[address] = TensorField.new(
-            input=input_field,
-            target=target_field,
-            present=torch.from_numpy(projection.present).reshape(input_field.shape),
-            trainable=torch.from_numpy(projection.trainable).reshape(input_field.shape),
-            inferred=torch.from_numpy(projection.inferred).reshape(input_field.shape),
-            address=address,
-            schema=schema,
-            strata=strata,
-            context=Context(
-                state=state,
-                salt=salt,
-            ),
-        )
+        if binding:
+            bindings[address] = binding[0]
 
     inputs = TensorDict(source=cast(Any, out), batch_size=[batch.num_rows])
     inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows)
@@ -167,25 +143,16 @@ def mock(schema: Schema, batch_size: int) -> EncodedInput:
     for address, request in schema.active_requests.items():
         TensorField = TENSORFIELDS[request.type].TensorField
         shape = tuple(axes[cast(Node, request.parent).address].slots.shape)
-        state = pa.array(np.full(np.prod(shape), Tokens.padded.value, dtype=np.int8))
-        field = RaggedField(
-            values=pa.nulls(0),
-            state=state,
-            placement=pa.array([], type=pa.int64()),
+        sources = Sources(
+            inputs=(),
+            placement=np.array([], dtype=np.int64),
             shape=shape,
-        )
-        routing = torch.zeros(shape, dtype=torch.bool)
-        out[address] = TensorField.new(
-            input=field,
-            target=field,
-            present=routing,
-            trainable=routing,
-            inferred=routing,
+            decisions=(),
+            vacant=True,
             address=address,
-            schema=schema,
             strata=Strata.predict,
-            context=Context(),
         )
+        out[address], _, _ = TensorField.new(sources, schema=schema, context=Context())
 
     inputs = TensorDict(source=cast(Any, out), batch_size=[batch_size])
     inputs[root] = TensorDict(source=cast(Any, axes), batch_size=[batch_size])

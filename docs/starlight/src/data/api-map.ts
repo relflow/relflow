@@ -450,9 +450,6 @@ export const apiCatalog: ApiSection[] = [
         "name": "rf.BatchContext"
       },
       {
-        "name": "rf.Derive"
-      },
-      {
         "name": "rf.TensorInput"
       },
       {

@@ -11,6 +11,7 @@ from typing import Generic, TypeAlias, TypeGuard, TypeVar, cast
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+from lark import Lark, UnexpectedInput
 
 Atom: TypeAlias = str | int | bool
 ListType: TypeAlias = pa.ListType | pa.LargeListType | pa.FixedSizeListType
@@ -100,154 +101,214 @@ class Projection(Generic[Array]):
     present: Array
 
 
-class Parser:
-    """Strict parser for RelFlow's structural path grammar."""
+def member(name: str) -> str:
+    """Render a schema name as one native query member."""
 
-    def __init__(self, text: str) -> None:
-        self.text = text
-        self.position = 0
+    return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) else f"[{json.dumps(name)}]"
 
-    def error(self, reason: str, position: int | None = None) -> ValueError:
-        offset = self.position if position is None else position
-        segment = self.text[offset:] or "<end>"
-        return ValueError(f"invalid query {self.text!r} at {segment!r}: {reason}")
 
-    def identifier(self) -> Member:
-        start = self.position
-        if self.position >= len(self.text) or not self.text[self.position].isalpha():
-            raise self.error("expected an identifier beginning with a letter")
+GRAMMAR = r"""
+?start: absolute
+      | relative
+      | path
 
-        self.position += 1
-        while self.position < len(self.text):
-            character = self.text[self.position]
-            if not (character.isalpha() or character.isdigit() or character == "_"):
-                break
-            self.position += 1
+absolute: "/" branch* path
+relative: RELATIVE path
+branch: BRANCH "/"
 
-        name = self.text[start : self.position]
-        return Member(name=name, segment=name)
+path: first step*
+?first: NAME                       -> member
+      | "[" STRING "]"             -> string
 
-    def bracket(self) -> Literal | Traverse | Slice:
-        start = self.position
-        self.position += 1
-        if self.position >= len(self.text):
-            raise self.error("unterminated bracket", start)
+?step: "." NAME                    -> member
+     | "[" STRING "]"              -> string
+     | "[" BOOL "]"                -> boolean
+     | "[" INT "]"                 -> integer
+     | "[" "*" "]"                 -> traverse
+     | "[" [INT] ":" [INT] "]"    -> slice
 
-        if self.text.startswith("*]", self.position):
-            self.position += 2
-            return Traverse()
+RELATIVE: "../"+
 
-        if self.text[self.position] == '"':
+// Priority keeps slash-terminated branches ahead of overlapping field names.
+BRANCH.2: /[\w-]+(?=\/)/u
+
+// Validate Python identifier characters and JSON string escapes after lexing.
+NAME: /[^\W\d_][\w]*/u
+STRING: /"(?:[^"\\\x00-\x1f]|\\.)*"/
+INT: /-?(0|[1-9][0-9]*)/
+BOOL: "true" | "false"
+"""
+
+parser = Lark(GRAMMAR, parser="lalr", propagate_positions=True)
+
+
+def error(expression: str, offset: int, reason: str) -> ValueError:
+    segment = expression[offset:] or "<end>"
+    return ValueError(f"invalid query {expression!r} at {segment!r}: {reason}")
+
+
+def diagnostic(expression: str, failure: UnexpectedInput) -> ValueError:
+    """Translate common unsupported constructs, then use a generic syntax error."""
+
+    if not expression or not expression.strip():
+        return error(expression, 0, "query must be a non-empty string")
+    if expression != expression.strip():
+        return error(expression, 0, "whitespace is not allowed outside quoted field names")
+    if expression.startswith("[*]"):
+        return error(expression, 0, "queries are observation-relative and must not begin with '[*]'")
+    if expression.startswith("$"):
+        return error(expression, 0, "queries are observation-relative and must not begin with '$'")
+
+    offset = max(0, failure.pos_in_stream or 0)
+    remaining = expression[offset:]
+    expected = getattr(failure, "expected", None) or getattr(failure, "allowed", None) or set()
+    if remaining.startswith("$") and "NAME" in expected and "LSQB" in expected:
+        return error(expression, offset, "queries are observation-relative and must not begin with '$'")
+    if expression.startswith("/") and "/" in remaining.split("[", 1)[0]:
+        return ValueError(f"invalid absolute query {expression!r}: branch names must be schema names")
+    if "NAME" in expected and "LSQB" in expected:
+        if remaining and remaining[0].isspace():
+            return error(expression, offset, "whitespace is not allowed outside quoted field names")
+        return error(expression, offset, "expected an identifier beginning with a letter")
+    bracket = expression.rfind("[", 0, offset + 1)
+    if bracket >= 0 and "]" not in expression[bracket:offset]:
+        content = expression[bracket + 1 :]
+        if content.startswith("*]") and "STRING" in expected:
+            return error(expression, bracket, "queries are observation-relative and must not begin with '[*]'")
+        if content.startswith('"'):
             try:
-                value, consumed = json.JSONDecoder().raw_decode(self.text[self.position :])
-            except json.JSONDecodeError as error:
-                raise self.error("invalid JSON string literal", start) from error
-            if not isinstance(value, str):
-                raise self.error("quoted bracket values must be strings", start)
-
-            self.position += consumed
-            if self.position >= len(self.text) or self.text[self.position] != "]":
-                raise self.error("expected ']' after the string literal", start)
-            self.position += 1
-            return Literal(value=value, segment=self.text[start : self.position])
-
-        end = self.text.find("]", self.position)
+                _, consumed = json.JSONDecoder().raw_decode(content)
+            except json.JSONDecodeError:
+                return error(expression, bracket, "invalid JSON string literal")
+            if content[consumed : consumed + 1] != "]":
+                return error(expression, bracket, "expected ']' after the string literal")
+        end = content.find("]")
         if end < 0:
-            raise self.error("unterminated bracket", start)
-
-        content = self.text[self.position : end]
-        self.position = end + 1
-        segment = self.text[start : self.position]
-
+            return error(expression, bracket, "unterminated bracket")
+        content = content[:end]
         if not content:
-            raise self.error("flattening is not supported; use a preprocessor", start)
+            return error(expression, bracket, "flattening is not supported; use a preprocessor")
         if content.startswith("?"):
-            raise self.error("filters are not supported; use a preprocessor", start)
+            return error(expression, bracket, "filters are not supported; use a preprocessor")
         if ":" in content:
             bounds = content.split(":")
             if len(bounds) != 2:
-                raise self.error("slice steps are not supported", start)
+                return error(expression, bracket, "slice steps are not supported")
             if not all(not bound or re.fullmatch(r"-?(0|[1-9][0-9]*)", bound) for bound in bounds):
-                raise self.error("slice bounds must be integers", start)
-            return Slice(
-                start=int(bounds[0]) if bounds[0] else None,
-                stop=int(bounds[1]) if bounds[1] else None,
-                segment=segment,
-            )
-        if content == "true":
-            return Literal(value=True, segment=segment)
-        if content == "false":
-            return Literal(value=False, segment=segment)
-        if re.fullmatch(r"-?(0|[1-9][0-9]*)", content):
-            return Literal(value=int(content), segment=segment)
+                return error(expression, bracket, "slice bounds must be integers")
+        if "STRING" in expected and (
+            content in {"true", "false"} or re.fullmatch(r"-?(0|[1-9][0-9]*)", content) or ":" in content
+        ):
+            return error(expression, bracket, "a query must begin with a field name")
         if content.startswith("'"):
-            raise self.error("string literals must use JSON double quotes", start)
+            return error(expression, bracket, "string literals must use JSON double quotes")
         if "," in content:
-            raise self.error("multiselects are not supported; use a preprocessor", start)
-        raise self.error("unsupported bracket expression", start)
-
-    def parse(self) -> Query:
-        if not self.text or not self.text.strip():
-            raise self.error("query must be a non-empty string", 0)
-        if self.text != self.text.strip():
-            raise self.error("whitespace is not allowed outside quoted field names", 0)
-        if self.text.startswith("[*]"):
-            raise self.error("queries are observation-relative and must not begin with '[*]'", 0)
-        if self.text.startswith("$"):
-            raise self.error("queries are observation-relative and must not begin with '$'", 0)
-
-        if self.text.startswith("["):
-            first = self.bracket()
-            if not isinstance(first, Literal) or not isinstance(first.value, str):
-                raise self.error("a query must begin with a field name", 0)
-            steps: list[Parsed] = [first]
-        else:
-            steps = [self.identifier()]
-
-        while self.position < len(self.text):
-            character = self.text[self.position]
-            if character == ".":
-                if self.text.startswith("..", self.position):
-                    raise self.error("recursive descent is not supported; use a preprocessor")
-                self.position += 1
-                if self.position < len(self.text) and self.text[self.position] == "*":
-                    raise self.error("object wildcards are not supported; name the field explicitly")
-                steps.append(self.identifier())
-                continue
-            if character == "[":
-                steps.append(self.bracket())
-                continue
-            if character == "|":
-                raise self.error("pipes are not supported; use a preprocessor")
-            if character == "(":
-                raise self.error("functions are not supported; use a preprocessor")
-            if character in "<>=!&":
-                raise self.error("expressions are not supported; use a preprocessor")
-            raise self.error("expected '.' or '['")
-
-        return Query(text=self.text, steps=tuple(steps))
+            return error(expression, bracket, "multiselects are not supported; use a preprocessor")
+        return error(expression, bracket, "unsupported bracket expression")
+    if remaining.startswith("..") or (remaining.startswith(".") and offset and expression[offset - 1] == "."):
+        return error(expression, max(0, offset - 1), "recursive descent is not supported; use a preprocessor")
+    if remaining.startswith("*") and offset and expression[offset - 1] == ".":
+        return error(expression, offset, "object wildcards are not supported; name the field explicitly")
+    if remaining.startswith("|"):
+        return error(expression, offset, "pipes are not supported; use a preprocessor")
+    if remaining.startswith("("):
+        return error(expression, offset, "functions are not supported; use a preprocessor")
+    if remaining and remaining[0] in "<>=!&":
+        return error(expression, offset, "expressions are not supported; use a preprocessor")
+    if "NAME" in expected:
+        return error(expression, offset, "expected an identifier beginning with a letter")
+    if "DOT" in expected or "LSQB" in expected:
+        return error(expression, offset, "expected '.' or '['")
+    return error(expression, offset, "expected a structural path member or bracket selector")
 
 
 @cache
+def scope(expression: str) -> tuple[int | tuple[str, ...], Query]:
+    """Parse a branch scope and its Arrow-neutral structural query together."""
+
+    if not isinstance(expression, str):
+        raise TypeError(f"query must be a string, got {type(expression).__name__}")
+    try:
+        tree = parser.parse(expression)
+    except UnexpectedInput as failure:
+        raise diagnostic(expression, failure) from failure
+
+    owner: int | tuple[str, ...]
+    if tree.data == "absolute":
+        owner = tuple(str(branch.children[0]) for branch in tree.children[:-1])
+        path = tree.children[-1]
+    elif tree.data == "relative":
+        owner = len(str(tree.children[0])) // 3
+        path = tree.children[-1]
+    else:
+        owner, path = 0, tree
+
+    steps: list[Parsed] = []
+    for node in path.children:
+        segment = expression[node.meta.start_pos : node.meta.end_pos]
+        match node.data:
+            case "member":
+                token = node.children[0]
+                name = str(token)
+                start = node.meta.end_pos - len(name)
+                if not name[0].isalpha():
+                    raise error(expression, start, "expected an identifier beginning with a letter")
+                for index, char in enumerate(name[1:], start=1):
+                    if not (char.isalpha() or char.isdigit() or char == "_"):
+                        raise error(expression, start + index, "expected '.' or '['")
+                steps.append(Member(name=name, segment=name))
+            case "string":
+                try:
+                    value = json.loads(str(node.children[0]))
+                except json.JSONDecodeError as failure:
+                    raise error(expression, node.meta.start_pos, "invalid JSON string literal") from failure
+                steps.append(Literal(value=value, segment=segment))
+            case "boolean":
+                steps.append(Literal(value=str(node.children[0]) == "true", segment=segment))
+            case "integer":
+                steps.append(Literal(value=int(str(node.children[0])), segment=segment))
+            case "slice":
+                lower, upper = node.children
+                steps.append(
+                    Slice(
+                        start=None if lower is None else int(str(lower)),
+                        stop=None if upper is None else int(str(upper)),
+                        segment=segment,
+                    )
+                )
+            case "traverse":
+                steps.append(Traverse())
+            case _:
+                raise AssertionError(node.data)
+    local = expression[path.meta.start_pos : path.meta.end_pos]
+    return owner, Query(text=local, steps=tuple(steps))
+
+
 def compile(expression: str) -> Query:
     """Parse one observation-relative structural query."""
 
-    if not isinstance(expression, str):
-        raise TypeError(f"query must be a string, got {type(expression).__name__}")
-    return Parser(expression).parse()
+    if isinstance(expression, str) and (expression.startswith("/") or expression.startswith("../")):
+        raise error(expression, 0, "expected an observation-relative structural path")
+    _, query = scope(expression)
+    return query
 
 
-@cache
-def scope(expression: str) -> tuple[int, str]:
-    """Separate explicit leaf ancestor steps from the ordinary structural path."""
-    if not isinstance(expression, str):
-        raise TypeError(f"query must be a string, got {type(expression).__name__}")
-    depth = 0
-    while expression.startswith("../"):
-        depth += 1
-        expression = expression[3:]
-    compile(expression)
-    return depth, expression
+def origin(expression: str, *, address: str) -> tuple[int, Query]:
+    """Resolve relative and absolute branch scopes against a bound leaf."""
+    owner, path = scope(expression)
+    branches = tuple(address.strip("/").split("/")[:-1])
+    if isinstance(owner, tuple):
+        if branches[: len(owner)] != owner:
+            raise ValueError(
+                f"absolute source query {expression!r} at '{address}' must name the current branch or an ancestor"
+            )
+        return len(branches) - len(owner), path
+    if owner > len(branches):
+        raise ValueError(
+            f"source query {expression!r} at '{address}' ascends {owner} owner branches, "
+            f"but only {len(branches)} ancestor branches exist; keep the source within the model root"
+        )
+    return owner, path
 
 
 def listed(datatype: pa.DataType) -> TypeGuard[ListType]:
@@ -546,6 +607,26 @@ def select(
         values=wrap(values, selected.values, mask),
         present=wrap(values, selected.present, mask),
     )
+
+
+def gather(
+    source: pa.Array, expression: Query | str, indices: pa.Array, *, address: str | None = None
+) -> Projection[pa.Array]:
+    """Select query inputs at particular rows without gathering unrelated struct members.
+
+    Follow struct members before gathering, then execute remaining list or map
+    operations on the selected rows. Null indices and null enclosing structs
+    remain structurally absent.
+    """
+    plan = bind(expression, source.type, address=address)
+    steps = plan.steps
+    present = pc.is_valid(indices)
+    while steps and isinstance(steps[0], Member):
+        if source.null_count:
+            present = pc.and_kleene(present, pc.take(pc.is_valid(source), indices))
+        source = pc.struct_field(source, steps[0].name)
+        steps = steps[1:]
+    return select(pc.take(source, indices), present, steps, plan, address)
 
 
 def query(

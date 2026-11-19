@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from dataclasses import InitVar, dataclass
 from functools import partial
 from multiprocessing import Manager
-from typing import TYPE_CHECKING, Annotated, Any, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, Unpack, cast
 
 import numpy as np
 import pyarrow as pa
@@ -30,6 +30,8 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
@@ -40,6 +42,7 @@ from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
     from relflow.data.datasets.base import InterprocessEncodingContext
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.tensorfields.shared.resize import Resize
 
@@ -253,16 +256,15 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
         request = cast(Request, schema.requests[address])
         digest = context.state if isinstance(context.state, Digest) else Digest(request.compression)
 
@@ -278,7 +280,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                 },
                 batch_size=input.shape,
             )
-        return cls(
+        result = cls(
             content=percentiles(digest, content, state),
             raw=content,
             state=state,
@@ -288,6 +290,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             targets=targets,
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @quantile.register(Component.bind)

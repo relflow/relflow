@@ -10,12 +10,13 @@ import torch
 from tensordict import TensorDict
 
 import relflow as rf
-from relflow.data.ragged import RaggedField, coalesce
+from relflow.data.ragged import RaggedField, Sources, coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TENSORFIELDS, Context
+from relflow.tensorfields.extensions import text as text_extension
 from relflow.tensorfields.extensions.text import (
     ATTENTION_MASK,
     DEFAULT_TEXT_MODEL,
@@ -86,10 +87,7 @@ def tensorfield(*, values: list, schema: Schema, strata: Strata) -> TensorField:
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["text"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
     )
 
 
@@ -401,17 +399,21 @@ def test_text_tokenizes_unique_strings_and_restores_sparse_coordinates(
     )
     schema = build_schema(max_length=max_length, tokenizer_batch_size=2, mask=objective)
     present = torch.from_numpy(states != Tokens.padded).reshape(target.shape)
-    field = TensorField.new(
-        input=input,
-        target=target,
-        present=present,
-        trainable=present.clone() if objective else torch.zeros_like(present),
-        inferred=torch.zeros_like(present),
-        address=ADDRESS,
-        schema=schema,
+    trainable = present.clone() if objective else torch.zeros_like(present)
+    inferred = torch.zeros_like(present)
+    projection = SimpleNamespace(split=lambda: (input, target))
+    monkeypatch.setattr(text_extension, "resolve", lambda *args, **kwargs: (projection, kwargs["context"], None, ()))
+    monkeypatch.setattr(text_extension, "masks", lambda _: (present, trainable, inferred))
+    sources = Sources(
+        inputs=(),
+        placement=positions,
+        shape=target.shape,
+        decisions=(),
+        vacant=False,
+        address=rf.Address(ADDRESS),
         strata=Strata.train,
-        context=Context(),
     )
+    field, _, _ = TensorField.new(sources, schema=schema, context=Context())
 
     reference = FakeTokenizer()
     reference.padding_side = padding_side

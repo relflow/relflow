@@ -270,7 +270,7 @@ class Leaf(Node):
         def type(self) -> str: ...
     else:
         type: str
-    query: str | tuple[str, ...] | None = None
+    query: tuple[str, ...] | None = None
     nullable: bool = True
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
@@ -288,6 +288,11 @@ class Leaf(Node):
     @classmethod
     def check_mask(cls, value: Any) -> tuple[Mask, ...]:
         return Mask.normalize(value)
+
+    @pydantic.field_validator("query", mode="before")
+    @classmethod
+    def check_queries(cls, value: Any) -> Any:
+        return (value,) if isinstance(value, str) else value
 
     @property
     def embedded(self) -> bool:
@@ -312,31 +317,39 @@ class Leaf(Node):
 
         from relflow.data.query import scope
 
-        for expression in (self.query,) if isinstance(self.query, str) else self.query:
+        for expression in self.query:
             scope(expression)
         return self
 
+    def queries(self) -> tuple[str, ...]:
+        """Return explicit paths, or the same-named path after the leaf is bound."""
+        from relflow.data.query import member
+
+        return (member(cast(str, self.name)),) if self.query is None else self.query
+
     def post_bind_validate(self) -> None:
-        """Check scoped sources and derived-input capability against the live registry."""
-        from relflow.data.query import scope
-        from relflow.structs.enums import Component
+        """Check scoped queries and source counts against the live registry."""
+        from relflow.data.query import origin
         from relflow.tensorfields.base import TENSORFIELDS
 
-        if isinstance(self.query, tuple) and Component.derive not in TENSORFIELDS[self.type].components:
-            raise ValueError(
-                f"field '{self.address}' has multiple source queries but extension '{self.type}' has no "
-                "derive component; register Component.derive or use one query"
+        count = len(self.queries())
+        expected = TENSORFIELDS[self.type].queries
+        if isinstance(expected, int):
+            allowed = count == expected
+        elif isinstance(expected, tuple):
+            allowed = count in expected
+        else:
+            start = 0 if expected.start is None else expected.start
+            step = 1 if expected.step is None else expected.step
+            allowed = (
+                count >= start and (expected.stop is None or count < expected.stop) and (count - start) % step == 0
             )
-        if self.query is None:
-            return
-        ancestors = sum(node.type == "branch" for node in self.path) - 1
-        for expression in (self.query,) if isinstance(self.query, str) else self.query:
-            depth, _ = scope(expression)
-            if depth > ancestors:
-                raise ValueError(
-                    f"source query {expression!r} at '{self.address}' ascends {depth} owner branches, "
-                    f"but only {ancestors} ancestor branches exist; keep the source within the model root"
-                )
+        if not allowed:
+            raise ValueError(
+                f"field '{self.address}' with extension '{self.type}' expects queries {expected!r}, got {count}"
+            )
+        for expression in self.queries():
+            origin(expression, address=str(self.address))
 
     @functools.cached_property
     def shape(self) -> tuple[int | None, ...]:

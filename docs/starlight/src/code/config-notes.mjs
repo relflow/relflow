@@ -118,6 +118,11 @@ const pythonRules = [
     note: reference.options.granularity,
   },
   {
+    pattern: /\bdelta\s*=\s*True\b/g,
+    accept: (_match, context, offset) => context.callAt(offset) === 'rf.Duration',
+    note: reference.options.delta,
+  },
+  {
     pattern: /\bquery(?=\s*=)/g,
     note: reference.options.query,
   },

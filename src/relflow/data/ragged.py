@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-import re
 from dataclasses import dataclass
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
@@ -15,22 +14,16 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
-from relflow.data.query import Literal, Member, MissingFieldError, compile, listed, parts, query, scope
+from relflow.data.query import Literal, Member, MissingFieldError, Query, compile, listed, member, origin, parts, query
 from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
-from relflow.structs.enums import Component, Overflow, Strata, Tokens
+from relflow.structs.enums import Overflow, Strata, Tokens
 from relflow.structs.tree import Address, Leaf
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
     from relflow.structs.tree import Mask
-
-
-def member(name: str) -> str:
-    """Render a schema name as one native query member."""
-
-    return name if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) else f"[{json.dumps(name)}]"
 
 
 @cache
@@ -126,6 +119,18 @@ def valid(values: pa.Array | pa.ChunkedArray) -> np.ndarray:
 
 
 @dataclass(frozen=True, slots=True)
+class Collection:
+    """Candidate records and the retained window of each parent in one Arrow chunk."""
+
+    records: pa.Array
+    first: np.ndarray
+    starts: np.ndarray
+    counts: np.ndarray
+    base: int
+    valid: np.ndarray | None
+
+
+@dataclass(frozen=True, slots=True)
 class Layout:
     """Structurally present records and their positions in dense model geometry."""
 
@@ -135,6 +140,7 @@ class Layout:
     lengths: np.ndarray
     present: np.ndarray
     valid: np.ndarray
+    collections: tuple[Collection, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,22 +260,9 @@ class Projection:
             if values.shape != (size,):
                 raise ValueError(f"Projection.{name} shape must be ({size},), got {values.shape}")
 
-    def split(
-        self,
-        values: pa.Array | pa.ChunkedArray,
-    ) -> tuple[RaggedField, RaggedField]:
-        """Split one prepared pristine value array into input and target fields."""
-
-        if not isinstance(values, (pa.Array, pa.ChunkedArray)):
-            raise TypeError(f"prepared projection values must be an Arrow array, got {type(values).__name__}")
-        if not self.vacant and len(values) != len(self.pristine.values):
-            raise ValueError(
-                "prepared projection values must preserve pristine length "
-                f"{len(self.pristine.values)}, got {len(values)}"
-            )
-        if not valid(values).all():
-            raise ValueError("prepared projection values cannot contain nulls")
-
+    def split(self) -> tuple[RaggedField, RaggedField]:
+        """Split pristine values into input and target fields."""
+        values = self.pristine.values
         state = self.pristine.state.to_numpy(zero_copy_only=False).astype(np.int8, copy=True)
         placement = self.pristine.placement.to_numpy(zero_copy_only=False)
 
@@ -304,61 +297,95 @@ class Projection:
 
 
 @dataclass(frozen=True, slots=True)
+class Sources:
+    """Arrow query inputs and owner coordinates for one tensorfield.
+
+    Inputs follow the request's query order. Each provides Arrow values and
+    structural presence for the retained owner records. ``select`` applies
+    the field's mask decisions to one value and presence per owner record.
+    """
+
+    inputs: tuple[SourceProjection[pa.Array | pa.ChunkedArray], ...]
+    placement: np.ndarray
+    shape: tuple[int, ...]
+    decisions: tuple[Decision, ...]
+    strata: Strata
+    address: Address
+    vacant: bool = False
+    collections: tuple[Collection, ...] = ()
+
+    @property
+    def rows(self) -> int:
+        """Number of structurally retained owner records."""
+        return len(self.placement)
+
+    def single(self) -> Projection:
+        """Route a single source, or an absent prediction target."""
+        if self.vacant:
+            return route(self.placement, vacancy(self.shape), self.decisions, strata=self.strata, vacant=True)
+        if len(self.inputs) != 1:
+            raise ValueError(f"field '{self.address}' expects one source, got {len(self.inputs)}")
+        source = self.inputs[0]
+        if not isinstance(source, SourceProjection):
+            raise TypeError(f"field '{self.address}' expects a query projection, got {type(source).__name__}")
+        return self.select(source.values, source.present)
+
+    def select(self, values: pa.Array | pa.ChunkedArray, present: pa.Array | pa.ChunkedArray) -> Projection:
+        """Apply the field's geometry and masks to selected Arrow values."""
+        value = selected(values, present, rows=self.rows, address=self.address)
+        field = pristine(self.placement, self.shape, value)
+        return route(self.placement, field, self.decisions, strata=self.strata, vacant=False)
+
+
+@dataclass(frozen=True, slots=True)
 class Coalesced:
     """Policy-resolved fields and their shared, pristine branch layouts."""
 
-    fields: dict[Address, Projection]
+    fields: dict[Address, Sources]
     layouts: dict[Address, Layout]
 
 
-def head(expression: str) -> str:
+def head(expression: Query) -> str:
     """Return the record member a query reads first."""
 
-    first = compile(expression).steps[0]
+    first = expression.steps[0]
     if isinstance(first, Member):
         return first.name
     if isinstance(first, Literal) and isinstance(first.value, str):
         return first.value
-    raise ValueError(f"query {expression!r} must begin with a field name")
+    raise ValueError(f"query {expression.text!r} must begin with a field name")
 
 
 def referenced(branch: Branch) -> set[str]:
     """Return the record members that a branch, its masks, and its children read."""
 
-    names = {head(branch.query)} if branch.query is not None else set()
+    names = {head(compile(branch.query))} if branch.query is not None else set()
     for mask in branch.mask:
         if mask.query is not None:
-            names.add(head(mask.query))
+            names.add(head(compile(mask.query)))
     if branch.query is not None:
         return names
     for child in branch.fields:
         if getattr(child, "type", None) == "branch":
             branch_child = cast("Branch", child)
-            names.add(head(branch_child.query) if branch_child.query is not None else cast(str, child.name))
+            names.add(head(compile(branch_child.query)) if branch_child.query is not None else cast(str, child.name))
         else:
-            for expression in queries(cast(Leaf, child)):
-                depth, path = scope(expression)
+            for expression in cast(Leaf, child).queries():
+                depth, path = origin(expression, address=str(child.address))
                 if not depth:
                     names.add(head(path))
         for mask in child.mask:
             if mask.query is not None and getattr(child, "type", None) != "branch":
-                names.add(head(mask.query))
+                names.add(head(compile(mask.query)))
     for child in branch.descendants:
         if not isinstance(child, Leaf):
             continue
         owners = [node for node in child.path if node.type == "branch"]
-        for expression in queries(child):
-            depth, path = scope(expression)
+        for expression in child.queries():
+            depth, path = origin(expression, address=str(child.address))
             if depth and depth < len(owners) and owners[-1 - depth] is branch:
                 names.add(head(path))
     return names
-
-
-def queries(request: Leaf) -> tuple[str, ...]:
-    """Normalize one leaf's declared source paths without changing explicit empty inputs."""
-    if request.query is None:
-        return (member(cast(str, request.name)),)
-    return (request.query,) if isinstance(request.query, str) else request.query
 
 
 def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout:
@@ -391,9 +418,10 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
 
     present = boolean(selected.present)
     retained = present & valid(selected.values)
+    origin = np.flatnonzero(retained).astype(np.int64, copy=False)
     return Layout(
         records=retain(selected.values, retained),
-        placement=np.flatnonzero(retained).astype(np.int64, copy=False),
+        placement=origin,
         shape=(rows, 1),
         lengths=np.ones(rows, dtype=np.int64),
         present=np.ones(rows, dtype=bool),
@@ -421,8 +449,9 @@ def descend(
     if selected is None or pa.types.is_null(selected.values.type):
         if selected is not None:
             collection_present[layout.placement] = boolean(selected.present)
+        empty = pa.array([], type=pa.struct([]))
         return Layout(
-            records=pa.array([], type=pa.struct([])),
+            records=empty,
             placement=np.empty(0, dtype=np.int64),
             shape=(*layout.shape, 0),
             lengths=retained_lengths.reshape(layout.shape),
@@ -437,7 +466,7 @@ def descend(
     present = boolean(selected.present)
     source = compact(selected.values)
     chunks = source.chunks if isinstance(source, pa.ChunkedArray) else [source]
-    retained: list[tuple[np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
+    retained: list[tuple[np.ndarray, np.ndarray, pa.Array, np.ndarray, np.ndarray]] = []
     randomized = branch.overflow == Overflow.random and strata == Strata.train
     ranges = np.zeros(parent_size, dtype=np.int64) if randomized else None
     tail = branch.overflow == Overflow.tail or (branch.overflow == Overflow.random and not randomized)
@@ -465,7 +494,7 @@ def descend(
         starts = list_offsets[:-1] + (lengths - counts if tail else 0)
         if ranges is not None:
             ranges[parent_placement] = np.where(available, lengths - counts, 0)
-        retained.append((starts, children, counts, parent_placement))
+        retained.append((list_offsets, starts, children, counts, parent_placement))
 
     shifts = None
     if ranges is not None:
@@ -478,7 +507,8 @@ def descend(
     shape = (*layout.shape, extent)
     record_chunks: list[pa.Array] = []
     placement_chunks: list[np.ndarray] = []
-    for starts, children, counts, parent_placement in retained:
+    collections: list[Collection] = []
+    for list_offsets, starts, children, counts, parent_placement in retained:
         if shifts is not None:
             starts = starts + shifts[parent_placement]
         total = int(counts.sum())
@@ -497,6 +527,19 @@ def descend(
             records = pc.take(children, pa.array(indices, type=pa.int64()))
         valid_record = valid(records)
         placement = parent_placement[parents] * extent + slots
+        if valid_record.any():
+            start = int(list_offsets[0])
+            stop = int(list_offsets[-1])
+            collections.append(
+                Collection(
+                    records=children.slice(start, stop - start),
+                    first=list_offsets[:-1],
+                    starts=starts,
+                    counts=counts,
+                    base=start,
+                    valid=None if valid_record.all() else valid_record,
+                )
+            )
         if valid_record.all():
             record_chunks.append(records)
             placement_chunks.append(placement)
@@ -507,6 +550,7 @@ def descend(
     records = (
         record_chunks[0] if len(record_chunks) == 1 else pa.chunked_array(record_chunks, type=source.type.value_type)
     )
+
     return Layout(
         records=records,
         placement=np.concatenate(placement_chunks) if placement_chunks else np.empty(0, dtype=np.int64),
@@ -514,17 +558,18 @@ def descend(
         lengths=retained_lengths.reshape(layout.shape),
         present=collection_present.reshape(layout.shape),
         valid=collection_valid.reshape(layout.shape),
+        collections=tuple(collections),
     )
 
 
-def vacancy(layout: Layout) -> RaggedField:
+def vacancy(shape: tuple[int, ...]) -> RaggedField:
     """Represent a source-less leaf without inventing an extension datatype."""
 
     return RaggedField(
         values=pa.nulls(0),
-        state=pa.array(np.full(math.prod(layout.shape), Tokens.padded.value, dtype=np.int8)),
+        state=pa.array(np.full(math.prod(shape), Tokens.padded.value, dtype=np.int8)),
         placement=pa.array([], type=pa.int64()),
-        shape=layout.shape,
+        shape=shape,
     )
 
 
@@ -536,7 +581,7 @@ def source(
     address: Address,
 ) -> SourceProjection[pa.Array | pa.ChunkedArray]:
     """Resolve a local source or gather an ancestor source by retained coordinates."""
-    depth, path = scope(expression)
+    depth, path = origin(expression, address=str(address))
     if not depth:
         return query(layout.records, path, address=str(address))
     if depth > len(ancestors):
@@ -555,63 +600,47 @@ def source(
     return SourceProjection(values=pc.take(selected.values, gather), present=pc.take(selected.present, gather))
 
 
-def derived(selected: object, *, rows: int, address: Address) -> SourceProjection[pa.Array | pa.ChunkedArray]:
-    """Validate the one-value-per-owner invariant at the extension derivation boundary."""
-    if not isinstance(selected, SourceProjection):
-        raise TypeError(
-            f"derived field '{address}' must return an Arrow query Projection, got {type(selected).__name__}"
-        )
-    for name, values in (("values", selected.values), ("presence", selected.present)):
-        if not isinstance(values, (pa.Array, pa.ChunkedArray)):
-            raise TypeError(f"derived field '{address}' {name} must be an Arrow array, got {type(values).__name__}")
-        if len(values) != rows:
-            raise ValueError(f"derived field '{address}' {name} must retain {rows} owner rows, got {len(values)}")
-    if selected.present.type != pa.bool_() or selected.present.null_count:
+def selected(
+    values: object, present: object, *, rows: int, address: Address
+) -> SourceProjection[pa.Array | pa.ChunkedArray]:
+    """Validate one selected value and presence per owner record."""
+    for name, array in (("values", values), ("presence", present)):
+        if not isinstance(array, (pa.Array, pa.ChunkedArray)):
+            raise TypeError(f"field '{address}' {name} must be an Arrow array, got {type(array).__name__}")
+        if len(array) != rows:
+            raise ValueError(f"field '{address}' {name} must retain {rows} owner rows, got {len(array)}")
+    values = cast(pa.Array | pa.ChunkedArray, values)
+    present = cast(pa.Array | pa.ChunkedArray, present)
+    datatype = present.type
+    while listed(datatype):
+        datatype = datatype.value_type
+    if datatype != pa.bool_() or (present.type == pa.bool_() and present.null_count):
         raise ValueError(
-            f"derived field '{address}' presence must contain one non-null Boolean per owner row, "
-            f"got {selected.present.type} with {selected.present.null_count} nulls"
+            f"field '{address}' presence must contain one non-null Boolean per owner row, "
+            f"got {present.type} with {present.null_count} nulls"
         )
-    return selected
+    return SourceProjection(values=values, present=present)
 
 
-def pristine(layout: Layout, request: Leaf, *, ancestors: tuple[Layout, ...]) -> RaggedField:
+def pristine(
+    placement: np.ndarray, shape: tuple[int, ...], selected: SourceProjection[pa.Array | pa.ChunkedArray]
+) -> RaggedField:
     """Project one untouched leaf while preserving extension-owned Arrow values."""
-
-    from relflow.tensorfields.base import TENSORFIELDS
-
-    extension = TENSORFIELDS[request.type]
-    expressions = queries(request)
-    if Component.derive in extension.components:
-        inputs = tuple(
-            source(layout, expression, ancestors=ancestors, address=request.address) for expression in expressions
-        )
-        selected = derived(
-            extension.derive(inputs, request=request, address=request.address, rows=len(layout.records)),
-            rows=len(layout.records),
-            address=request.address,
-        )
-    else:
-        if isinstance(request.query, tuple):
-            raise ValueError(
-                f"field '{request.address}' has multiple source queries but extension '{request.type}' has no "
-                "derive component; register Component.derive or use one query"
-            )
-        selected = source(layout, expressions[0], ancestors=ancestors, address=request.address)
     present = (
         boolean(selected.present) if selected.present.type == pa.bool_() else boolean(pc.is_valid(selected.present))
     )
     available = valid(selected.values)
     valued = present & available
 
-    state = np.full(math.prod(layout.shape), Tokens.padded.value, dtype=np.int8)
-    state[layout.placement[present]] = Tokens.null.value
-    state[layout.placement[valued]] = Tokens.valued.value
-    placement = layout.placement[valued]
+    state = np.full(math.prod(shape), Tokens.padded.value, dtype=np.int8)
+    state[placement[present]] = Tokens.null.value
+    state[placement[valued]] = Tokens.valued.value
+    placement = placement[valued]
     return RaggedField(
         values=retain(selected.values, valued),
         state=pa.array(state, type=pa.int8()),
         placement=pa.array(placement, type=pa.int64()),
-        shape=layout.shape,
+        shape=shape,
     )
 
 
@@ -767,8 +796,8 @@ def project(
     *,
     strata: Strata,
     ancestors: tuple[Layout, ...],
-) -> Projection:
-    """Build pristine values and resolved input/objective routing for one leaf."""
+) -> Sources:
+    """Resolve a leaf's source queries and owner geometry."""
 
     allow_vacancy = strata == Strata.predict and any(
         decision.mask.reconstruct and decision.mask.query is None and decision.mask.rate is None
@@ -781,22 +810,37 @@ def project(
         and pa.types.is_struct(layout.records.type)
         and not layout.records.type.get_all_field_indices(request.name)
     )
-    if source_less:
-        field = vacancy(layout)
-    else:
+    inputs: tuple[SourceProjection[pa.Array | pa.ChunkedArray], ...] = ()
+    if not source_less:
         try:
-            field = pristine(layout, request, ancestors=ancestors)
+            inputs = tuple(
+                source(layout, expression, ancestors=ancestors, address=request.address)
+                for expression in request.queries()
+            )
         except MissingFieldError:
-            from relflow.tensorfields.base import TENSORFIELDS
-
-            if not allow_vacancy or Component.derive not in TENSORFIELDS[request.type].components:
+            if not allow_vacancy:
                 raise
-            field = vacancy(layout)
             source_less = True
+    return Sources(
+        inputs=inputs,
+        placement=layout.placement,
+        shape=layout.shape,
+        decisions=decisions,
+        strata=strata,
+        address=request.address,
+        vacant=source_less,
+        collections=layout.collections,
+    )
+
+
+def route(
+    placement: np.ndarray, field: RaggedField, decisions: tuple[Decision, ...], *, strata: Strata, vacant: bool
+) -> Projection:
+    """Apply mask decisions to a field's pristine values."""
     state = field.state.to_numpy(zero_copy_only=False)
     observed = state != Tokens.padded.value
     owner = np.zeros(len(state), dtype=bool)
-    owner[layout.placement] = True
+    owner[placement] = True
     requested = np.zeros(len(state), dtype=bool)
     skipped = np.zeros(len(state), dtype=bool)
     masked = np.zeros(len(state), dtype=bool)
@@ -826,7 +870,7 @@ def project(
         present=present,
         trainable=trainable,
         inferred=inferred,
-        vacant=source_less,
+        vacant=vacant,
     )
 
 
@@ -861,7 +905,7 @@ def coalesce(
             if getattr(node, "type", None) == "branch":
                 descendants.setdefault(node.address, []).append(address)
 
-    fields: dict[Address, Projection] = {}
+    fields: dict[Address, Sources] = {}
     layouts: dict[Address, Layout] = {}
 
     def visit(

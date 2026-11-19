@@ -13,7 +13,6 @@ from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
 from relflow.structs.tree import Mask
-from relflow.tensorfields.base import TENSORFIELDS
 from relflow.tensorfields.extensions.boolean import (
     BooleanCounter,
     Decoder,
@@ -54,10 +53,7 @@ def tensorfield(groups: list[list[list[Any]]], *, schema: Schema, strata: Strata
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["boolean"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
     )
 
 

@@ -35,14 +35,14 @@ def test_branch_query_skip_is_atomic_across_descendants():
     )
 
     projections = coalesce(source, schema, Strata.train).fields
-    amount = projections["/items/amount"]
-    code = projections["/items/code"]
+    amount = projections["/items/amount"].single()
+    code = projections["/items/code"].single()
 
     assert amount.present.tolist() == code.present.tolist() == [True, False]
     assert amount.trainable.tolist() == code.trainable.tolist() == [False, True]
     assert amount.visible.tolist() == code.visible.tolist() == [True, False]
 
-    inputs, targets = amount.split(amount.pristine.values)
+    inputs, targets = amount.split()
     assert inputs.values.to_pylist() == [1.0]
     assert inputs.dense.tolist() == [[[Tokens.valued.value, Tokens.padded.value]]]
     assert targets.values.to_pylist() == [2.0]
@@ -55,9 +55,9 @@ def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
     )
     source = arrow_table([{"value": float(index)} for index in range(512)])
 
-    whole = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"]
-    repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"]
-    next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4).fields["/value"]
+    whole = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"].single()
+    repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"].single()
+    next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4).fields["/value"].single()
 
     assert np.array_equal(whole.present, repeated.present)
     assert not np.array_equal(whole.present, next_epoch.present)
@@ -72,7 +72,7 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
     )
     source = arrow_table([{"value": float(index), "eligible": index % 2 == 0} for index in range(256)])
 
-    projection = coalesce(source, schema, Strata.train, seed=5, epoch=0).fields["/value"]
+    projection = coalesce(source, schema, Strata.train, seed=5, epoch=0).fields["/value"].single()
     skipped = ~projection.present
 
     assert skipped.any()
@@ -202,8 +202,8 @@ def test_source_less_prediction_uses_vacancy_and_fixed_routing():
     schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, label=rf.Category(mask=True))
     source = arrow_table([{"unused": 1}, {"unused": 2}])
 
-    projection = coalesce(source, schema, Strata.predict).fields["/label"]
-    inputs, targets = projection.split(projection.pristine.values)
+    projection = coalesce(source, schema, Strata.predict).fields["/label"].single()
+    inputs, targets = projection.split()
 
     assert projection.vacant is True
     assert pa.types.is_null(projection.pristine.values.type)
@@ -229,8 +229,8 @@ def test_source_less_learned_mask_reconstruction_remains_present():
     )
     source = arrow_table([{"unused": 1}, {"unused": 2}])
 
-    projection = coalesce(source, schema, Strata.predict).fields["/label"]
-    inputs, _ = projection.split(projection.pristine.values)
+    projection = coalesce(source, schema, Strata.predict).fields["/label"].single()
+    inputs, _ = projection.split()
 
     assert projection.vacant is True
     assert projection.present.tolist() == [True, True]

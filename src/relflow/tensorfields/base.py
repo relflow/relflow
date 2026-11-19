@@ -9,8 +9,9 @@ import shlex
 import sys
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass
+from collections import ChainMap
+from collections.abc import Iterator, Mapping, MutableMapping, Sequence
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from functools import partial
 from types import MappingProxyType, UnionType
@@ -20,6 +21,7 @@ from typing import (
     Callable,
     ClassVar,
     Generic,
+    Literal,
     Protocol,
     Self,
     TypeAlias,
@@ -33,6 +35,7 @@ from typing import (
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
+import pydantic
 import torch
 from lightning.pytorch import Callback
 from tensordict import TensorClass, TensorDict, TensorDictBase
@@ -41,14 +44,13 @@ from typing_extensions import TypeVar as DefaultTypeVar
 from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool
 from relflow.architecture.rotary import coordinates, flatten, signal
 from relflow.data.arrow import Geometry, variants
-from relflow.data.query import Projection as SourceProjection
-from relflow.structs.enums import Component, Strata, TensorKey
+from relflow.structs.enums import Component, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, Leaf
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
-    from relflow.data.ragged import RaggedField
+    from relflow.data.ragged import Projection, RaggedField, Sources
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
     from relflow.tensorfields.shared.resize import Resize
@@ -71,19 +73,6 @@ class Observe(Protocol):
     def __call__(
         self, field: RaggedField, *, address: Address, schema: Schema, state: object | None, learn: bool
     ) -> TensorDict | None: ...
-
-
-class Derive(Protocol):
-    """Compute one Arrow value per retained owner record before observation or masking."""
-
-    def __call__(
-        self,
-        inputs: tuple[SourceProjection[pa.Array | pa.ChunkedArray], ...],
-        *,
-        request: RequestBase,
-        address: Address,
-        rows: int,
-    ) -> SourceProjection[pa.Array | pa.ChunkedArray]: ...
 
 
 class Learn(Protocol):
@@ -197,10 +186,51 @@ def default_learn(
 
 @dataclass(frozen=True, slots=True)
 class Context:
-    """Per-field resources supplied uniformly during tensorization."""
+    """Per-field resources supplied during tensorization."""
 
     state: object | None = None
     salt: int = 0
+
+
+def resolve(
+    sources: Sources, *, schema: Schema, context: Context
+) -> tuple[Projection, Context, TensorDict | None, tuple[object, ...]]:
+    """Resolve and observe one source using its field resources."""
+    projection = sources.single()
+    address = sources.address
+    request = schema.requests[address]
+    extension = TENSORFIELDS[request.type]
+    pristine = projection.pristine
+    nulls = pristine.state.to_numpy(zero_copy_only=False) == Tokens.null.value
+    if not request.nullable and nulls.any():
+        raise ValueError(f"request '{address}' has nullable=False but input contains {int(nulls.sum())} null value(s)")
+    values = pristine.values if projection.vacant else extension.prepare(pristine.values, address=address)
+    canonical = pristine if values is pristine.values else replace(pristine, values=values)
+    binding: tuple[object, ...] = ()
+    if isinstance(context.state, BatchContext):
+        if Component.bind not in extension.components:
+            raise RuntimeError(f"extension '{extension.name}' at '{address}' requires a bind component")
+        state, bound = context.state.batch(values)
+        context = replace(context, state=state)
+        binding = (bound,)
+    observation = None
+    if sources.strata == Strata.train:
+        observation = extension.observe(
+            field=canonical, address=address, schema=schema, state=context.state, learn=True
+        )
+    if canonical is not pristine:
+        projection = replace(projection, pristine=canonical)
+    return projection, context, observation, binding
+
+
+def masks(projection: Projection) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Convert one projection's routing masks to the tensorfield geometry."""
+    shape = projection.pristine.shape
+    return (
+        torch.from_numpy(projection.present).reshape(shape),
+        torch.from_numpy(projection.trainable).reshape(shape),
+        torch.from_numpy(projection.inferred).reshape(shape),
+    )
 
 
 class TensorInput(TensorClass):
@@ -723,16 +753,15 @@ class TensorFieldBase(ABC, Generic[ContentT]):
     @abstractmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> Self:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        """Construct a field and return its observation and optional binding.
+
+        Vacant inputs occur during graph planning and for missing prediction targets.
+        """
         raise NotImplementedError
 
     def take(self, indices: torch.Tensor | None) -> TensorInput:
@@ -788,12 +817,12 @@ class Extension:
     Register request, tensorfield, embedder, decoder, loss, output, and write
     components with ``@extension.register(Component.Request)`` or another explicit
     role. ``types`` names the Python equivalents
-    of accepted canonical Arrow terminal families after optional derivation.
-    A derive component validates its own source operands. Separate tuple entries are
+    of accepted canonical Arrow terminal families. Separate tuple entries are
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
     overrides a standard matcher. ``requires`` maps importable module names to
-    their package requirements. ``callbacks`` lists the Lightning callback
+    their package requirements. ``queries`` declares accepted query counts as
+    an integer, tuple, or Python slice; its default is one. ``callbacks`` lists the Lightning callback
     classes or factories every model using the extension attaches; every rank
     must declare the same. Creating an extension with an existing name replaces
     the registry entry and emits a warning.
@@ -804,6 +833,7 @@ class Extension:
         name: str,
         *,
         types: tuple[ValueTypeFamily, ...],
+        queries: int | tuple[int, ...] | slice = 1,
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
         requires: Mapping[str, str] | None = None,
         callbacks: Sequence[CallbackFactory] = (),
@@ -813,6 +843,29 @@ class Extension:
 
         if not re.match(r"^[a-z0-9_]+$", name):
             raise ValueError("Extension name must consist of lowercase letters, numbers, and underscores only")
+
+        if isinstance(queries, bool):
+            raise TypeError("Extension queries must be a non-negative integer, tuple of counts, or slice")
+        if isinstance(queries, int):
+            if queries < 0:
+                raise ValueError("Extension query counts must be non-negative")
+        elif isinstance(queries, tuple):
+            if not queries or any(type(count) is not int or count < 0 for count in queries):
+                raise ValueError("Extension queries must contain non-negative integer counts")
+        elif isinstance(queries, slice):
+            start = 0 if queries.start is None else queries.start
+            stop = queries.stop
+            step = 1 if queries.step is None else queries.step
+            if (
+                type(start) is not int
+                or start < 0
+                or (stop is not None and (type(stop) is not int or stop <= start))
+                or type(step) is not int
+                or step <= 0
+            ):
+                raise ValueError("Extension query slices require non-negative bounds and a positive step")
+        else:
+            raise TypeError("Extension queries must be a non-negative integer, tuple of counts, or slice")
 
         if not isinstance(types, tuple):
             raise TypeError("Extension types must be a tuple of types or PEP 604 unions")
@@ -884,6 +937,7 @@ class Extension:
                 raise TypeError(f"Extension callback factory for '{name}' must produce a Lightning Callback")
 
         self.name: str = name
+        self.queries: int | tuple[int, ...] | slice = queries
         self.value_types: tuple[ValueTypeFamily, ...] = types
         self.families: tuple[tuple[type[Any], ...], ...] = tuple(families)
         self.family_by_type: Mapping[type[Any], int] = MappingProxyType(type_to_family)
@@ -893,8 +947,10 @@ class Extension:
         self.requires: Mapping[str, str] = MappingProxyType(
             {module: requirement.strip() for module, requirement in dependencies.items()}
         )
-        self.components: dict[Component, ComponentValue | None] = {}
+        self.own_components: dict[Component, ComponentValue | None] = {}
+        self.components: MutableMapping[Component, ComponentValue | None] = self.own_components
         self.callback_factories: tuple[CallbackFactory, ...] = tuple(callbacks)
+        self.parent_request: type[RequestBase] | None = None
 
         if name in TENSORFIELDS:
             warnings.warn(
@@ -905,9 +961,67 @@ class Extension:
 
         TENSORFIELDS[name] = self
 
+    @classmethod
+    def inherit(
+        cls,
+        parent: type[RequestBase],
+        *,
+        name: str,
+        types: tuple[ValueTypeFamily, ...] | None = None,
+        queries: int | tuple[int, ...] | slice | None = None,
+        arrow: Mapping[type[Any], ArrowMatcher] | None = None,
+        requires: Mapping[str, str] | None = None,
+        callbacks: Sequence[CallbackFactory] = (),
+    ) -> Self:
+        """Specialize a registered public field constructor under a new name.
+
+        Components follow later parent registrations until explicitly replaced
+        on the child. The generated Request and metadata capture their parent
+        at creation; callbacks append and requirements merge by import name.
+        """
+        matches = [
+            extension for extension in TENSORFIELDS.values() if extension.components.get(Component.Request) is parent
+        ]
+        if len(matches) != 1:
+            raise ValueError("Extension.inherit requires a uniquely registered tensorfield Request constructor")
+        source = matches[0]
+        value_types = source.types if types is None else types
+        if not isinstance(value_types, tuple):
+            raise TypeError("Extension types must be a tuple of types or PEP 604 unions")
+        members = {
+            member
+            for family in value_types
+            for member in (get_args(family) if isinstance(family, UnionType) else (family,))
+            if isinstance(member, type)
+        }
+        matchers = {member: matcher for member, matcher in source.matchers.items() if member in members}
+        if arrow is not None:
+            if not isinstance(arrow, Mapping):
+                raise TypeError("Extension arrow must be a mapping from declared value types to Arrow matchers")
+            matchers.update(arrow)
+        if requires is not None and not isinstance(requires, Mapping):
+            raise TypeError("Extension requires must be a mapping from import names to pip requirements")
+        if isinstance(callbacks, (str, bytes)) or not isinstance(callbacks, Sequence):
+            raise TypeError("Extension callbacks must be a sequence of Lightning Callback classes or factories")
+
+        request = pydantic.create_model(f"{name}_Request", __base__=parent, type=(cast(Any, Literal)[name], name))
+        extension = cls(
+            name,
+            types=value_types,
+            queries=source.queries if queries is None else queries,
+            arrow=matchers,
+            requires={**source.requires, **(requires or {})},
+            callbacks=(*source.callback_factories, *callbacks),
+        )
+        # Pickle resolves dynamic request classes by module and qualified name.
+        globals()[request.__name__] = request
+        extension.parent_request = parent
+        extension.components = ChainMap(extension.own_components, {Component.Request: request}, source.components)
+        return extension
+
     @property
     def types(self) -> tuple[ValueTypeFamily, ...]:
-        """Registered canonical atom families consumed after optional derivation."""
+        """Registered canonical atom families consumed by this extension."""
         return self.value_types
 
     def require(self, *, address: Address) -> None:
@@ -1139,7 +1253,7 @@ class Extension:
         key = Component(component)
         if obj is OMITTED:
             return partial(self.register, key)
-        if key in self.components:
+        if key in self.own_components:
             raise ValueError(f"Component '{key}' already registered in extension '{self.name}'")
         if obj is None:
             if key not in {Component.output, Component.write}:
@@ -1160,11 +1274,21 @@ class Extension:
                     raise TypeError(
                         f"extension '{self.name}' component '{key}' must be a subclass of {key}Base, got {actual}"
                     )
+                if key == Component.Request and self.parent_request is not None:
+                    request = cast(type[RequestBase], obj)
+                    if not issubclass(request, self.parent_request):
+                        raise TypeError(f"extension '{self.name}' Request must inherit its parent Request constructor")
+                    field = request.model_fields["type"]
+                    if field.default != self.name or get_args(field.annotation) != (self.name,):
+                        raise ValueError(
+                            f"extension '{self.name}' Request must retain its '{self.name}' type discriminator; "
+                            "subclass the inherited extension.Request"
+                        )
             elif not callable(obj):
                 raise TypeError(f"extension '{self.name}' component '{key}' must be callable, got {type(obj).__name__}")
 
         value = cast(ComponentValue | None, obj)
-        self.components[key] = value
+        self.own_components[key] = value
         return cast(RegisterT | None, value)
 
     @property
@@ -1212,10 +1336,6 @@ class Extension:
     @property
     def observe(self) -> Observe:
         return cast(Observe, self.component(Component.observe))
-
-    @property
-    def derive(self) -> Derive:
-        return cast(Derive, self.component(Component.derive))
 
     @property
     def learn(self) -> Learn:

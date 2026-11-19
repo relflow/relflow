@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from dataclasses import InitVar
-from typing import TYPE_CHECKING, Annotated, Literal, Unpack, cast
+from typing import TYPE_CHECKING, Annotated, Literal, Self, Unpack, cast
 
 import pyarrow as pa
 import pyarrow.compute as pc
@@ -31,12 +31,15 @@ from relflow.tensorfields.base import (
     RequestBase,
     TensorFieldBase,
     TensorInput,
+    masks,
+    resolve,
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
+    from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
 
@@ -165,16 +168,16 @@ class TensorField(TensorFieldBase[torch.Tensor]):
     @classmethod
     def new(
         cls,
-        input: RaggedField,
-        target: RaggedField,
-        present: torch.Tensor,
-        trainable: torch.Tensor,
-        inferred: torch.Tensor,
-        address: Address,
+        sources: Sources,
+        *,
         schema: Schema,
-        strata: Strata,
         context: Context,
-    ) -> TensorField:
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        address = sources.address
+        projection, context, observation, binding = resolve(sources, schema=schema, context=context)
+        input, target = projection.split()
+        present, trainable, inferred = masks(projection)
+
         def encode(field: RaggedField) -> torch.Tensor:
             encoded = pc.if_else(field.values, pa.scalar(1.0, pa.float32()), pa.scalar(-1.0, pa.float32()))
             if isinstance(encoded, pa.ChunkedArray):
@@ -182,7 +185,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             return torch.from_numpy(field.place(encoded.to_numpy(zero_copy_only=False), fill=0.0))
 
         state = torch.from_numpy(input.dense)
-        return cls(
+        result = cls(
             content=encode(input),
             state=state,
             present=present,
@@ -199,6 +202,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             ),
             batch_size=input.batch_size,
         )
+        return result, observation, binding
 
 
 @boolean.register(Component.Embedder)

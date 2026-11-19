@@ -62,7 +62,7 @@ def test_leaf_query_is_optional():
 def test_leaf_accepts_explicit_request_level_query():
     leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "query": "payload.amount"})
 
-    assert leaf.query == "payload.amount"
+    assert leaf.query == ("payload.amount",)
 
 
 def test_leaf_requires_non_empty_explicit_query():

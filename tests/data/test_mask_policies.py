@@ -53,8 +53,8 @@ def test_mask_configuration_matrix(
     )
 
     schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, value=rf.Number(mask=policy))
-    projection = coalesce(source, schema, strata, seed=19, epoch=3).fields["/value"]
-    inputs, targets = projection.split(projection.pristine.values)
+    projection = coalesce(source, schema, strata, seed=19, epoch=3).fields["/value"].single()
+    inputs, targets = projection.split()
 
     active = strata == rf.Strata.train or (not dropout and (strata != rf.Strata.predict or rate is None))
     chosen = (inputs.dense.reshape(-1) != rf.Tokens.valued).tolist()
@@ -446,7 +446,7 @@ def test_train_only_query_is_not_required_during_prediction():
     assert field.state[:, 0].tolist() == [rf.Tokens.valued, rf.Tokens.valued]
 
 
-def test_query_backed_target_requires_its_source():
+def test_unconditionally_masked_query_target_can_be_absent_at_prediction():
     configured = rf.Model(
         preset="small",
         d_model=8,
@@ -454,5 +454,7 @@ def test_query_backed_target_requires_its_source():
         label=rf.Boolean(query="labels.value", mask=True),
     )
 
-    with pytest.raises(ValueError, match="labels"):
-        configured.predict(pa.table({"feature": [1.0, 2.0]}))
+    source = pa.table({"feature": [1.0, 2.0]})
+    field = configured.encode(source, strata="predict")["/label"]
+    assert field.inferred.all()
+    assert len(configured.predict(source)) == 2

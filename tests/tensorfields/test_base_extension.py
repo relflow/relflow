@@ -32,7 +32,7 @@ def build_extension() -> Extension:
 
     class TensorField(TensorFieldBase):
         @classmethod
-        def new(cls, input, target, present, trainable, inferred, address, schema, strata, context):
+        def new(cls, sources, *, schema, context):
             return object()
 
     class Embedder(EmbedderBase):
@@ -66,6 +66,17 @@ def build_extension() -> Extension:
 def test_extension_rejects_invalid_name():
     with pytest.raises(ValueError, match="lowercase letters"):
         Extension(name="Bad-Name", types=(str,))
+
+
+@pytest.mark.parametrize(
+    "queries",
+    [True, -1, (), (1, -1), (True,), (1, 1.0), slice(-1, 3), slice(2, 2), slice(0, 3, 0), slice(0, 3, -1), "1"],
+)
+def test_extension_rejects_invalid_query_counts_without_registering(queries):
+    name = extension_name("badqueries")
+    with pytest.raises((TypeError, ValueError), match="quer"):
+        Extension(name=name, types=(str,), queries=queries)
+    assert name not in TENSORFIELDS
 
 
 def test_extension_requires_value_types_without_polluting_registry():

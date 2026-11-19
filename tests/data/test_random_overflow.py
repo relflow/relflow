@@ -31,7 +31,7 @@ def test_random_overflow_keeps_contiguous_full_windows_and_uses_tail_outside_tra
     )
     source = pa.table({"events": [[{"value": index} for index in range(8)] for _ in range(128)]})
     resolved = coalesce(source, configured, strata, seed=7, epoch=2, ordinal=3)
-    values = np.asarray(resolved.fields["/events/value"].pristine.values).reshape(128, 3)
+    values = np.asarray(resolved.fields["/events/value"].single().pristine.values).reshape(128, 3)
 
     assert np.all(np.diff(values, axis=1) == 1)
     assert resolved.layouts["/events"].lengths.tolist() == [[3]] * 128
@@ -40,7 +40,11 @@ def test_random_overflow_keeps_contiguous_full_windows_and_uses_tail_outside_tra
     else:
         assert values.tolist() == [[5, 6, 7]] * 128
         other = coalesce(source, configured, strata, seed=91, epoch=15, ordinal=8)
-        assert other.fields["/events/value"].pristine.values.equals(resolved.fields["/events/value"].pristine.values)
+        assert (
+            other.fields["/events/value"]
+            .single()
+            .pristine.values.equals(resolved.fields["/events/value"].single().pristine.values)
+        )
 
 
 def test_random_windows_replay_and_vary_by_epoch_seed_batch_and_branch():
@@ -51,17 +55,17 @@ def test_random_windows_replay_and_vary_by_epoch_seed_batch_and_branch():
     original = coalesce(source, configured, rf.Strata.train, seed=7, epoch=2, ordinal=3)
     before = configured.model_dump_json()
     replay = coalesce(source, configured, rf.Strata.train, seed=7, epoch=2, ordinal=3)
-    expected = original.fields["/left/value"].pristine.values
+    expected = original.fields["/left/value"].single().pristine.values
 
-    assert replay.fields["/left/value"].pristine.values.equals(expected)
-    assert not original.fields["/right/value"].pristine.values.equals(expected)
+    assert replay.fields["/left/value"].single().pristine.values.equals(expected)
+    assert not original.fields["/right/value"].single().pristine.values.equals(expected)
     for options in (
         {"seed": 8, "epoch": 2, "ordinal": 3},
         {"seed": 7, "epoch": 3, "ordinal": 3},
         {"seed": 7, "epoch": 2, "ordinal": 4},
     ):
         changed = coalesce(source, configured, rf.Strata.train, **options)
-        assert not changed.fields["/left/value"].pristine.values.equals(expected)
+        assert not changed.fields["/left/value"].single().pristine.values.equals(expected)
     assert configured.model_dump_json() == before
 
 
@@ -81,7 +85,11 @@ def test_random_windows_do_not_use_or_advance_process_random_state():
         random.seed(934)
         torch.manual_seed(934)
         second = coalesce(source, configured, rf.Strata.train, seed=5)
-        assert first.fields["/events/value"].pristine.values.equals(second.fields["/events/value"].pristine.values)
+        assert (
+            first.fields["/events/value"]
+            .single()
+            .pristine.values.equals(second.fields["/events/value"].single().pristine.values)
+        )
     finally:
         np.random.set_state(numpy_state)
         random.setstate(python_state)
@@ -108,7 +116,7 @@ def test_random_windows_preserve_null_empty_short_and_null_item_geometry():
             [[False, False, False]],
             [[True, False, True]],
         ]
-        assert resolved.fields["/events/value"].pristine.values.to_pylist() == [1]
+        assert resolved.fields["/events/value"].single().pristine.values.to_pylist() == [1]
 
 
 def test_random_windows_align_nested_records_queries_masks_and_geometry():
@@ -148,14 +156,14 @@ def test_random_windows_align_nested_records_queries_masks_and_geometry():
     resolved = coalesce(source, configured, rf.Strata.train, seed=2, epoch=3)
     outer, inner = resolved.layouts["/events"], resolved.layouts["/events/children"]
     records = dict(zip(outer.placement, outer.records.to_pylist(), strict=True))
-    target = resolved.fields["/events/target"]
+    target = resolved.fields["/events/target"].single()
     for position, record in records.items():
         assert target.trainable[position] == record["selected"]
     assert target.pristine.values.to_pylist() == [-record["value"] for record in records.values()]
     assert inner.shape == (16, 1, 3, 2)
     for position, record in zip(inner.placement, inner.records.to_pylist(), strict=True):
         assert record["parent"] == records[position // 2]["value"]
-    nested = resolved.fields["/events/children/value"].pristine.values.to_numpy().reshape(-1, 2)
+    nested = resolved.fields["/events/children/value"].single().pristine.values.to_numpy().reshape(-1, 2)
     assert np.all(np.diff(nested, axis=1) == 1)
     axes = geometry(resolved.layouts, rows=16)
     assert axes["/events"].slots.reshape(-1).sum().item() == len(records)
@@ -184,12 +192,12 @@ def test_random_windows_are_invariant_to_dictionary_chunks_and_sliced_arrow_stor
         actual = coalesce(table, configured, rf.Strata.train, seed=7, epoch=3, ordinal=4)
         for address in expected.fields:
             assert (
-                actual.fields[address].pristine.values.to_pylist()
-                == expected.fields[address].pristine.values.to_pylist()
+                actual.fields[address].single().pristine.values.to_pylist()
+                == expected.fields[address].single().pristine.values.to_pylist()
             )
             assert (
-                actual.fields[address].pristine.placement.to_pylist()
-                == expected.fields[address].pristine.placement.to_pylist()
+                actual.fields[address].single().pristine.placement.to_pylist()
+                == expected.fields[address].single().pristine.placement.to_pylist()
             )
         assert actual.layouts["/events"].lengths.tolist() == expected.layouts["/events"].lengths.tolist()
 

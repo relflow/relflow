@@ -14,7 +14,7 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.tensorfields.base import TENSORFIELDS, Context
+from relflow.tensorfields.base import Context
 from relflow.tensorfields.extensions.group import Decoder, Embedder, Metrics, TensorField, bind, loss, output, write
 from relflow.tensorfields.shared.resize import Resize
 from relflow.tensorfields.shared.vocabulary import OnlineVocabularyModel, VocabularyBatch, VocabularyState
@@ -57,10 +57,7 @@ def tensorfield(
     return tensorize(
         TensorField,
         projection,
-        TENSORFIELDS["group"],
-        address=ADDRESS,
         schema=schema,
-        strata=strata,
         context=Context(state=state),
     )
 
