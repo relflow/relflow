@@ -49,6 +49,10 @@ export const outputs = {
     [0.12, -0.34, 0.08],
     'A fixed-width numeric vector matching n_dim=3; coordinates are not probabilities.',
   ),
+  coordinates: decoded(
+    [40.7128, -74.006],
+    'A latitude and longitude pair in degrees, in that order.',
+  ),
   ordinal: decoded(
     'medium',
     'A declared ordered label, preserving its scalar type. With no declared labels, content is an integer rank. No label probability is returned.',

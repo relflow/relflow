@@ -134,6 +134,10 @@ export const apiCatalog: ApiSection[] = [
       {
         "name": "rf.Vector",
         "guide": "/data-types/vector/"
+      },
+      {
+        "name": "rf.Coordinates",
+        "guide": "/data-types/coordinates/"
       }
     ]
   },

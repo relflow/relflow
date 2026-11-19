@@ -5,6 +5,7 @@ const leaves = [
   'number',
   'quantile',
   'vector',
+  'coordinates',
   'ordinal',
   'category',
   'boolean',

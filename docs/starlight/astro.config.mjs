@@ -76,6 +76,7 @@ export default defineConfig({
                 { label: 'Number', slug: 'data-types/number' },
                 { label: 'Quantile', slug: 'data-types/quantile' },
                 { label: 'Vector', slug: 'data-types/vector' },
+                { label: 'Coordinates', slug: 'data-types/coordinates' },
                 { label: 'Ordinal', slug: 'data-types/ordinal' },
               ],
             },
