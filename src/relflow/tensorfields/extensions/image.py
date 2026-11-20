@@ -146,6 +146,10 @@ def snapshot(path: str, immutable: bool) -> tuple[bytes, bytes | None]:
             with open_image(path) as stream:
                 body = stream.read()
             version = hashlib.sha256(body).hexdigest()
+        elif os.name == "nt":
+            # Windows can report different metadata by path and by handle after a replacement.
+            with open(path, "rb") as stream:
+                version = stamp(os.fstat(stream.fileno()))
         else:
             version = stamp(os.stat(path))
     return json.dumps((path, version), ensure_ascii=False, separators=(",", ":")).encode(), body

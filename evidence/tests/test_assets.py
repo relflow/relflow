@@ -81,12 +81,15 @@ def released(tmp_path, monkeypatch):
     responses[reports_url] = reports
     calls = []
 
-    def download(location, **kwargs):
+    def urlopen(request, **kwargs):
+        location = request.full_url
         calls.append(location)
         value = responses[location]
-        return value if isinstance(value, bytes) or value is None else json.dumps(value).encode()
+        if value is None:
+            raise HTTPError(location, 404, "not found", {}, None)
+        return io.BytesIO(value if isinstance(value, bytes) else json.dumps(value).encode())
 
-    monkeypatch.setattr(assets, "download", download)
+    monkeypatch.setattr(assets, "urlopen", urlopen)
     return tmp_path, responses, selected, report, calls, url
 
 
@@ -102,6 +105,27 @@ def test_release_asset_is_digest_checked_cached_and_keeps_sources_unchanged(rele
     assets.fetch(root, required=True)
     assert calls.count(url) == 2
     assert json.loads(result.read_text())["results"]["P001"]["seed"] == 7
+
+
+def test_release_accepts_publication_larger_than_sixteen_mib(released):
+    root, responses, _, report, _, url = released
+    content = responses[url] + b" " * (16 * 1024 * 1024)
+    responses[url] = content
+    report["assets"][0].update(size=len(content), digest="sha256:" + hashlib.sha256(content).hexdigest())
+
+    path = assets.fetch(root, required=True)
+
+    assert path is not None and path.stat().st_size == len(content)
+
+
+def test_release_rejects_oversized_publication_before_download(released):
+    root, _, _, report, calls, url = released
+    report["assets"][0]["size"] = 32 * 1024 * 1024 + 1
+
+    with pytest.raises(ValueError, match="unexpected URL or size"):
+        assets.fetch(root, required=True)
+
+    assert url not in calls
 
 
 @pytest.mark.parametrize(

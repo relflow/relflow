@@ -19,10 +19,11 @@ from evidence.releases import VERSION, inventory, supported
 
 REPOSITORY = "relflow/relflow"
 SHA = re.compile(r"[0-9a-f]{40}")
-LIMIT = 8 * 1024 * 1024
+METADATA_LIMIT = 8 * 1024 * 1024
+PUBLICATION_LIMIT = 32 * 1024 * 1024
 
 
-def download(url: str, *, missing: bool = False, limit: int = LIMIT) -> bytes | None:
+def download(url: str, *, missing: bool = False, limit: int = METADATA_LIMIT) -> bytes | None:
     """Bound public asset reads and distinguish an unreleased version from an outage."""
     try:
         with urlopen(Request(url, headers={"User-Agent": "relflow-evidence-publication"}), timeout=30) as response:
@@ -77,14 +78,14 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
     if (
         asset.get("browser_download_url") != url
         or type(asset.get("size")) is not int
-        or not 0 <= asset["size"] <= LIMIT
+        or not 0 <= asset["size"] <= PUBLICATION_LIMIT
     ):
         raise ValueError(f"Evidence {tag} publication asset has an unexpected URL or size")
     destination = root / ".cache/evidence" / tag / "publication.json"
     expected = asset["digest"].removeprefix("sha256:")
     content = destination.read_bytes() if destination.is_file() else None
     if content is None or hashlib.sha256(content).hexdigest() != expected:
-        content = download(url)
+        content = download(url, limit=PUBLICATION_LIMIT)
     if content is None or len(content) != asset["size"] or hashlib.sha256(content).hexdigest() != expected:
         raise ValueError(f"Evidence {tag} publication bytes differ from the retained asset")
     destination.parent.mkdir(parents=True, exist_ok=True)
