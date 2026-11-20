@@ -247,8 +247,9 @@ def component(source: str, name: str) -> ast.FunctionDef:
         or definition.decorator_list
     ):
         raise ValueError(f"Diagnostic renderer {name!r} requires the signature (bundle, spec) without decorators")
-    scope = symtable.symtable(ast.unparse(definition), "<diagnostic component>", "exec").get_children()[0]
-    scopes = [scope]
+    # Python 3.14 adds a sibling annotation scope (PEP 649), so select the function scope by name.
+    module = symtable.symtable(ast.unparse(definition), "<diagnostic component>", "exec")
+    scopes = [child for child in module.get_children() if child.get_name() == name and child.get_type() == "function"]
     unresolved = set()
     while scopes:
         current = scopes.pop()
