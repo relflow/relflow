@@ -28,7 +28,7 @@ jobs:
           path: candidate
           fetch-depth: 0
           persist-credentials: false
-      - name: Check out the trusted runtime resolver
+      - name: Check out the trusted baseline selector
         uses: actions/checkout@v4
         with:
           repository: relflow/relflow
@@ -48,6 +48,8 @@ jobs:
         env:
           CANDIDATE_SHA: ${{ github.sha }}
           SUITE_REF: ${{ inputs.suite_ref }}
+          # Resolve dependencies with these reviewed bytes independently of the selected suite.
+          RESOLVER_BLOB: 538fc509594a9a5721ea05923504a488d2d5ead3
         run: |
           python - <<'PY'
           import json
@@ -87,7 +89,8 @@ jobs:
             (cd baseline && python scripts/release.py licensing)
             uv build --project "$GITHUB_WORKSPACE/baseline" --wheel --out-dir "$GITHUB_WORKSPACE/inputs/baseline"
           fi
-          python executor/evidence/resolve.py --project "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/inputs"
+          git -C candidate cat-file blob "$RESOLVER_BLOB" > "$RUNNER_TEMP/evidence-resolve.py"
+          python -I "$RUNNER_TEMP/evidence-resolve.py" --project "$GITHUB_WORKSPACE/candidate" --output "$GITHUB_WORKSPACE/inputs"
           echo "baseline_sha=$BASELINE_SHA" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:

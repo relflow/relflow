@@ -58,7 +58,14 @@ def test_every_experiment_declares_its_imported_dependencies_without_importing_m
         if "torchjd" in expected:
             assert "relflow[torchjd]>=0.5.0" in declared["dependencies"]
         if "transformers" in expected:
-            assert "relflow[text]>=0.5.0" in declared["dependencies"]
+            extras = {
+                extra
+                for requirement in declared["dependencies"]
+                if (match := re.fullmatch(r"relflow\[([\w,-]+)\].*", requirement))
+                for extra in match[1].split(",")
+            }
+            media = {name.lower() for name in classified["types"] if name in {"Text", "Image"}}
+            assert extras & {"text", "image"} and media <= extras, f"{path}: select the relevant encoder extras"
 
 
 def test_registered_proofs_have_unique_standalone_scripts() -> None:

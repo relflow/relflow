@@ -193,6 +193,8 @@ files = [
     "evidence/experiments/reporting.py",
     "evidence/experiments/run.py",
     "evidence/experiments/source.py",
+    "evidence/fixtures/media.py",
+    "evidence/fixtures/questions.py",
     "evidence/hosted.md",
     "evidence/hosted.py",
     "evidence/observations.py",
@@ -256,7 +258,7 @@ blocked = [
 "docs/starlight/scripts/*" = [".ts", ".mjs"]
 "docs/starlight/public/benchmarks/*" = [".csv", ".json"]
 "docs/starlight/public/examples/*/*" = [".py", ".json", ".txt"]
-"evidence/experiments/P[0-9]*" = [".py"]
+"evidence/experiments/P[0-9]*" = [".py", ".npz"]
 "evidence/diagnostics/*" = [".py"]
 "evidence/tests/**/test_*" = [".py"]
 "native/src/**" = [".rs"]
