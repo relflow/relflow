@@ -13,6 +13,8 @@ The attention described here operates within one top-level model observation. In
 - The co-incident datapoints within an observation
 - Datapoints across different observations when packed into a branch
 
+Set `cross=True` on a branch to mix its fields multiplicatively within each record. For example, in `rf.Branch(cross=True, quantity=rf.Number, unit_price=rf.Number)`, quantity can modulate the representation of unit price. The option applies only to that branch. Use `cross=True` on `rf.Model` to apply it to the root record.
+
 As with all user-facing constructs in relflow, branches are defined with great user extensibility in both the length of a branch (the context-window), as well as what elements of ingested data fills the content of a branch. These aspects are discussed in greater technical depth in our [API map](/api-map/).
 
 ## Information reductions

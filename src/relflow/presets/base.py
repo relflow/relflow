@@ -25,6 +25,7 @@ class BranchDefaults(pydantic.BaseModel):
     n_heads: Annotated[int, pydantic.Field(gt=0, multiple_of=2)]
     ffnx: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 8
     attention: AttentionMode | None = AttentionMode.mha
+    cross: pydantic.StrictBool = False
     dropout: Rate | None = 0.0
     reduction: ReductionConfig | None
 
@@ -90,6 +91,7 @@ def resolve(
     description: str | None = None,
     embed: bool = False,
     attention: AttentionInput = cast(AttentionInput, OMITTED),
+    cross: bool = cast(bool, OMITTED),
     reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
     dropout: Rate | None = cast(Rate | None, OMITTED),
     mask: MaskInput = False,
@@ -104,6 +106,7 @@ def resolve(
         n_heads=n_heads,
         ffnx=ffnx,
         attention=attention,
+        cross=cross,
         reduction=reduction,
         dropout=dropout,
     )

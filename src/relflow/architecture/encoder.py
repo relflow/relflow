@@ -150,6 +150,44 @@ class RotaryTransformerEncoderLayer(torch.nn.Module):
         __call__ = forward
 
 
+class Cross(torch.nn.Module):
+    """Mix fixed field slots within one item through a rank-eight multiplicative residual."""
+
+    def __init__(self, slots: tuple[tuple[Address, int], ...], width: int, dropout: float) -> None:
+        super().__init__()
+        self.slots = slots
+        self.width = width
+        self.down = torch.nn.Linear(len(slots) * width, 8, bias=False)
+        self.up = torch.nn.Linear(8, len(slots) * width)
+        self.dropout = torch.nn.Dropout(dropout)
+
+    def forward(self, inputs: torch.Tensor, present: torch.Tensor) -> torch.Tensor:
+        absent = ~present.unsqueeze(-1)
+        values = inputs.masked_fill(absent, 0.0).flatten(1)
+        update = values * self.up(self.down(values))
+        return (values + self.dropout(update)).reshape_as(inputs).masked_fill(absent, 0.0)
+
+    @torch.no_grad()
+    def rebuild_state(self, previous: torch.nn.Module) -> dict[str, torch.Tensor]:
+        """Keep learned interactions attached to their field and child-summary index after a schema edit."""
+        if not isinstance(previous, Cross) or previous.width != self.width:
+            return {}
+        if previous.slots == self.slots:
+            return previous.state_dict()
+        indices = {slot: index for index, slot in enumerate(previous.slots)}
+        for index, slot in enumerate(self.slots):
+            if slot in indices:
+                old = slice(indices[slot] * self.width, (indices[slot] + 1) * self.width)
+                new = slice(index * self.width, (index + 1) * self.width)
+                self.down.weight[:, new].copy_(previous.down.weight[:, old])
+                self.up.weight[new].copy_(previous.up.weight[old])
+                self.up.bias[new].copy_(previous.up.bias[old])
+        return self.state_dict()
+
+    if TYPE_CHECKING:
+        __call__ = forward
+
+
 class BranchEncoder(torch.nn.Module):
     """Contextualize child parcels and route their reduced branch representation."""
 
@@ -210,7 +248,9 @@ class BranchEncoder(torch.nn.Module):
             torch.nn.init.xavier_uniform_(self.conditioning.weight)
 
         self.coordinate_origins = frozenset(
-            child.address for child in branch.fields if isinstance(child, Leaf) and child.active
+            child.address
+            for child in branch.fields
+            if isinstance(child, Leaf) and (child.embedded if branch.cross else child.active)
         )
         # A reduced child branch contributes its summary tokens to each item's
         # coordinate, so leaf-times-child interactions form before reduction.
@@ -222,8 +262,17 @@ class BranchEncoder(torch.nn.Module):
             and schema.branch_outputs[child.address]
         }
         coordinate_tokens = len(self.coordinate_origins) + sum(self.coordinate_branches.values())
-        self.coordinate_encoder: RotaryTransformerEncoderLayer | None = None
-        if attention is not None and coordinate_tokens > 1:
+        self.coordinate_encoder: RotaryTransformerEncoderLayer | Cross | None = None
+        if branch.cross and coordinate_tokens > 1:
+            slots = tuple(
+                (child.address, index)
+                for child in branch.fields
+                for index in range(
+                    1 if child.address in self.coordinate_origins else self.coordinate_branches.get(child.address, 0)
+                )
+            )
+            self.coordinate_encoder = Cross(slots, schema.d_model, dropout)
+        elif attention is not None and coordinate_tokens > 1:
             coordinate_heads = branch.n_heads
             while coordinate_heads > 0 and (
                 schema.d_model % coordinate_heads != 0 or schema.d_model // coordinate_heads < 2
@@ -594,18 +643,22 @@ class BranchEncoder(torch.nn.Module):
         rows = math.prod(payload.shape[:-2])
         inputs = payload.reshape(rows, field_count, channel_count)
         presence = present.reshape(rows, field_count)
-        prepared = bool(field_count) and not customized((self.coordinate_encoder,))
-        full = prepared and bool(presence.all())
-        if prepared and not full:
-            values, packing = pack(inputs, presence)
-            if packing.indices.numel():
-                values = self.coordinate_encoder(values, present=presence, packing=packing)
-            mixed = unpack(values, packing, inputs, presence, (self.coordinate_encoder,))
+        if isinstance(self.coordinate_encoder, Cross):
+            # Each projection column belongs to a specific slot, including when its input is absent.
+            mixed = self.coordinate_encoder(inputs, present=presence)
         else:
-            mixed = self.coordinate_encoder(
-                inputs,
-                present=None if full and inputs.is_cuda and 0 < inputs.shape[0] <= SDPA_BATCH_MAX else presence,
-            )
+            prepared = bool(field_count) and not customized((self.coordinate_encoder,))
+            full = prepared and bool(presence.all())
+            if prepared and not full:
+                values, packing = pack(inputs, presence)
+                if packing.indices.numel():
+                    values = self.coordinate_encoder(values, present=presence, packing=packing)
+                mixed = unpack(values, packing, inputs, presence, (self.coordinate_encoder,))
+            else:
+                mixed = self.coordinate_encoder(
+                    inputs,
+                    present=None if full and inputs.is_cuda and 0 < inputs.shape[0] <= SDPA_BATCH_MAX else presence,
+                )
         mixed = mixed.reshape(payload.shape)
 
         contextualized = list(parcels)

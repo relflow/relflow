@@ -37,6 +37,7 @@ class Options(TypedDict, total=False):
     description: str | None
     embed: bool
     attention: AttentionInput
+    cross: bool
     reduction: ReductionConfig | None
     dropout: Rate | None
     mask: MaskInput
