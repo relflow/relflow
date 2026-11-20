@@ -28,7 +28,7 @@ const description = stage.description
     index % 3 === 1 ? { text, href: parts[index + 1] } : index % 3 === 0 ? { text } : null,
   )
   .filter((part) => part !== null);
-const nextLabels =(['predict', 'train'] as const).flatMap((mode) => {
+const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
   const path = flowPaths[mode];
   const position = path.indexOf(stage.id);
   if (position < 0) return [];
@@ -83,7 +83,11 @@ const nextLabels =(['predict', 'train'] as const).flatMap((mode) => {
       </dl>
     </div>
     <p class="df-description">
-      {description.map((part) => ('href' in part ? <a href={part.href}>{part.text}</a> : part.text))}
+      {
+        description.map((part) =>
+          'href' in part ? <a href={part.href}>{part.text}</a> : part.text,
+        )
+      }
     </p>
     <div class="df-views">
       {
