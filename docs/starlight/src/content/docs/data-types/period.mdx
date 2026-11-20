@@ -61,10 +61,10 @@ reconstruction targets.
 
 ## How is this leaf trained?
 
-State classification uses cross-entropy. For valued reconstruction
-targets, each predicted calendar-part pair is normalized to a direction
-and penalized by cosine distance, `1 - cosine_similarity`, from the known
-pair. The content loss averages across the selected parts.
+For valued reconstruction targets, each predicted calendar-part pair is 
+normalized to a direction and penalized by cosine distance, 
+`1 - cosine_similarity`, from the known pair. The content loss 
+averages across the selected parts.
 
 This trains recurring calendar representations. It does not train a
 datetime writer or a numeric elapsed-time prediction.

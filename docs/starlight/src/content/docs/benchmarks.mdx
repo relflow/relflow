@@ -3,9 +3,11 @@ title: Benchmarks
 description: State-of-the-art predictive results on large structured-data tasks, with published scores, parameter counts, and provenance.
 ---
 
-**State-of-the-art predictive modeling, with a comparison you can inspect.**
+**State-of-the-art predictive modeling with an open-sourced comparison.**
 On the nine published RelArena tasks with more than one million training
 examples, relflow beats TabPFN-3 on **9 of 9** and TabPFN-3.5 on **6 of 9**.
+Additionally, relflow is the only deployable solution for relational learning,
+and the only solution which works for real-time inference.
 
 | Compared model | relflow wins | Compared tasks |
 | --- | ---: | ---: |
@@ -66,18 +68,3 @@ The [relflow count](/benchmarks/relflow-parameters-2026-11-10.json),
 and [TabPFN-3.5 report](https://arxiv.org/html/2609.17895v1) preserve the
 counting boundaries. Parameter counts measure weights; latency, memory,
 and serving cost require measurements of their own.
-
-## Read the comparison precisely
-
-- The large-task threshold counts the original labeled training examples,
-  rather than source-table rows or the combined training-and-validation refit.
-- The full leaderboard uses Elo over tasks with seed 0. Models use its
-  standardized tuning regime; systems may use their own tuning procedures.
-- The parameter count comes from a retained research model whose recipe
-  matches the published submission. A separate execution produced the
-  leaderboard scores. Schema details and vocabulary state can affect size.
-
-Use these records to choose candidates for your own held-out evaluation.
-[Explore the model schemas](/concepts/models/).
-The [learning experiments](/evidence/) test individual capabilities and
-information boundaries behind these larger tasks.

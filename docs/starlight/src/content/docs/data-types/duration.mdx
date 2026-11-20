@@ -101,10 +101,10 @@ not on the source timestamps.
 
 ## How is this leaf trained?
 
-Duration uses Number’s objectives on the derived numeric elapsed value.
-State classification uses cross-entropy. The default `"mae"` combines
-standardized signed-log error and a scaled source-unit absolute-error term;
-`"mse"` and `"huber"` use the original elapsed-value space.
+Duration uses Number’s objectives on the derived numeric elapsed value. 
+The default `"mae"` combines standardized signed-log error and a scaled 
+source-unit absolute-error term; `"mse"` and `"huber"` use the original 
+elapsed-value space.
 
 Only finite, valued reconstruction targets contribute numeric content
 loss. Predictions and numeric error metrics use the configured

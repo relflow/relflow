@@ -17,7 +17,11 @@ As with all user-facing constructs in relflow, branches are defined with great u
 
 ## Information reductions
 
-In order to condense information as it flows vertically up the tree, from the leaf to the node / root, reductions are applied to the information contained within a branch. Reductions occur after the aforementioned process of attention within and across observations within a branch. These reductions may take many forms, as a cross-attention, algebraic mean, or an identity forward-pass in which nested information is presented, as is, to the next layer of the tree. Further, these reductions allow for each branch of the model tree to potentially reduce the context size while traversing up the model tree. This embedding functions as the learned representation of all data contained under that branch. The Mean branch reduction averages the encoded values while also retaining a learned count signal.
+In order to condense information as it flows vertically up the tree, from a leaf to the root, reductions are applied to the information contained within a branch. 
+
+Reductions occur after attention is applied within and across observations within a branch, and these reductions may take many forms. Further, these reductions allow for each branch of the model tree to potentially reduce the context size while traversing up the model tree. This embedding functions as the learned representation of all data contained under that branch.
+
+Relflow currently offers reductions as a cross-attention, algebraic mean, or an identity forward-pass. For the attention-based reduction of information, users may explicitly declare the number of outputs of this reduction. The Mean branch reduction averages the encoded values while also retaining a learned count signal.
 
 :::tip[Interested in contributing new reductions?]
 

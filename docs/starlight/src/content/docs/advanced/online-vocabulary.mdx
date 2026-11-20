@@ -6,10 +6,12 @@ description: Understand label admission, cold starts, mutable training state, vo
 import DataViews from '../../../components/DataViews.astro';
 import { categoryExamples } from '../../../data/examples/category';
 
-A new product category can appear halfway through a training stream. relflow
-can give it a vocabulary entry and grow the affected model storage during the
-same fit. Learning a useful representation still requires training examples.
-Serving a prediction does not perform that learning step.
+For those leaf types which learn how to represent discrete data, we establish 
+an online vocabulary which learns the embeddings of such data. In addressing 
+this challenge, we observe a new product category can appear halfway through 
+a training stream. Relflow can give it a vocabulary entry and grow the affected 
+model storage during the same fit. Learning a useful representation still requires 
+training examples. Serving a prediction does not perform that learning step.
 
 Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
 Class declarations, field state, and fit calls use that same 0.5.0 source.

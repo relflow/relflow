@@ -14,8 +14,8 @@ export const embeddings: Concept = {
   id: 'embeddings', title: 'Embeddings',
   description: 'Export learned representations while preserving node identity, repeated-parent coordinates, and model provenance.',
   intro: [
-    'Use embed=True to export learned representations from a fitted model. Export context for a complete observation or a particular branch, then evaluate those vectors for your downstream task.',
-    'Representations are returned separately from target predictions. Use them for a downstream experiment such as retrieval or another model, and evaluate that use explicitly: a useful supervised target does not automatically establish useful similarity distances.',
+    'Relflow models all users to set embed=True to export learned representations from a fitted model. Export context for a complete observation or a particular branch, then evaluate those vectors for your downstream purposes.',
+    'Representations are returned separately from target predictions. Use them for a downstream experiment such as retrieval or another model, and evaluate that use explicitly: a useful supervised target does not automatically establish semantically meaningful distances between embeddings.',
   ],
   examples: scenarios.map((scenario) => ({
     caseId: scenario.id,

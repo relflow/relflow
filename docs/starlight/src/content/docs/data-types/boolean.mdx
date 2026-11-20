@@ -29,10 +29,8 @@ nulls remain separate from either Boolean answer.
 
 ## How is this leaf trained?
 
-Selected reconstruction targets train the state head with weighted
-cross-entropy. Valued Boolean answers train the content logit with
-counter-weighted binary cross-entropy. A sigmoid turns that logit into the
-probability of `True`.
+Valued Boolean answers train the content logit with counter-weighted binary 
+cross-entropy. A sigmoid turns that logit into the probability of `True`.
 
 The `threshold` option changes decision metrics, not this loss or the returned
 probability.

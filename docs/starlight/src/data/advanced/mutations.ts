@@ -43,7 +43,7 @@ with model.override(history, length=52, overflow="tail"):
 ordinary_history = model.predict(inputs, batch_size=256)`,
       note: 'The original 104-row cap returns on exit, including exceptional exit. The shared illustration has one historical week; this comparison needs a request set with longer histories to exercise the different limits.',
     }],
-    takeaway: 'override restores schema attributes. It is not a checkpoint rollback: compatible learned-state changes made inside a context are not generally undone.',
+    takeaway: 'Override restores schema attributes. It is not a checkpoint rollback: compatible learned-state changes made inside a context are not generally undone.',
   },
   credit: {
     title: 'Remove the inquiry source from the model',
@@ -90,13 +90,13 @@ export const mutations: Concept = {
   title: 'Mutations',
   description: 'Select, update, extend, delete, reset, and temporarily override a model schema while rebuilding its runtime graph.',
   intro: [
-    'Enterprise teams can start from a shared pretrained model and create versions for their own data and prediction tasks. Mutations let each team add targets or use a different subset of inputs while retaining compatible learned state.',
-    'These examples start with an instance of the selected case’s model. Make edits between complete operations: mutation is prohibited during active forward, inference, or Lightning Trainer loops. Each block is an independent example, rather than a sequence of edits to one shared instance.',
+    'relflow empowers enterprise teams to create centralized, pretrained models and then for individual teams to create versions which are suited for their own data and predictions tasks. The key mechanism for this, mutations, allows each team to add data or targets, or even to remove the reliance on previously trained-to data entirely; all of this is possible while relflow models retain all compatible learned states.',
+    'The following examples start with an instance of the selected case’s model. Make edits between complete operations: mutation is prohibited during active forward, inference, or Lightning Trainer loops. Each block is an independent example, rather than a sequence of edits to one shared instance.',
   ],
   principles: [
     { title: 'Select exact schema nodes', text: 'rf.Address() denotes the anonymous root; rf.Address("claims", "invoices") denotes /claims/invoices. Combine rf.where predicates or inspect model.select(...) before a broad edit. Updates are strict by default, so every selected node must support each supplied option.' },
     { title: 'Retain compatible state, then check behavior', text: 'Graph rebuilds retain compatible learned state; new or incompatible components need initialization. An edit can still change context, routing, or outputs. New prediction targets and reset nodes require training, and state retention alone does not promise unchanged predictions.' },
-    { title: 'Distinguish a temporary edit from a checkpoint', text: 'override restores the previous schema attributes on exit. It does not snapshot every weight, vocabulary, or normalizer. Use a saved checkpoint when the requirement is to recover an earlier trained artifact.' },
+    { title: 'Distinguish a temporary edit from a checkpoint', text: 'Override restores the previous schema attributes on exit. It does not snapshot every weight, vocabulary, or normalizer. Use a saved checkpoint when the requirement is to recover an earlier trained artifact.' },
     { title: 'Start optimization on the updated parameters', text: 'After an edit, prepare data for the updated schema and begin a new fit when adaptation is needed. An old custom optimizer can reference replaced modules. Mutations also clear compilation and cached output contracts; rebuild the deployment artifact you intend to use.' },
   ],
   examples: scenarios.map(({ id }) => ({ caseId: id, ...examples[id] })),

@@ -40,10 +40,9 @@ a large change can span fewer in a sparse tail.
 
 ## How is this leaf trained?
 
-The state head uses weighted cross-entropy. Content reconstruction
-penalizes differences between predicted and observed percentile coordinates:
-absolute error for `"mae"`, squared error for `"mse"`, or Huber loss for
-`"huber"`.
+Content reconstruction penalizes differences between predicted and observed 
+percentile coordinates: absolute error for `"mae"`, squared error for `"mse"`,
+or Huber loss for `"huber"`.
 
 These losses operate in percentile space. Reported numeric error metrics
 use original units after the inverse transform; percentile MSE is not
@@ -143,6 +142,5 @@ the snapshot does not update the distribution.
 ### Related types
 
 - [Number](/data-types/number/) preserves magnitude through raw and signed-log representations and supports predictions beyond observed values.
-- [Vector](/data-types/vector/) represents a fixed-width numeric collection.
 
 </DataTypePage>

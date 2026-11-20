@@ -72,8 +72,7 @@ export const predictions: Concept = {
     'Each example assumes a model already trained for the selected schema and a Polars or Arrow input containing its known records. The tree visualizes one illustrative prediction row. Expand Returned fields to inspect its complete state, content, and inferred values; these examples are not executed results or evidence of application quality.',
   ],
   principles: [
-    { title: 'Read the type’s content contract', text: 'A rich leaf contains state probabilities, extension-owned content, and an inferred flag. Number content is a scalar in original units; Boolean content.probability estimates True. These are different readouts even when both use numbers.' },
-    { title: 'Keep state separate from confidence in the answer', text: 'state describes valued, null, padded, masked, and other states. For a Boolean, state.valued does not mean the event is likely; content.probability answers that question. inferred records whether the result was inferred.' },
+    { title: 'Read the type’s content contract', text: 'A rich leaf contains state probabilities, extension-owned content, and an inferred flag. Each extension may contain different fields under content. Refer to each data type\'s documentation to learn more.' },
     { title: 'Preserve the supplied collection structure', text: 'Targets inside branches produce aligned list records, including nested structures and structural nulls. Supply the requested records before inference; a nested target is not an instruction to generate a new collection.' },
   ],
   examples: scenarios.map((scenario): Concept['examples'][number] => {

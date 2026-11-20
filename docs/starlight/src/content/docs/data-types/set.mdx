@@ -44,10 +44,10 @@ reconstruction target unchanged.
 
 ## How is this leaf trained?
 
-State classification uses cross-entropy. Content reconstruction uses
-binary cross-entropy independently for each populated vocabulary label:
-present members are positives and absent known members are negatives.
-The content term is averaged across the selected known memberships.
+Content reconstruction uses binary cross-entropy independently for each 
+populated vocabulary label: present members are positives and absent 
+known members are negatives. The content term is averaged across the 
+selected known memberships.
 
 Unseen target members have no named output class. The writer’s `threshold`
 filters results after prediction and does not change this objective.

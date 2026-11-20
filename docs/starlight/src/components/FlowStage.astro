@@ -21,7 +21,14 @@ const code = stage.code || [];
 const codeModes = [
   ...new Set(code.flatMap((item) => (item.mode ? [item.mode] : ['predict', 'train']))),
 ].join(' ');
-const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
+/* Descriptions are plain text with optional inline `[label](href)` links. */
+const description = stage.description
+  .split(/\[([^\]]+)\]\(([^)\s]+)\)/)
+  .map((text, index, parts) =>
+    index % 3 === 1 ? { text, href: parts[index + 1] } : index % 3 === 0 ? { text } : null,
+  )
+  .filter((part) => part !== null);
+const nextLabels =(['predict', 'train'] as const).flatMap((mode) => {
   const path = flowPaths[mode];
   const position = path.indexOf(stage.id);
   if (position < 0) return [];
@@ -75,7 +82,9 @@ const nextLabels = (['predict', 'train'] as const).flatMap((mode) => {
         <dd>{transition.output}</dd>
       </dl>
     </div>
-    <p class="df-description">{stage.description}</p>
+    <p class="df-description">
+      {description.map((part) => ('href' in part ? <a href={part.href}>{part.text}</a> : part.text))}
+    </p>
     <div class="df-views">
       {
         stage.views.map((view, index) => (

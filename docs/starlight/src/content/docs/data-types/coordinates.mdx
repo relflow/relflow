@@ -44,11 +44,11 @@ computation precision, so this does not guarantee sub-meter prediction accuracy.
 
 ## How is this leaf trained?
 
-The state head uses cross-entropy. The content objective minimizes the
-great-circle angle between predicted and observed positions, scaled by the
-training-target spread; MAE and RMSE report distances in meters. Distances use a
-[mean Earth radius of 6,371,009 meters](https://www.emc.ncep.noaa.gov/HWRF/scripts/namespacehwrf_1_1constants.html).
-This spherical surface distance does not include roads, obstacles, terrain,
+The content objective minimizes the great-circle angle between predicted and 
+observed positions, scaled by the training-target spread; MAE and RMSE report
+distances in meters. Distances use a [mean Earth radius of 6,371,009 meters]
+(https://www.emc.ncep.noaa.gov/HWRF/scripts/namespacehwrf_1_1constants.html). 
+This spherical surface distance does not include roads, obstacles, terrain, 
 or elevation and is not a pedestrian route length.
 
 ### Predictions

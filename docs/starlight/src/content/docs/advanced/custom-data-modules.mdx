@@ -7,10 +7,11 @@ import DataViews from '../../../components/DataViews.astro';
 import { repeatPurchaseSchema } from '../../../data/schema-examples';
 import { repeatPurchase } from '../../../data/observations';
 
-Connect a source that the built-in loaders do not already handle. Use
-`rf.CustomDataModule` for Python records, or `rf.ArrowDataModule` when your
-connector already returns Arrow. A complete Lightning data module is useful
-when you also need to replace batching and loader scheduling.
+Users can define their own data modules to connect a source that the built-in 
+loaders do not already handle. Use `rf.CustomDataModule` for Python records, 
+or `rf.ArrowDataModule` when your connector already returns Arrow. 
+A complete Lightning data module is useful when you also need to replace 
+batching and loader scheduling.
 
 The examples use the 0.5.0 API and application-supplied files.
 
@@ -38,11 +39,6 @@ cutoff. Training and validation records also contain the completed outcome;
 prediction records omit it.
 
 <DataViews id="custom-module-purchase-data" dataset={repeatPurchase} schema={repeatPurchaseSchema} />
-
-Neither an ingress chunk nor a training batch changes this observation boundary.
-Do not split the orders into independent customers when grouping source rows.
-The application still prepares joins, cutoffs, and evaluation splits before
-the data module receives them.
 
 ## Adapt a mapping dataset
 

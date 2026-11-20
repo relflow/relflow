@@ -60,10 +60,9 @@ runtime resources.
 
 ## How is this leaf trained?
 
-The state head uses weighted cross-entropy. A reconstructing mask
-trains a decoder against the pristine frozen encoder vector: mean squared
-coordinate error for `objective="l2"`, or mean absolute coordinate error
-for `"l1"`.
+A reconstructing mask trains a decoder against the pristine frozen encoder vector: 
+mean squared coordinate error for `objective="l2"`, or mean absolute coordinate 
+error for `"l1"`.
 
 Downstream targets train the field’s task projection while the pretrained
 encoder remains frozen. Reconstruction predicts a vector, not token IDs,

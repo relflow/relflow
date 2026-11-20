@@ -40,10 +40,10 @@ without replacing its reconstruction answer.
 
 ## How is this leaf trained?
 
-Enum trains state classification with cross-entropy and valued label
-reconstruction with multiclass cross-entropy over the fixed declaration.
-Unlike Category, every declared label is an eligible class from the start.
-Declaring a class does not supply training examples for it.
+Enum trains valued label reconstruction with multiclass cross-entropy over 
+the fixed declaration. Unlike Category, every declared label is an eligible 
+class from the start. Declaring a class does not supply training examples 
+for it.
 
 Softmax probabilities and optional ranked candidates describe competing
 classes, rather than distances between their names or declaration positions.

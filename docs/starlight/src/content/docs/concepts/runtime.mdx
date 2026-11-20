@@ -7,8 +7,10 @@ import ConceptPage from '../../../components/ConceptPage.astro';
 import { runtime } from '../../../data/concepts/runtime';
 
 Once you have defined a model, its runtime follows four methods: `fit`,
-`validate`, `test`, and `predict`. Start with a preset so you can focus on your
-data and prediction targets rather than configuring the training loop.
+`validate`, `test`, and `predict`. We recommend new users start with a 
+preset for both model architecture as well as training regimes, so 
+you can focus on your data and prediction targets rather than configuring 
+the training loop.
 
 ## Start with a preset
 
@@ -16,7 +18,7 @@ The bundled presets are `small` and `medium`. Select a preset when constructing
 the model to choose its architecture defaults, and select it again on `fit` to
 choose its training defaults. These are independent choices.
 
-The examples below use `small` for both. Its fit recipe supplies the batch size,
+The examples below use `small` for both. The `train` preset supplies the batch size,
 optimizer settings, training budget, and parameter averaging. You do not need to
 set those options individually to get started.
 
@@ -31,9 +33,7 @@ set those options individually to get started.
 
 Use a data module to stream prepared files from disk or cloud storage. Training,
 validation, and test records include the historical target answers; prediction
-requests supply the known inputs. The same schema applies throughout.
-
-<ConceptPage concept={runtime} />
+requests supply the known inputs. In all cases, the same model schema applies.
 
 ## Keep the fitted model
 
@@ -45,3 +45,5 @@ and continuing a training run.
 For custom sources or preprocessing, continue with
 [data modules](/advanced/data-modules/). Training policy overrides and learned
 state are covered in [Advanced Usage](/advanced/training/).
+
+<ConceptPage concept={runtime} />

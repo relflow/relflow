@@ -28,7 +28,7 @@ Choose one of two contracts:
   are rejected in this mode, and ranks must lie within ±2^53.
 
 A declaration must contain unique labels of one scalar type: string, integer,
-finite float, Boolean, or bytes. With `values=(10, 20, 30)`, those integer labels
+finite float, Boolean, or bytes. With `values=(10, 15, 100)`, those integer labels
 instead occupy adjacent positions `0`, `1`, and `2`. Nulls keep a separate state;
 they are neither labels nor integer ranks. String spelling and case must match;
 Ordinal has no string-folding options.
@@ -48,9 +48,9 @@ numeric geometry.
 ## How is this leaf trained?
 
 Ordinal reuses Number’s reconstruction objective on ranks before
-rounding. State classification uses cross-entropy. The default `"mae"`
-combines standardized signed-log rank error with a scaled source-rank
-absolute-error term; `"mse"` and `"huber"` use the original rank space.
+rounding. The default `"mae"` combines standardized signed-log rank error 
+with a scaled source-rank absolute-error term; `"mse"` and `"huber"` use 
+the original rank space.
 
 Output rounding and declaration-bound clipping happen when predictions
 are written. They are not multiclass classification losses and do not
