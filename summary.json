@@ -1,14 +1,14 @@
 {
-  "commit": "0b700f2df4edda5a3353b9a83dd8cf73fbcc1394",
-  "run": "https://github.com/relflow/relflow/actions/runs/44616593340",
+  "commit": "0f70f86e99d123ea0de029cd412effea427fa8af",
+  "run": "https://github.com/relflow/relflow/actions/runs/44780231157",
   "lines": {
-    "covered": 13053,
-    "total": 13989,
-    "percent": 93.30902852241047
+    "covered": 13411,
+    "total": 14372,
+    "percent": 93.31338714166435
   },
   "branches": {
-    "covered": 3889,
-    "total": 4648,
-    "percent": 83.67039586919105
+    "covered": 3958,
+    "total": 4732,
+    "percent": 83.64327979712596
   }
 }
