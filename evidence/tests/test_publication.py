@@ -4,7 +4,7 @@ import json
 import shutil
 
 import pytest
-from evidence_ci import ROOT, plan, task_key, write_json
+from evidence_ci import ROOT, plan, runtime_inputs, task_key, write_json
 from experiments.source import fingerprint, frontmatter, registry
 from record import readme_content, select, validate
 
@@ -48,13 +48,10 @@ def reports(tmp_path):
 @pytest.fixture
 def publication(tmp_path):
     root = tmp_path / "publication"
-    for entry in registry().values():
-        source = ROOT / entry["script"]
-        target = root / entry["script"]
+    for name in runtime_inputs(ROOT):
+        target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-    for helper in sorted((ROOT / "experiments").glob("[a-z]*.py")):
-        shutil.copy2(helper, root / "experiments" / helper.name)
+        shutil.copy2(ROOT / name, target)
     (root / "results.json").write_text(
         json.dumps(
             {
@@ -191,6 +188,14 @@ def test_validation_uses_the_supplied_catalog(reports, publication):
     source.unlink()
     validate(reports)
     with pytest.raises(ValueError, match="full-catalog"):
+        validate(reports, root=publication)
+
+
+@pytest.mark.parametrize("asset", [path.name for path in (ROOT / "experiments").glob("P*.npz")])
+def test_validation_rejects_changed_embedding_fixture(reports, publication, asset):
+    fixture = publication / "experiments" / asset
+    fixture.write_bytes(fixture.read_bytes()[:-1])
+    with pytest.raises(ValueError, match="Experiment runtime inputs differ"):
         validate(reports, root=publication)
 
 

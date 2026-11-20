@@ -151,6 +151,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         description: str | None = None,
         embed: bool = False,
         attention: AttentionInput = cast(AttentionInput, OMITTED),
+        cross: bool = cast(bool, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
@@ -175,6 +176,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         description: str | None = None,
         embed: bool = False,
         attention: AttentionInput = AttentionMode.mha,
+        cross: bool = False,
         reduction: ReductionConfig | None = _DEFAULT_REDUCTION,
         dropout: Rate | None = None,
         mask: MaskInput = False,
@@ -212,6 +214,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         description: str | None = None,
         embed: bool = False,
         attention: AttentionInput = cast(AttentionInput, OMITTED),
+        cross: bool = cast(bool, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
@@ -235,6 +238,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         ``mask=True`` makes a field a supervised target. ``embed=True`` emits
         its embedding during prediction. ``attention`` selects the root
         encoder mode; ``None`` disables its coordinate and sequence attention.
+        ``cross=True`` selects a rank-eight multiplicative field cross at the root.
         ``reduction`` independently selects its output representation.
         ``ffnx`` multiplies the root feed-forward width; each child has its own
         value, defaulting to 8. Activation and normalization are fixed.
@@ -260,6 +264,8 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
                 raise TypeError("schema cannot be combined with preset; use Model(schema=...) for a resolved schema")
             if ffnx is not OMITTED:
                 raise TypeError("schema cannot be combined with a root ffnx override")
+            if cross is not OMITTED:
+                raise TypeError("schema cannot be combined with a root cross override")
             if fields is not None or field_kwargs or mask is not False:
                 raise TypeError("schema cannot be combined with tree fields")
             if any(value is not OMITTED for value in (d_model, n_layers, n_heads)):
@@ -291,6 +297,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
                     description=description,
                     embed=embed,
                     attention=attention,
+                    cross=cross,
                     reduction=reduction,
                     dropout=dropout,
                     mask=mask,

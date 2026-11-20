@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { evidenceEntries } from '../../src/evidence/data';
 
 test('Evidence leads with the modeled question and a CI-driven comparison while diagnostics stay opt-in', async ({
   page,
@@ -55,6 +56,10 @@ test('the catalog verdict agrees with the report, including unmet and pending en
   page,
 }) => {
   await page.goto('/evidence/');
+  const catalogIds = await page
+    .locator('[data-evidence-entry]')
+    .evaluateAll((entries) => entries.map((entry) => entry.id).sort());
+  expect(catalogIds).toEqual(evidenceEntries.map(({ id }) => id).sort());
   const unmet = page.locator('[data-evidence-entry][data-status="not_met"]').first();
   const pending = page.locator('[data-evidence-entry][data-status="missing"]').first();
   await expect(page.locator('[data-evidence-library] .readouts')).toHaveCount(0);
@@ -158,23 +163,15 @@ test('the primary chart and nested investigation disclosures work without JavaSc
   }
 });
 
-test('every Evidence page renders its own reviewed question, setup, and scope', async ({
-  page,
-}, info) => {
+test.describe('Evidence page reviews', () => {
   test.skip(
-    info.project.name !== 'desktop-light',
+    () => test.info().project.name !== 'desktop-light',
     'Full catalog text audit once; shared mobile and theme behavior is checked above.',
   );
-  test.setTimeout(120_000);
-  const { evidenceEntries } = await import('../../src/evidence/data');
-  await page.goto('/evidence/');
-  const ids = await page
-    .locator('[data-evidence-entry]')
-    .evaluateAll((entries) => entries.map((entry) => entry.id));
-  for (const id of ids) {
-    await test.step(id, async () => {
-      await page.goto(`/evidence/${id}/`);
-      const content = evidenceEntries.find((entry) => entry.id === id)!.review!;
+  test.describe.configure({ timeout: 90_000 });
+  for (const { id, review: content } of evidenceEntries) {
+    test(`${id} renders its reviewed question, setup, and scope`, async ({ page }) => {
+      await page.goto(`/evidence/${id}/`, { waitUntil: 'domcontentloaded' });
       await expect(page.locator('h1')).toHaveText(content.question);
       const setup = page.locator('#modeling-title').locator('..');
       await expect(setup).toContainText(content.modeling);

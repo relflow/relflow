@@ -66,7 +66,8 @@ class Branch(Node, metaclass=BranchMeta):
     parsing public requests. Batch size alone does not bound nested collections.
 
     ``attention=None`` disables coordinate and sequence attention independently
-    of the reduction. ``ffnx`` multiplies this node's feed-forward hidden width
+    of the reduction. ``cross=True`` mixes this branch's fields with a rank-eight
+    multiplicative cross. ``ffnx`` multiplies this node's feed-forward hidden width
     and defaults to 8 independently of its parent.
     ``mask`` accepts the same policies as a leaf and applies to its descendants.
     Subclasses may declare children in their class bodies; constructing those
@@ -79,6 +80,7 @@ class Branch(Node, metaclass=BranchMeta):
     type: Annotated[Literal["branch"], pydantic.Field(default="branch")] = "branch"
     query: str | None = None
     attention: AttentionMode | None = AttentionMode.mha
+    cross: pydantic.StrictBool = False
     length: Annotated[pydantic.StrictInt | None, pydantic.Field(gt=0)] = None
     overflow: Overflow | None = None
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
@@ -97,6 +99,7 @@ class Branch(Node, metaclass=BranchMeta):
         length: int | None = None,
         overflow: OverflowInput | None = None,
         attention: AttentionInput = cast(AttentionInput, OMITTED),
+        cross: bool = cast(bool, OMITTED),
         n_layers: int = cast(int, OMITTED),
         n_heads: int = cast(int, OMITTED),
         ffnx: int = cast(int, OMITTED),
@@ -117,6 +120,7 @@ class Branch(Node, metaclass=BranchMeta):
             length=length,
             overflow=overflow,
             attention=attention,
+            cross=cross,
             n_layers=n_layers,
             n_heads=n_heads,
             ffnx=ffnx,

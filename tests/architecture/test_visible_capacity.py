@@ -23,13 +23,15 @@ def totals(model: rf.Model) -> list[float]:
 
 
 @pytest.mark.parametrize("reduction", [rf.Attention(), rf.Mean()], ids=["attention", "mean"])
-def test_extending_a_root_target_leaves_capacity_and_predictions_unchanged(reduction):
+@pytest.mark.parametrize("cross", [False, True])
+def test_extending_a_root_target_leaves_capacity_and_predictions_unchanged(reduction, cross):
     torch.manual_seed(0)
     model = rf.Model(
         preset="small",
         d_model=8,
         batch_size=2,
         reduction=reduction,
+        cross=cross,
         items=rf.Branch(length=4, amount=rf.Number),
         size=rf.Number,
         total=rf.Number(mask=True),

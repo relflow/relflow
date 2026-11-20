@@ -13,6 +13,7 @@ from pathlib import Path
 UV_VERSION = "0.13.7"
 PLATFORM = "x86_64-manylinux_2_28"
 PYTHON_VERSION = "3.12"
+EXTRAS = ("text", "image")
 
 
 def pins(path: Path) -> dict[str, set[str]]:
@@ -65,6 +66,7 @@ def resolve(project: Path, output: Path) -> dict:
         raise ValueError("Use fresh runtime resolution inputs; never overwrite an earlier attempt")
     output.mkdir(parents=True, exist_ok=True)
     constraints, requirements = output / names[0], output / names[1]
+    extras = [argument for name in EXTRAS for argument in ("--extra", name)]
     execute(
         [
             "uv",
@@ -73,6 +75,7 @@ def resolve(project: Path, output: Path) -> dict:
             str(project),
             "--locked",
             "--no-dev",
+            *extras,
             "--no-emit-project",
             "--no-hashes",
             "--no-header",
@@ -89,6 +92,7 @@ def resolve(project: Path, output: Path) -> dict:
             "pip",
             "compile",
             str(project / "pyproject.toml"),
+            *extras,
             "--constraints",
             str(constraints),
             "--torch-backend",
@@ -112,6 +116,8 @@ def resolve(project: Path, output: Path) -> dict:
         "python_version": PYTHON_VERSION,
         "platform": PLATFORM,
         "torch_backend": "cpu",
+        "extras": list(EXTRAS),
+        "resolver_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         "packages": resolved,
         "uv_lock_sha256": hashlib.sha256((project / "uv.lock").read_bytes()).hexdigest(),
         "constraints_sha256": hashlib.sha256(constraints.read_bytes()).hexdigest(),

@@ -91,6 +91,7 @@ from relflow.tensorfields.extensions.duration import Request as Duration
 from relflow.tensorfields.extensions.enum import Request as Enum
 from relflow.tensorfields.extensions.group import Request as Group
 from relflow.tensorfields.extensions.hashable import Request as Hash
+from relflow.tensorfields.extensions.image import Request as Image
 from relflow.tensorfields.extensions.number import Request as Number
 from relflow.tensorfields.extensions.ordinal import Request as Ordinal
 from relflow.tensorfields.extensions.quantile import Request as Quantile
@@ -170,6 +171,7 @@ __all__ = [
     "Group",
     "Hash",
     "Schema",
+    "Image",
     "Jitter",
     "Leaf",
     "Metric",

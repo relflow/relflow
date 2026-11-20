@@ -5,6 +5,7 @@ from relflow.tensorfields.extensions import duration as duration
 from relflow.tensorfields.extensions import enum as enum
 from relflow.tensorfields.extensions import group as group
 from relflow.tensorfields.extensions import hashable as hashable
+from relflow.tensorfields.extensions import image as image
 from relflow.tensorfields.extensions import number as number
 from relflow.tensorfields.extensions import ordinal as ordinal
 from relflow.tensorfields.extensions import quantile as quantile
@@ -20,6 +21,7 @@ __all__ = [
     "enum",
     "group",
     "hashable",
+    "image",
     "number",
     "ordinal",
     "quantile",

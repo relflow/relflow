@@ -13,10 +13,6 @@ export const runtime: Concept = {
       text: 'Construction applies architecture defaults to the declared fields and branches. The fit preset independently supplies the training recipe. Neither choice adds targets or changes which answers are hidden from the inputs.',
     },
     {
-      title: 'Keep validation and test separate',
-      text: 'Use validation metrics when comparing presets or other model choices. Keep the test split for the final evaluation. These calls evaluate the fitted model without training it or learning vocabularies and normalization from evaluation records.',
-    },
-    {
       title: 'Learned state travels with the model',
       text: 'Fitting updates neural parameters and field-owned state such as vocabularies and numeric normalizers. Validation, test, and prediction reuse that fitted state. Constructing the class again creates a new, untrained model.',
     },

@@ -37,10 +37,10 @@ can collide.
 
 ## How is this leaf trained?
 
-State classification uses cross-entropy. For content reconstruction,
-each normalized hash lane is quantized into `n_buckets` uniform bins.
-Per-lane cross-entropy trains the decoder to identify those buckets, averaged
-across hash lanes and selected valued targets.
+For content reconstruction, each normalized hash lane is quantized into
+`n_buckets` uniform bins. Per-lane cross-entropy trains the decoder to
+identify those buckets, averaged across hash lanes and selected valued
+targets.
 
 This objective reconstructs an identity fingerprint, not the original
 identifier. It does not provide a decoder for arbitrary user or product IDs.

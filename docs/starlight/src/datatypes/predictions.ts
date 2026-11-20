@@ -110,6 +110,9 @@ export const outputs = {
     3.5,
     'Elapsed time in the configured granularity, for example days; not a timestamp or formatted duration.',
   ),
+  image: representation(
+    'Image uses the frozen vision vector as an internal reconstruction target.',
+  ),
   text: representation(
     'Text reconstructs frozen encoder vectors internally; it does not generate strings or completions.',
   ),

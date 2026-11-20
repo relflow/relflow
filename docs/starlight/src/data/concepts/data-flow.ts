@@ -120,7 +120,7 @@ export const flowCases: FlowCase[] = scenarios.map((scenario) => {
       {
         id: 'preprocess', title: 'Preprocess', optional: true,
         summary: 'Apply any configured transformations to source records.',
-        description: 'No custom preprocessor is configured in this example: the prepared records pass through. A preprocessor can rename, join, filter, sort, or group records using an eager Polars frame before schema queries and model batching.',
+        description: 'No custom preprocessor is configured in this example: the prepared records pass through. A preprocessor can rename, join, filter, sort, or group records using an eager Polars frame before schema queries and model batching. Learn more at [data modules](/advanced/data-modules/).',
         views: [
           { kind: 'text', label: 'Before', text: 'Prepared source records, with each history and nested collection already assembled.' },
           { kind: 'text', label: 'After · pass-through', text: 'The original prepared records pass through unchanged.' },

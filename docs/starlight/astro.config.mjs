@@ -100,7 +100,10 @@ export default defineConfig({
             },
             {
               label: 'Multimodal data',
-              items: [{ label: 'Text', slug: 'data-types/text' }],
+              items: [
+                { label: 'Text', slug: 'data-types/text' },
+                { label: 'Image', slug: 'data-types/image' },
+              ],
             },
             {
               label: 'Other data',

@@ -202,6 +202,15 @@ model = rf.Model(
   Disk storage grows with observed text; only hot state is memory bounded.
   `embedder.warm(strings)` fills the cache ahead of training. Cache owners are
   shared by a trainer's loader family; separate DDP ranks share disk, not RAM.
+- `Image` accepts local image paths and Arrow object-store URIs. Install
+  `relflow[image]`. Loader workers send compact IDs for local or explicitly
+  immutable references. Bounded threads decode and prepare distinct misses,
+  then a frozen vision encoder supplies the pristine CLS vector. The cache
+  and representation/reconstruction contracts match Text. Mutable local
+  paths use file identity and timestamps; mutable remote URIs hash the
+  bytes once per lookup. Use `immutable=True` for content-addressed paths
+  to skip source I/O on warm hits. `jpeg_short_edge` opts into native JPEG
+  downsampling before the checkpoint processor and has its own cache identity.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,

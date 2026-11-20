@@ -247,7 +247,7 @@ def test_every_job_checks_out_the_same_immutable_executor(job):
     assert CONFIG["env"]["EVIDENCE_EXECUTOR"] == publication.EXECUTOR
 
 
-def test_consumer_resolves_inputs_with_the_same_immutable_helper_it_executes():
+def test_consumer_pins_the_resolver_bytes_and_uses_the_hosted_helpers_baseline_selector():
     consumer = yaml.safe_load((WORKFLOW.parent / "evidence.yml").read_text())
     helper = consumer["jobs"]["run"]["uses"].rsplit("@", 1)[1]
     resolver = next(
@@ -256,6 +256,11 @@ def test_consumer_resolves_inputs_with_the_same_immutable_helper_it_executes():
         if step.get("with", {}).get("path") == "executor"
     )
     assert resolver == helper
+    prepare = next(step for step in consumer["jobs"]["wheels"]["steps"] if step.get("id") == "inputs")
+    blob = subprocess.check_output(["git", "hash-object", "evidence/resolve.py"], cwd=WORKFLOW.parents[2], text=True)
+    assert prepare["env"]["RESOLVER_BLOB"] == blob.strip()
+    assert 'git -C candidate cat-file blob "$RESOLVER_BLOB"' in prepare["run"]
+    assert 'python -I "$RUNNER_TEMP/evidence-resolve.py"' in prepare["run"]
     pinned = yaml.safe_load(
         subprocess.check_output(
             ["git", "show", helper + ":.github/workflows/evidence-hosted.yml"], cwd=WORKFLOW.parents[2], text=True

@@ -17,6 +17,7 @@ export const leafTypes = [
   'Period',
   'Duration',
   'Text',
+  'Image',
 ] as const;
 export type LeafType = (typeof leafTypes)[number];
 
