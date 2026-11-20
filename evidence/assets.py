@@ -19,7 +19,8 @@ from evidence.releases import VERSION, inventory, supported
 
 REPOSITORY = "relflow/relflow"
 SHA = re.compile(r"[0-9a-f]{40}")
-LIMIT = 8 * 1024 * 1024
+# Bounds memory, not integrity (the SHA256 digest owns that); relflow 0.5.2's indented publication is 8.4 MiB.
+LIMIT = 32 * 1024 * 1024
 
 
 def download(url: str, *, missing: bool = False, limit: int = LIMIT) -> bytes | None:
