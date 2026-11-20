@@ -38,9 +38,8 @@ order and scale remain part of the data contract.
 
 ## How is this leaf trained?
 
-The state head uses cross-entropy. Valued target vectors use mean
-squared coordinate error with `objective="l2"`, or mean absolute coordinate
-error with `objective="l1"`.
+Valued target vectors use mean squared coordinate error with `objective="l2"`,
+or mean absolute coordinate error with `objective="l1"`.
 
 The loss averages across coordinates without learning a coordinate
 normalizer. Coordinate scales therefore affect their contribution to the

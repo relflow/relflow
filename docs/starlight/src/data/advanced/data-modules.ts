@@ -82,14 +82,6 @@ export const dataModules: Concept = {
   ],
   principles: [
     {
-      title: 'One batch row is one complete observation',
-      text: 'A customer, conversation, forecast origin, application, asset assessment, or policy review keeps its related records inside the row. The model batch size counts these outer rows. Branch limits independently bound the records inside them.',
-    },
-    {
-      title: 'Split by the decision you will evaluate',
-      text: 'Prepare training, validation, and test populations before loading. For time-dependent tasks, preserve each cutoff and wait for complete labels. The default training shuffle does not make an unsafe split valid.',
-    },
-    {
       title: 'Preprocess before structural queries',
       text: 'Preprocessors receive eager Polars frames and produce the canonical records used by the schema. Use them or your source pipeline for renaming, joins, filtering, ordering, and derived values. A node query selects within those records; it does not infer joins. Dataset-scoped preprocessing can collect the split in memory.',
     },
@@ -99,7 +91,7 @@ export const dataModules: Concept = {
     },
     {
       title: 'Let the model loop bind the loader',
-      text: 'fit, validate, test, and data-module prediction bind an unbound relflow data module to the model that owns its schema and batch size. Use data.bind(model) only for direct loader access. Create a new data module when using another loaded model.',
+      text: 'Fit, validate, test, and data-module prediction bind a relflow data module to the model that owns its schema and batch size. Use data.bind(model) only for direct loader access. Create a new data module when using another loaded model.',
     },
   ],
   examples: scenarios.map((scenario) => ({

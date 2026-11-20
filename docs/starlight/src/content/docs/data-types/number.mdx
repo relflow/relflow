@@ -21,11 +21,14 @@ own numeric normalization.
 
 The `Number` leaf accepts integer or floating-point typed data.
 Supply numeric scalars such as `29.95`, `4`, or `-2.5`. Zero is a value;
-`None` represents a null. Keep units consistent within a field.
+`None` has a special [`state`](/concepts/data-types/#state-vs-content)
+representation, and is never regressed against. Keep units consistent
+within a field.
 
 Source values, statistics, and numeric readouts retain float64 precision on
 CPU and CUDA; MPS uses float32. Special cases are handled as follows:
 
+- None takes the `null` state, so it is not embedded or penalized as a valued number.
 - A floating-point NaN takes the `other` state, so it is not embedded or penalized as a valued number.
 - Infinite values remain `valued`; the numeric embedding bounds their representation, and numeric reconstruction excludes them.
 - Integers beyond ±2^53 are rejected because float64 cannot preserve every integer there. Use [Hash](/data-types/hash/) for large identifiers.
@@ -42,7 +45,7 @@ values. Validation, test, and prediction reuse those learned statistics.
 The signed log is `sign(x) × log(1 + abs(x))`; you do not need to select a
 log transform in a separate preprocessing pipeline.
 
-Each normalized representation is encoded through sine/cosine Fourier
+Each normalized representation is encoded through sine and cosine Fourier
 features. A learned projection combines them with the field’s state embedding,
 while scalar channels retain access to magnitude. `n_bands` and `offset`
 set the base-two frequency exponents from `-n_bands` through `offset`,
@@ -52,24 +55,20 @@ pristine reconstruction targets.
 
 ## How is this leaf trained?
 
-The state head is trained with cross-entropy. Content loss uses only
-finite, valued reconstruction targets.
-
-By default, `objective="mae"` combines absolute error in standardized signed-log
-units with a bounded source-unit absolute-error term, scaled by the raw
+Content loss uses only finite, valued reconstruction targets. By default,
+`objective="mae"` combines absolute error in standardized signed-log units
+with a bounded source-unit absolute-error term, scaled by the raw
 training spread. `objective="mse"` and `"huber"` instead penalize errors in
-the original value space, standardized by its training scale. Numeric
-predictions and reported error metrics return to the source units.
+the original value space, standardized by its training scale. All error metrics
+are given in the original source units, as provided to the model.
 
 ### Predictions
 
-A numeric prediction returns in the same units as its training labels. For a
+A numeric prediction returns in the same units as its training labels. For a numeric
 field named `delivery_days`, `predictions.delivery_days.content` contains the
-predicted number of days. The surrounding result also carries the field's state and whether it was
-inferred. See [Runtime](/concepts/runtime/) for how targets fit into
-the output record.
-
-Error metrics are reported in the original units.
+predicted number of days. The higher-order `predictions.delivery_days` result also
+carries the field's state and whether it was inferred. A representation of this JSON
+structure is given below.
 
 <ValueTree
   id="number-predictions"
@@ -86,7 +85,7 @@ Error metrics are reported in the original units.
 | `objective` | `"mae"` | Choose `"mae"`, `"mse"`, or `"huber"` for numeric reconstruction. |
 | `alpha` | `None` | Use cumulative normalization statistics, or a value between 0 and 1 for exponential training updates. |
 | `jitter` | `rf.Jitter()` | Configure training-only noise while preserving reconstruction targets. |
-| `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
+| `n_bands` | `8` | Set the lower base-two Fourier exponent; must be positive. |
 | `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
 
 ### Request methods
@@ -149,8 +148,5 @@ dictionary does not change the model.
 - [Quantile](/data-types/quantile/) represents a scalar by its position within the training distribution.
 - [Ordinal](/data-types/ordinal/) represents ordered labels or integer ranks.
 - [Duration](/data-types/duration/) derives a numeric elapsed value from timestamps.
-- [Vector](/data-types/vector/) holds a fixed collection of numeric coordinates.
-- [Period](/data-types/period/) encodes recurring calendar context.
-- [Hash](/data-types/hash/) represents identifier relationships without a numeric magnitude.
 
 </DataTypePage>

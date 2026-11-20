@@ -46,10 +46,9 @@ the reconstruction answer.
 
 ## How is this leaf trained?
 
-The state head uses cross-entropy. Content reconstruction uses multiclass
-cross-entropy over populated vocabulary labels. Unknown target identities
-supply no label-classification loss; they are still counted when reporting
-target vocabulary coverage.
+Content reconstruction uses multiclass cross-entropy over populated vocabulary
+labels. Unknown target identities supply no label-classification loss; they are
+still counted when reporting target vocabulary coverage.
 
 A softmax supplies the returned class probabilities. Spare allocation and
 the unavailable sentinel are not prediction classes.

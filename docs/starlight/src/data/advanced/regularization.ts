@@ -155,7 +155,7 @@ export const regularization: Concept = {
   principles: [
     { title: 'Keep target hiding permanent', text: 'mask=True is the supervised-target contract: that field is never embedded and receives a reconstruction objective. A float mask or Mask(rate=...) instead adds training-only random input dropout by default. Replacing a target’s mask=True with a float changes its role.' },
     { title: 'Choose the boundary for noise', text: 'Jitter perturbs supported continuous training representations, while dropout configures neural attention/feed-forward regularization. Jitter uses standardized Number values by default; normalize=False selects its raw representation. Neither edits source records or target values.' },
-    { title: 'Sample history without changing the question', text: 'A bounded history with overflow="random" uses a contiguous random training window and retains the tail for validation, test, and prediction. Supply more than the cap for sampling to vary and bound the candidate pool separately. Keep requested forecast slots and target-bearing claim records intact.' },
+    { title: 'Sample history without changing the question', text: 'A bounded history with overflow="random" uses a contiguous random training window and retains the tail for validation, test, and prediction. Supply more than the cap for sampling to vary and bound the candidate pool separately' },
   ],
   examples: scenarios.map(({ id }) => ({ caseId: id, ...examples[id] })),
   takeaway: 'Target masks define the task. Input masking, jitter, dropout, and history sampling are optional training choices that need their own held-out comparison.',

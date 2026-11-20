@@ -63,8 +63,8 @@ export const training: Concept = {
   title: 'Training and learned state',
   description: 'Distinguish construction, fitting, evaluation, model artifacts, and full training-state resume.',
   intro: [
-    'A schema constructs an untrained network. Fitting changes its parameters and field-owned state using historical observations and hidden answers. Prediction uses that fitted state on new observations.',
-    'The examples assume the selected class definition and application-prepared labeled splits. They illustrate API calls, not measured results. The saved-model step follows fitting; constructing a schema alone does not produce a useful trained predictor.',
+    'A schema constructs an untrained network. Fitting changes its parameters and field-owned state using training observations and hidden answers. Prediction uses that fitted state on new observations.',
+    'The examples assume the selected class definition and application-prepared labeled splits, and serve to illustrate API calls. The saved-model step follows fitting; constructing a schema alone does not produce a useful trained predictor.',
   ],
   principles: [
     {
@@ -73,11 +73,11 @@ export const training: Concept = {
     },
     {
       title: 'Fitting and evaluation have different jobs',
-      text: 'fit learns and can use validation metrics for model selection. validate and test evaluate their corresponding splits without training the model. Reserve test for the population and decisions you intend to report, with labels unavailable as inputs.',
+      text: 'Fit learns and can use validation metrics for model selection. Validate and test evaluate their corresponding splits without training the model. Reserve test for the population and decisions you intend to report, with labels unavailable as inputs.',
     },
     {
       title: 'Architecture and fit presets are independent',
-      text: 'The constructor’s preset chooses architecture defaults. fit(preset=...) independently selects optional training defaults. Explicit settings win. The bundled fit recipes use eight epochs and EMA with early stopping and rollback off; ordinary fit defaults enable early stopping and rollback using validation loss.',
+      text: 'The constructor’s preset chooses architecture defaults. fit(preset=...) independently selects optional training defaults. Explicit settings always override preset values. The bundled fit recipes use eight epochs and EMA with early stopping and rollback off; ordinary fit defaults enable early stopping and rollback using validation loss.',
     },
     {
       title: 'Saving a model is different from resuming a run',
@@ -85,7 +85,7 @@ export const training: Concept = {
     },
     {
       title: 'Some resources stay outside the artifact',
-      text: 'Recreate data sources and processors when loading a model, and make required external text-encoder assets available. Compilation is transient. A schema mutation can retain compatible learned state, but a newly added target still needs its own training answers and evaluation.',
+      text: 'Recreate data sources and processors when loading a model, and make required external text-encoder assets available.',
     },
   ],
   examples: scenarios.map((scenario) => ({

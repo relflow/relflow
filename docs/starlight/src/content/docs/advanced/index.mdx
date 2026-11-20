@@ -3,9 +3,16 @@ title: Advanced usage
 description: Build custom data pipelines, register new leaf types, and manage learned state as your data changes.
 ---
 
-Extend how data reaches a model, how a field represents information, or how
-learned state evolves between training runs. These guides follow the contracts
-behind the high-level modeling API.
+Relflow promises to abstract away the most complex aspects of deep learning
+for enterprise data. However, we also know that it is sometimes necessary for
+practitioners to open the hood of models as advanced as relflow and to fully
+take advantage of the customizability offered.
+
+Below, you will find details around advanced features and applications of
+relflow models. If you have a unique challenge which you feel is not clearly
+addressed here, please feel free to
+[open a ticket](https://github.com/relflow/relflow/issues/new/choose),
+or [reach out to our community on Discord](https://discord.gg/DVyZUkvTFA)!
 
 ## Choose the boundary you need
 
@@ -34,10 +41,10 @@ the pipeline.
 
 | Change | Owning layer |
 | --- | --- |
-| Join, filter, rename, sort, or derive source values | Source preparation or an `rf.Preprocessor`. |
+| Join, filter, rename, sort, or derive source values | `rf.Preprocessor`. |
 | Select values already present in the prepared observation | The schema’s explicit node queries. |
 | Deliver observations repeatedly for training and evaluation | A source factory or data module. |
-| Represent a new kind of value and learn from it | A tensorfield extension. |
+| Represent a new kind of value and/or learn from it in a chosen manner | A tensorfield extension. |
 | Choose a decision from a prediction | Application policy or an `rf.Postprocessor`. |
 
 For example, grouping transactions into customer histories belongs to data
