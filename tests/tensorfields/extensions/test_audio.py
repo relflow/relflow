@@ -597,3 +597,313 @@ def test_offline_whisper_training_prediction_and_checkpoint_with_loader_worker(t
     model.save(checkpoint)
     restored = rf.Model.load(checkpoint)
     assert restored.predict(data).equals(predicted)
+
+
+@rf.preprocess
+def prepare_voicemail(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.rename({"raw_voicemail": "voicemail"})
+
+
+@rf.postprocess
+def attach_flag(frame: pl.DataFrame) -> pl.DataFrame:
+    prob = frame["predictions"].struct.field("escalated").struct.field("content").struct.field("probability")
+    return frame.with_columns((prob >= 0.5).alias("escalated_flag"))
+
+
+@pytest.mark.integration
+def test_end_to_end_multiformat_relational_audio_pipeline(tmp_path, monkeypatch):
+    import io
+
+    import lightning.pytorch as lit
+    import pyarrow.ipc as ipc
+    import yaml
+    from fastapi.testclient import TestClient
+    from transformers import WhisperConfig, WhisperFeatureExtractor, WhisperModel
+
+    monkeypatch.setenv("RELFLOW_CACHE_DIR", str(tmp_path / "default_cache"))
+    lit.seed_everything(404, workers=True)
+
+    encoder_dir = tmp_path / "whisper_encoder"
+    WhisperFeatureExtractor(chunk_length=1, n_samples=16000, nb_max_frames=100, feature_size=32).save_pretrained(
+        encoder_dir
+    )
+    whisper_init = WhisperModel(
+        WhisperConfig(
+            d_model=16,
+            encoder_layers=0,
+            encoder_attention_heads=2,
+            encoder_ffn_dim=32,
+            decoder_layers=1,
+            decoder_attention_heads=2,
+            decoder_ffn_dim=32,
+            num_mel_bins=32,
+            max_source_positions=50,
+        )
+    )
+    with torch.no_grad():
+        whisper_init.encoder.conv1.weight.zero_()
+        whisper_init.encoder.conv1.bias.zero_()
+        whisper_init.encoder.conv1.weight[:8, :10, 1] = 1.0
+        whisper_init.encoder.conv1.weight[:8, 20:, 1] = -1.0
+        whisper_init.encoder.conv1.weight[8:, 20:, 1] = 1.0
+        whisper_init.encoder.conv1.weight[8:, :10, 1] = -1.0
+        whisper_init.encoder.conv2.weight.zero_()
+        whisper_init.encoder.conv2.bias.zero_()
+        for ch in range(16):
+            whisper_init.encoder.conv2.weight[ch, ch, 1] = 1.0
+        whisper_init.encoder.embed_positions.weight.zero_()
+    whisper_init.save_pretrained(encoder_dir)
+
+    media_dir = tmp_path / "recordings"
+    media_dir.mkdir()
+    formats = (
+        ("wav", "WAV", "PCM_16", 48000, 2),
+        ("flac", "FLAC", "PCM_16", 24000, 2),
+        ("ogg", "OGG", "VORBIS", 16000, 1),
+        ("opus.ogg", "OGG", "OPUS", 48000, 1),
+        ("mp3", "MP3", None, 16000, 1),
+        ("aiff", "AIFF", "PCM_16", 22050, 2),
+    )
+
+    def write_recording(index: int, urgent: bool, split: str) -> str:
+        ext, fmt, subtype, rate, ch = formats[index % len(formats)]
+        rng = np.random.default_rng(9000 + index + (500 if split == "test" else 0))
+        # Place the distinguishing acoustic cue in the final third (0.4s..0.6s) so
+        # multi-window clip="chunks" (window=0.2s, max_windows=3) is required to observe it.
+        lead = np.linspace(0.0, 0.4, int(0.4 * rate), endpoint=False, dtype=np.float64)
+        tail = np.linspace(0.0, 0.2, int(0.2 * rate), endpoint=False, dtype=np.float64)
+        neutral = 0.25 * np.sin(2.0 * np.pi * rng.uniform(850.0, 950.0) * lead)
+        cue_freq = rng.uniform(3100.0, 3800.0) if urgent else rng.uniform(160.0, 230.0)
+        cue = 0.75 * np.sin(2.0 * np.pi * cue_freq * tail + rng.uniform(0.0, 2.0 * np.pi))
+        mono = np.concatenate([neutral, cue]).astype(np.float32)
+        samples = np.column_stack([mono, 0.8 * mono]) if ch == 2 else mono
+        name = f"{split}_{index:03d}.{ext}"
+        sf.write(media_dir / name, samples, rate, format=fmt, subtype=subtype)
+        return name
+
+    def make_split(split: str, count: int) -> pl.DataFrame:
+        rows = []
+        for idx in range(count):
+            urgent = bool(idx % 2)
+            pattern = (idx // 2) % 3
+            primary = write_recording(idx * 2, urgent, split)
+            followup = write_recording(idx * 2 + 1, urgent, split)
+            calls = (
+                []
+                if pattern == 0
+                else [{"clip": None, "channel": "phone"}, {"clip": followup, "channel": "app"}]
+                if pattern == 1
+                else [{"clip": primary, "channel": "phone"}, {"clip": followup, "channel": "web"}]
+            )
+            rows.append(
+                {
+                    "case_id": f"{split}-{idx}",
+                    "raw_voicemail": primary,
+                    "calls": calls,
+                    "escalated": urgent,
+                    "priority": "urgent" if urgent else "routine",
+                }
+            )
+        return pl.DataFrame(rows)
+
+    train_df = make_split("train", 24)
+    val_df = make_split("val", 8)
+    test_df = make_split("test", 12)
+
+    train_parquet = tmp_path / "train.parquet"
+    val_parquet = tmp_path / "val.parquet"
+    test_parquet = tmp_path / "test.parquet"
+    train_df.write_parquet(train_parquet)
+    val_df.write_parquet(val_parquet)
+    test_df.write_parquet(test_parquet)
+
+    store_dir = tmp_path / "audio_store"
+
+    class Call(rf.Branch):
+        clip = rf.Audio(
+            model=str(encoder_dir),
+            base=str(media_dir),
+            store=str(store_dir),
+            window=0.2,
+            stride=0.2,
+            max_windows=3,
+            clip="chunks",
+        )
+        channel = rf.Category
+
+    class EscalationModel(rf.Model):
+        voicemail = rf.Audio(
+            model=str(encoder_dir),
+            base=str(media_dir),
+            store=str(store_dir),
+            window=0.2,
+            stride=0.2,
+            max_windows=3,
+            clip="chunks",
+            embed=True,
+        )
+        calls = Call(length=3, overflow="tail")
+        escalated = rf.Boolean(mask=True)
+        priority = rf.Enum("routine", "urgent", mask=True)
+
+    model = EscalationModel(d_model=32, n_layers=2, n_heads=4)
+    backbone = audio.CachedModel.get_model(str(encoder_dir)).model
+    initial_backbone = {name: param.detach().clone() for name, param in backbone.named_parameters()}
+
+    # Pre-warm from a Polars Series and verify duplicate calls add zero new cache entries.
+    warmed = model.nodes["/voicemail"].embedder.warm(train_df["raw_voicemail"])
+    assert warmed == len(train_df)
+    assert model.nodes["/voicemail"].embedder.warm(train_df["raw_voicemail"]) == 0
+
+    dm = rf.ArrowDataModule(
+        model=model,
+        train=str(train_parquet),
+        validate=str(val_parquet),
+        test=str(test_parquet),
+        preprocessor=prepare_voicemail,
+        num_workers=0,
+        persistent_workers=False,
+        pin_memory=False,
+    )
+    model.fit(
+        dm,
+        batch_size=8,
+        max_epochs=32,
+        learning_rate=4e-3,
+        early_stopping=False,
+        rollback=False,
+        accelerator="cpu",
+        devices=1,
+        precision="32-true",
+        deterministic=True,
+        logger=False,
+        enable_checkpointing=False,
+        enable_model_summary=False,
+        enable_progress_bar=False,
+        num_sanity_val_steps=0,
+    )
+
+    for name, param in backbone.named_parameters():
+        assert param.grad is None
+        assert torch.equal(param, initial_backbone[name])
+
+    val_metrics = model.validate(dm, accelerator="cpu", devices=1, logger=False, enable_progress_bar=False)
+    test_metrics = model.test(dm, accelerator="cpu", devices=1, logger=False, enable_progress_bar=False)
+    assert val_metrics and test_metrics
+
+    unseen_inputs = test_df.select("case_id", "raw_voicemail", "calls")
+    whole = model.predict(unseen_inputs, preprocess=prepare_voicemail, postprocess=attach_flag, retain=("case_id",))
+    chunked = model.predict(
+        unseen_inputs,
+        batch_size=3,
+        preprocess=prepare_voicemail,
+        postprocess=attach_flag,
+        retain=("case_id",),
+    )
+    assert set(whole.columns) == {"inputs", "predictions", "representations", "escalated_flag"}
+    assert whole["escalated_flag"].to_list() == chunked["escalated_flag"].to_list()
+
+    truth = test_df["escalated"].to_numpy()
+    esc_pred = whole["escalated_flag"].to_numpy()
+    prio_pred = whole["predictions"].struct.field("priority").struct.field("content").struct.field("value").to_numpy()
+    assert np.mean(esc_pred == truth) >= 0.85
+    assert np.mean((prio_pred == "urgent") == truth) >= 0.85
+
+    # Streaming Parquet batch Writer parity.
+    written_dir = tmp_path / "batch_output"
+    pred_dm = rf.PolarsDataModule(
+        model=model,
+        predict=unseen_inputs,
+        preprocessor=prepare_voicemail,
+        num_workers=0,
+        persistent_workers=False,
+        pin_memory=False,
+    )
+    lit.Trainer(
+        accelerator="cpu",
+        devices=1,
+        logger=False,
+        enable_progress_bar=False,
+        callbacks=[rf.Writer(str(written_dir))],
+    ).predict(model, pred_dm, return_predictions=False)
+    written_table = pl.read_parquet(written_dir / "*.parquet")
+    assert written_table.height == len(test_df)
+
+    # Checkpoint save, inspect, preflight check, and reload into a cold store.
+    ckpt_path = tmp_path / "escalation.rf"
+    model.save(ckpt_path)
+    inspected = rf.inspect(ckpt_path)
+    assert inspected["command"] == "inspect"
+    checked = rf.check(
+        ckpt_path,
+        data={"train": str(train_parquet)},
+        preprocessor=prepare_voicemail,
+        execute=True,
+        sample=8,
+    )
+    assert all(phase["status"] == "passed" for phase in checked["phases"])
+
+    restored = rf.Model.load(ckpt_path)
+    restored.update(rf.where("type") == "audio", store=str(tmp_path / "cold_store"))
+    reloaded = restored.predict(
+        unseen_inputs, preprocess=prepare_voicemail, postprocess=attach_flag, retain=("case_id",)
+    )
+    assert reloaded["escalated_flag"].to_list() == whole["escalated_flag"].to_list()
+
+    # YAML schema declaration loading.
+    yaml_path = tmp_path / "schema.yaml"
+    yaml_path.write_text(
+        yaml.safe_dump(
+            {
+                "d_model": 16,
+                "n_layers": 1,
+                "n_heads": 2,
+                "fields": {
+                    "voicemail": {
+                        "type": "audio",
+                        "model": str(encoder_dir),
+                        "base": str(media_dir),
+                        "store": str(tmp_path / "yaml_store"),
+                        "window": 0.2,
+                        "clip": "tail",
+                    },
+                    "escalated": {"type": "boolean", "mask": True},
+                },
+            }
+        )
+    )
+    yaml_model = rf.Model.from_yaml(yaml_path)
+    assert yaml_model.predict(unseen_inputs.select("raw_voicemail"), preprocess=prepare_voicemail).height == len(
+        test_df
+    )
+
+    # Live FastAPI ASGI serving over both JSON and Arrow IPC streams.
+    deployment = (
+        rf.Deployment(model=restored, accelerator="cpu", retain=("case_id",))
+        .preprocess(prepare_voicemail)
+        .postprocess(attach_flag)
+    )
+    with TestClient(deployment.app()) as client:
+        assert client.get("/health").status_code == 200
+        json_rows = unseen_inputs.head(2).to_dicts()
+        r_json = client.post("/predict", json=json_rows)
+        assert r_json.status_code == 200, r_json.text
+        served_flags = [row["escalated_flag"] for row in r_json.json()]
+        assert served_flags == whole["escalated_flag"].head(2).to_list()
+
+        ipc_frame = unseen_inputs.slice(2, 3).to_arrow()
+        sink = io.BytesIO()
+        with ipc.new_stream(sink, ipc_frame.schema) as writer:
+            writer.write_table(ipc_frame)
+        r_ipc = client.post(
+            "/predict",
+            content=sink.getvalue(),
+            headers={
+                "content-type": "application/vnd.apache.arrow.stream",
+                "accept": "application/vnd.apache.arrow.stream",
+            },
+        )
+        assert r_ipc.status_code == 200
+        with ipc.open_stream(io.BytesIO(r_ipc.content)) as reader:
+            ipc_out = pl.from_arrow(reader.read_all())
+        assert ipc_out["escalated_flag"].to_list() == whole["escalated_flag"].slice(2, 3).to_list()
