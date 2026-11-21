@@ -307,7 +307,7 @@ def waveforms(
                 count = int(source.channels)
                 if isinstance(channels, int) and channels >= count:
                     raise ValueError(f"audio {path!r} has {count} channel(s); cannot select channel index {channels}")
-                if source.seekable() and source.frames > 0:
+                if source.seekable() and 0 < source.frames < 2**60:
                     intervals = spans(
                         int(source.frames),
                         rate,
@@ -513,8 +513,21 @@ def pool_outputs(
         scale = attention_mask.shape[1] / frames
         counts = (attention_mask.sum(dim=-1).float() / scale).ceil().long().clamp(min=1, max=frames)
         valid = torch.arange(frames, device=hidden.device).unsqueeze(0) < counts.unsqueeze(1)
+    empty = ~valid.any(dim=1)
+    if empty.any():
+        valid = valid.clone()
+        valid[empty, 0] = True
     weights = valid.unsqueeze(-1).to(dtype=hidden.dtype)
     return ((hidden * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)).float().contiguous()
+
+
+def minimum_samples(config: Any, rate: int) -> int:
+    receptive = 1
+    kernels = getattr(config, "conv_kernel", ()) or ()
+    strides = getattr(config, "conv_stride", ()) or ()
+    for kernel, step in reversed(list(zip(kernels, strides, strict=False))):
+        receptive = (receptive - 1) * int(step) + int(kernel)
+    return max(receptive, round(0.025 * rate), 1)
 
 
 def encode_clips(
@@ -532,6 +545,8 @@ def encode_clips(
         return torch.empty((0, hidden_size), dtype=torch.float32, device=device)
     names = tuple(getattr(extractor, "model_input_names", ("input_values",)))
     config = getattr(model, "config", None)
+    floor = minimum_samples(config, rate)
+    clips = [clip if len(clip) >= floor else np.pad(clip, (0, floor - len(clip))) for clip in clips]
     kind = getattr(config, "model_type", None)
     group_norm = getattr(config, "feat_extract_norm", None) == "group" and "input_values" in names
 
@@ -566,7 +581,8 @@ def encode_clips(
         kwargs["padding"] = True
         kwargs["return_attention_mask"] = True
 
-    prepared = extractor(clips, **kwargs)
+    with torch.autocast(device_type="cpu", enabled=False), torch.autocast(device_type=device.type, enabled=False):
+        prepared = extractor(clips, **kwargs)
     mask_array = prepared.get("attention_mask")
     attention_mask = torch.as_tensor(np.asarray(mask_array), device=device) if mask_array is not None else None
     forward_inputs: dict[str, torch.Tensor] = {}
@@ -652,6 +668,8 @@ class Embedder(FrozenEmbedder):
         """Decode and resample the next bounded batch on CPU while encoding the current batch."""
         if isinstance(records, Payloads):
             records = [bytes(row) for row in records]
+        if not records:
+            return torch.empty((0, self.hidden_size), dtype=torch.float32, device=device)
         model = self._cached_model.module_for(device)
         size = self.request.encoder_batch_size
         rate = self.sampling_rate

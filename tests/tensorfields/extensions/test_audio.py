@@ -320,6 +320,60 @@ def test_deterministic_span_selection_and_pooling_modes():
     torch.testing.assert_close(
         audio.pool_outputs(outputs, model, mask, audio.Pooling.pooler, 2, "m"), torch.tensor([[7.0, 8.0]])
     )
+    zero_mask = torch.zeros((1, 3), dtype=torch.int64)
+    torch.testing.assert_close(
+        audio.pool_outputs(outputs, model, zero_mask, audio.Pooling.mean, 2, "m"), torch.tensor([[1.0, 2.0]])
+    )
+    assert (
+        audio.minimum_samples(
+            SimpleNamespace(conv_kernel=(10, 3, 3, 3, 3, 2, 2), conv_stride=(5, 2, 2, 2, 2, 2, 2)), 16000
+        )
+        == 400
+    )
+
+
+def test_unframed_stream_fallback_and_empty_pool(acoustic, tmp_path, monkeypatch):
+    model = build(tmp_path)
+    embedder = model.nodes["/clip"].embedder
+    assert embedder.pool([], torch.device("cpu"), {}).shape == (0, 3)
+
+    real_soundfile = sf.SoundFile
+
+    class UnframedSoundFile:
+        def __init__(self, stream):
+            self.inner = real_soundfile(stream)
+            self.samplerate = self.inner.samplerate
+            self.channels = self.inner.channels
+            self.frames = 2**63 - 1
+
+        def seekable(self):
+            return True
+
+        def read(self, *args, **kwargs):
+            return self.inner.read(*args, **kwargs)
+
+        def __enter__(self):
+            self.inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self.inner.__exit__(*args)
+
+    monkeypatch.setattr(sf, "SoundFile", UnframedSoundFile)
+    record = audio.snapshot(str(tmp_path / "positive.wav"), True)[0]
+    pieces = audio.waveforms(
+        record,
+        {},
+        target_rate=16000,
+        offset=0.0,
+        duration=None,
+        window=0.05,
+        stride=None,
+        max_windows=2,
+        clip="tail",
+        channels="mean",
+    )
+    assert len(pieces) == 1 and len(pieces[0]) == 800
 
 
 @pytest.mark.integration
@@ -340,6 +394,7 @@ def test_whisper_hubert_ast_and_clap_encoder_contracts(tmp_path):
     )
 
     device = torch.device("cpu")
+    impulse = np.full(50, 0.25, dtype=np.float32)
     short = np.sin(np.linspace(0.0, 20.0, 8000, dtype=np.float32))
     longer = np.cos(np.linspace(0.0, 60.0, 24000, dtype=np.float32))
 
@@ -386,6 +441,18 @@ def test_whisper_hubert_ast_and_clap_encoder_contracts(tmp_path):
         model_name="whisper",
     )
     torch.testing.assert_close(whisper_out[0], solo_short[0], atol=1e-6, rtol=1e-6)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        bf16_out = audio.encode_clips(
+            whisper_backbone.model,
+            whisper_fe,
+            [short],
+            device,
+            rate=16000,
+            pooling=audio.Pooling.auto,
+            hidden_size=16,
+            model_name="whisper",
+        )
+    assert bf16_out.dtype == torch.float32 and torch.isfinite(bf16_out).all()
 
     # Group-normalized waveform models bucket unequal lengths so padding cannot alter embeddings.
     hubert = HubertModel(
@@ -406,6 +473,10 @@ def test_whisper_hubert_ast_and_clap_encoder_contracts(tmp_path):
         hubert, wav_fe, [short], device, rate=16000, pooling=audio.Pooling.auto, hidden_size=16, model_name="h"
     )
     torch.testing.assert_close(batched[0], solo[0], atol=1e-6, rtol=1e-6)
+    impulse_hubert = audio.encode_clips(
+        hubert, wav_fe, [impulse], device, rate=16000, pooling=audio.Pooling.auto, hidden_size=16, model_name="h"
+    )
+    assert impulse_hubert.shape == (1, 16) and impulse_hubert.abs().sum() > 0
 
     # AST supports pooler_output in auto/pooler modes and token pooling in cls/mean modes.
     ast = ASTModel(
@@ -421,7 +492,9 @@ def test_whisper_hubert_ast_and_clap_encoder_contracts(tmp_path):
     ast_fe = ASTFeatureExtractor(max_length=64, num_mel_bins=32)
     assert audio.native_window(ast_fe) == pytest.approx(0.64)
     for mode in (audio.Pooling.auto, audio.Pooling.pooler, audio.Pooling.cls, audio.Pooling.mean):
-        out = audio.encode_clips(ast, ast_fe, [short], device, rate=16000, pooling=mode, hidden_size=16, model_name="a")
+        out = audio.encode_clips(
+            ast, ast_fe, [impulse], device, rate=16000, pooling=mode, hidden_size=16, model_name="a"
+        )
         assert out.shape == (1, 16) and torch.isfinite(out).all()
 
     # CLAP unwraps audio_model and avoids random truncation on overlong clips.
