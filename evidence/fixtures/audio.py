@@ -15,11 +15,8 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 import torch
-from huggingface_hub import snapshot_download
-from media import project
-from transformers import AutoFeatureExtractor, AutoModel
+from media import AUDIO, embed
 
-AUDIO = ("openai/whisper-base", "e37978b90ca9030d5170a5c07aadb050351a65bb")
 RATE = 16000
 
 
@@ -52,48 +49,16 @@ def synthesize(seed, high, pulsed):
     return buffer.getvalue()
 
 
-@torch.inference_mode()
-def embed_audio(blobs, train, cache_dir=None):
-    """Encode FLAC bytes with the pinned Whisper-base encoder and fit train-only PCA."""
-    repo, revision = AUDIO
-    path = snapshot_download(
-        repo,
-        revision=revision,
-        cache_dir=cache_dir,
-        allow_patterns=["config.json", "model.safetensors", "preprocessor_config.json"],
-    )
-    extractor = AutoFeatureExtractor.from_pretrained(path, local_files_only=True)
-    encoder = AutoModel.from_pretrained(path, local_files_only=True).get_encoder().eval()
-    waveforms = []
-    for raw in blobs:
-        with sf.SoundFile(io.BytesIO(raw)) as source:
-            waveforms.append(source.read(dtype="float32"))
-    pooled = []
-    for start in range(0, len(waveforms), 8):
-        batch = waveforms[start : start + 8]
-        inputs = extractor(batch, sampling_rate=RATE, return_attention_mask=True, return_tensors="pt")
-        hidden = encoder(input_features=inputs.input_features).last_hidden_state
-        scale = inputs.attention_mask.shape[1] / hidden.shape[1]
-        counts = (inputs.attention_mask.sum(dim=-1).float() / scale).ceil().long().clamp(min=1, max=hidden.shape[1])
-        valid = (torch.arange(hidden.shape[1]).unsqueeze(0) < counts.unsqueeze(1)).unsqueeze(-1).float()
-        pooled.append((hidden * valid).sum(dim=1) / valid.sum(dim=1))
-    vectors = torch.cat(pooled, dim=0)
-    scores, variance = project(vectors, train)
-    return scores, dict(
-        model=repo,
-        revision=revision,
-        pooling="valid-frame mean",
-        width=int(vectors.shape[1]),
-        train_variance_retained=variance,
-    )
-
-
 def freeze(output, audio_cache=None):
     split = np.array(["train"] * 12 + ["validation"] * 4 + ["test"] * 8)
     seeds = np.arange(8400, 8400 + len(split))
     blobs = [synthesize(int(seed), high, pulsed) for seed, high, pulsed in product(seeds, (False, True), (False, True))]
+    waveforms = []
+    for raw in blobs:
+        with sf.SoundFile(io.BytesIO(raw)) as source:
+            waveforms.append(source.read(dtype="float32"))
     keys = np.array([hashlib.sha256(raw).hexdigest()[:16] + ".flac" for raw in blobs])
-    vectors, metadata = embed_audio(blobs, np.repeat(split == "train", 4), audio_cache)
+    vectors, metadata = embed(AUDIO, waveforms, np.repeat(split == "train", 4), audio_cache)
     with output.open("xb") as stream:
         np.savez_compressed(
             stream,
