@@ -1,3 +1,4 @@
+from relflow.tensorfields.extensions import audio as audio
 from relflow.tensorfields.extensions import boolean as boolean
 from relflow.tensorfields.extensions import category as category
 from relflow.tensorfields.extensions import dateparts as dateparts
@@ -14,6 +15,7 @@ from relflow.tensorfields.extensions import text as text
 from relflow.tensorfields.extensions import vector as vector
 
 __all__ = [
+    "audio",
     "boolean",
     "category",
     "dateparts",
