@@ -201,6 +201,7 @@ files = [
     "evidence/experiments/reporting.py",
     "evidence/experiments/run.py",
     "evidence/experiments/source.py",
+    "evidence/fixtures/audio.py",
     "evidence/fixtures/media.py",
     "evidence/fixtures/questions.py",
     "evidence/hosted.md",
