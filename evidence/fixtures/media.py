@@ -14,11 +14,12 @@ import numpy as np
 import torch
 from huggingface_hub import snapshot_download
 from PIL import Image
-from transformers import AutoModel, AutoTokenizer
+from transformers import AutoFeatureExtractor, AutoModel, AutoTokenizer
 from transformers.models.auto.image_processing_auto import AutoImageProcessor
 
 TEXT = ("sentence-transformers/all-MiniLM-L6-v2", "1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 IMAGE = ("facebook/dinov2-small", "ed25f3a31f01632728cabb09d1542f84ab7b0056")
+AUDIO = ("openai/whisper-base", "e37978b90ca9030d5170a5c07aadb050351a65bb")
 WIDTH = 8
 # Within each topic the first twelve sentences are training, the next four
 # validation, and the final eight test. Each sentence is an original input.
@@ -131,6 +132,24 @@ def embed(checkpoint, inputs, train, cache_dir=None):
             ]
         )
         pooling = "CLS"
+    elif checkpoint == AUDIO:
+        extractor = AutoFeatureExtractor.from_pretrained(path, local_files_only=True)
+        encoder = model.get_encoder()
+        pooled = []
+        for i in range(0, len(inputs), 8):
+            batch = extractor(
+                inputs[i : i + 8],
+                sampling_rate=extractor.sampling_rate,
+                return_attention_mask=True,
+                return_tensors="pt",
+            )
+            hidden = encoder(input_features=batch.input_features).last_hidden_state
+            scale = batch.attention_mask.shape[1] / hidden.shape[1]
+            counts = (batch.attention_mask.sum(dim=-1).float() / scale).ceil().long().clamp(min=1, max=hidden.shape[1])
+            valid = (torch.arange(hidden.shape[1]).unsqueeze(0) < counts.unsqueeze(1)).unsqueeze(-1).float()
+            pooled.append((hidden * valid).sum(dim=1) / valid.sum(dim=1))
+        vectors = torch.cat(pooled, dim=0)
+        pooling = "valid-frame mean"
     else:
         raise ValueError(f"No fixture pooling rule for {repo} at {revision}")
     scores, variance = project(vectors, train)

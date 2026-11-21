@@ -82,6 +82,7 @@ from relflow.tensorfields import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.extensions.audio import Request as Audio
 from relflow.tensorfields.extensions.boolean import Request as Boolean
 from relflow.tensorfields.extensions.category import Request as Category
 from relflow.tensorfields.extensions.coordinates import Request as Coordinates
@@ -149,6 +150,7 @@ __all__ = [
     "__version__",
     "Address",
     "Attention",
+    "Audio",
     "Branch",
     "BatchContext",
     "Boolean",

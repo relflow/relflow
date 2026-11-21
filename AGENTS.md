@@ -211,13 +211,21 @@ model = rf.Model(
   bytes once per lookup. Use `immutable=True` for content-addressed paths
   to skip source I/O on warm hits. `jpeg_short_edge` opts into native JPEG
   downsampling before the checkpoint processor and has its own cache identity.
+- `Audio` accepts local audio paths and Arrow object-store URIs. Install
+  `relflow[audio]`. SoundFile and SoXR decode, downmix or select channels,
+  and resample distinct misses in bounded threads before a frozen audio
+  encoder produces one pristine vector per recording. Recordings longer than
+  `window` default to `clip="chunks"`, averaging up to `max_windows`
+  overlapping windows; `clip="head"`, `"center"`, and `"tail"` seek to a
+  single window. Freshness, `immutable=True`, caching, `jitter`, and
+  representation/reconstruction contracts match `Image` and `Text`.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
-  and normalization placement. `Number`, `Vector`, `Period`, and `Text`
-  consume it. `Number` uses `normalize` to choose between raw and standardized
-  values. The other built-ins have one continuous representation and apply
-  jitter there without creating another normalizer.
+  and normalization placement. `Number`, `Vector`, `Period`, `Text`, `Image`,
+  and `Audio` consume it. `Number` uses `normalize` to choose between raw and
+  standardized values. The other built-ins have one continuous representation
+  and apply jitter there without creating another normalizer.
 - Tensorfield extensions declare canonical Arrow atom compatibility families with
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
   with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of

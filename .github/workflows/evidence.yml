@@ -49,7 +49,7 @@ jobs:
           CANDIDATE_SHA: ${{ github.sha }}
           SUITE_REF: ${{ inputs.suite_ref }}
           # Resolve dependencies with these reviewed bytes independently of the selected suite.
-          RESOLVER_BLOB: 538fc509594a9a5721ea05923504a488d2d5ead3
+          RESOLVER_BLOB: 07c675bca0135fbda109978142d463a92fb04e99
         run: |
           python - <<'PY'
           import json
