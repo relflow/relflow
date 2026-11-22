@@ -17,6 +17,10 @@ export const reference = {
     Hash: 'Batch-salted fingerprints preserve identifier matches without a persistent learned ID vocabulary.',
     Period: 'Selected calendar parts become cyclical coordinates, then project into model space.',
     Text: 'A frozen pretrained text encoder supplies vectors; a task projection learns how to use them.',
+    Image:
+      'A frozen pretrained vision encoder supplies CLS vectors; a task projection learns how to use them.',
+    Audio:
+      'A frozen pretrained audio encoder supplies recording vectors; a task projection learns how to use them.',
   }),
   types: /** @type {Record<string, Note>} */ ({
     Model: {
@@ -70,6 +74,14 @@ export const reference = {
     Text: {
       title: 'Text meaning',
       text: 'Represent strings with a frozen pretrained text encoder, then learn how those representations contribute to your task. This field does not generate text.',
+    },
+    Image: {
+      title: 'Visual media reference',
+      text: 'Decode local image paths or object-store URIs and encode them with a frozen vision backbone. Cached CLS vectors project into model space without generating images.',
+    },
+    Audio: {
+      title: 'Audio recording reference',
+      text: 'Decode and resample local audio paths or object-store URIs, pool overlapping windows with a frozen audio encoder, and project the cached vector into model space.',
     },
     Vector: {
       title: 'Fixed-width numeric values',
@@ -205,18 +217,18 @@ export const reference = {
     },
     objective: {
       title: 'Reconstruction loss',
-      text: 'Choose the loss for this field’s reconstruction objective. Number, Duration, and Ordinal use mae, mse, or huber; Vector and Text use l1 or l2. This option does not make a field a target by itself.',
+      text: 'Choose the loss for this field’s reconstruction objective. Number, Duration, and Ordinal use mae, mse, or huber; Vector, Text, Image, and Audio use l1 or l2. This option does not make a field a target by itself.',
     },
     maxLength: (/** @type {{tokens: string | number}} */ { tokens }) => ({
       title: 'Text token limit',
       text: `Limit the frozen text encoder input to ${tokens} tokens. Longer text is truncated by the tokenizer; this is not a character limit.`,
     }),
     store: {
-      title: 'Persistent text vectors',
-      text: 'Choose the persistent artifact-cache directory. Matching text encoders share vectors across fields, splits, and runs; omitting store selects the platform cache directory or RELFLOW_CACHE_DIR. This runtime resource stays outside checkpoints.',
+      title: 'Persistent encoder vectors',
+      text: 'Choose the persistent artifact-cache directory. Matching encoders share vectors across fields, splits, and runs; omitting store selects the platform cache directory or RELFLOW_CACHE_DIR. This runtime resource stays outside checkpoints.',
     },
     cache: {
-      title: 'Shared text cache',
+      title: 'Shared vector cache',
       text: 'True enables automatic persistent caching with bounded RAM and device hot tiers. False disables all cache tiers. A positive integer additionally caps hot entries; it does not replace the memory budget or bound disk growth.',
     },
     memory: {
@@ -228,9 +240,21 @@ export const reference = {
       text: 'Bound text tokenization batches separately from encoder execution batches. The default is 4096 strings.',
     },
     resident: {
-      title: 'Text store device budget',
+      title: 'Device cache budget',
       text: 'Budget the device hot tier in MiB. Zero disables that tier; None selects one eighth of free CUDA memory up to 512 MiB, and zero on other devices. This does not bound the encoder or all device memory.',
     },
+    base: {
+      title: 'Media path prefix',
+      text: 'Resolve relative file names against this directory or object-store URI prefix instead of the working directory.',
+    },
+    immutable: {
+      title: 'Immutable media paths',
+      text: 'Treat each resolved path as permanent for a single version of the bytes so warm cache hits make zero source storage requests.',
+    },
+    maxWindows: (/** @type {{count: string | number}} */ { count }) => ({
+      title: 'Maximum audio windows',
+      text: `Average at most ${count} overlapping windows across a long recording when clip="chunks".`,
+    }),
     format: {
       title: 'Prediction file format',
       text: 'Parquet writes rank-N.parquet; ipc writes Arrow IPC files named rank-N.arrow. IPC preserves sparse nested fixed-size vector results that Parquet cannot round-trip.',

@@ -11,6 +11,7 @@ import pydantic
 import torch
 from tensordict import TensorDict, tensorclass
 
+from relflow.data.arrow import nullify
 from relflow.data.query import Projection
 from relflow.helpers.state import compatible
 from relflow.structs.enums import Component, Strata, TensorKey
@@ -176,7 +177,7 @@ class TensorField(number.TensorField):
         values = selected.values
         if pa.types.is_dictionary(values.type):
             values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
-        values = pc.if_else(selected.present, values, None)
+        values = nullify(values, selected.present)
         if pa.types.is_null(values.type):
             ranks = pc.cast(values, pa.int64())
         elif request.values is None:

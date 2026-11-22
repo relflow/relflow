@@ -13,4 +13,5 @@ build:
       - make prepare
     build:
       html:
+        # An unpublished latest checkout exits 183 until Release publishes its Evidence.
         - uv run --project docs python -m docs.publish

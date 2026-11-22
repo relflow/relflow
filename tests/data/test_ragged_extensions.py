@@ -213,7 +213,7 @@ def test_extension_storage_uses_dictionary_value_validity():
     ]
 
 
-def test_dateparts_encodes_heterogeneous_date_union():
+def test_period_encodes_heterogeneous_date_union():
     values = pa.UnionArray.from_dense(
         pa.array([0, 1, 2], type=pa.int8()),
         pa.array([0, 0, 0], type=pa.int32()),
@@ -225,7 +225,7 @@ def test_dateparts_encodes_heterogeneous_date_union():
     )
     model = rf.Model(
         preset="small",
-        value=rf.DateParts(dateparts=["day_of_month"]),
+        value=rf.Period(dateparts=["day_of_month"]),
         d_model=8,
     )
 

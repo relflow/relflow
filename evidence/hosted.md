@@ -35,8 +35,8 @@ Checkouts do not retain repository credentials, and containers receive none.
 The wheel preparation job reads the reviewed resolver by its exact Git blob ID.
 When changing `evidence/resolve.py`, update `RESOLVER_BLOB` with the result of
 `git hash-object evidence/resolve.py`. The selector and hosted executor retain
-their own revision pins. The CPU dependency graph includes relflow's Text and
-Image extras. Frozen encoder weights are unnecessary for the cached media proof.
+their own revision pins. The CPU dependency graph includes relflow's Text,
+Image, and Audio extras. Frozen encoder weights are unnecessary for the cached media proofs.
 The reviewed resolver uses pinned uv to resolve Linux CPU wheel metadata while
 constraining selected distribution versions to the candidate's lock. Torch uses
 the corresponding `+cpu` wheel; unused CUDA dependencies do not enter the CPU

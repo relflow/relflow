@@ -82,11 +82,10 @@ from relflow.tensorfields import (
     TensorFieldBase,
     TensorInput,
 )
+from relflow.tensorfields.extensions.audio import Request as Audio
 from relflow.tensorfields.extensions.boolean import Request as Boolean
 from relflow.tensorfields.extensions.category import Request as Category
 from relflow.tensorfields.extensions.coordinates import Request as Coordinates
-from relflow.tensorfields.extensions.dateparts import Request as DateParts
-from relflow.tensorfields.extensions.dateparts import Request as Period
 from relflow.tensorfields.extensions.duration import Request as Duration
 from relflow.tensorfields.extensions.enum import Request as Enum
 from relflow.tensorfields.extensions.group import Request as Group
@@ -94,6 +93,7 @@ from relflow.tensorfields.extensions.hashable import Request as Hash
 from relflow.tensorfields.extensions.image import Request as Image
 from relflow.tensorfields.extensions.number import Request as Number
 from relflow.tensorfields.extensions.ordinal import Request as Ordinal
+from relflow.tensorfields.extensions.period import Request as Period
 from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
@@ -149,6 +149,7 @@ __all__ = [
     "__version__",
     "Address",
     "Attention",
+    "Audio",
     "Branch",
     "BatchContext",
     "Boolean",
@@ -162,7 +163,6 @@ __all__ = [
     "Coordinates",
     "CustomDataModule",
     "DuckDBDataModule",
-    "DateParts",
     "Enum",
     "EarlyStopping",
     "EMA",

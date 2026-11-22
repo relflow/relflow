@@ -278,7 +278,7 @@ def test_ragged_extension_losses_and_full_model_gradients_match_dense_execution(
         "number": (rf.Number, {}, lambda i: float(i + 1)),
         "category": (rf.Category, {"p_unavailable": 0.0}, lambda i: f"c{i % 3}"),
         "set": (rf.Set, {"p_unavailable": 0.0}, lambda i: [f"t{i % 3}", "shared"]),
-        "dateparts": (rf.DateParts, {"dateparts": ["day_of_week", "day_of_month"]}, lambda i: datetime(2026, 1, i + 1)),
+        "dateparts": (rf.Period, {"dateparts": ["day_of_week", "day_of_month"]}, lambda i: datetime(2026, 1, i + 1)),
         "vector": (rf.Vector, {"n_dim": 3}, lambda i: [float(i), float(i + 1), float(i + 2)]),
         "enum": (rf.Enum, {"values": ("a", "b"), "p_unavailable": 0.0}, lambda i: "a" if i % 2 else "b"),
         "boolean": (rf.Boolean, {}, lambda i: bool(i % 2)),

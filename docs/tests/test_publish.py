@@ -333,6 +333,30 @@ def test_preview_builds_select_only_released_measurements(project, environment, 
     assert calls == [str(selected)] * 3
 
 
+@pytest.mark.parametrize("released", [False, True])
+def test_latest_waits_for_the_checkout_version_to_be_released(project, environment, renderer, monkeypatch, released):
+    (project / "evidence/experiments").mkdir(parents=True)
+    (project / "pyproject.toml").write_text('[project]\nversion = "0.5.4"\n')
+    environment.update(READTHEDOCS_VERSION="latest", READTHEDOCS_VERSION_TYPE="branch")
+    selected = project.parent / "released-publication.json"
+    selected.write_text(json.dumps({"version": "0.5.4", "revision": "a" * 40}))
+
+    def fetch(root, version, *, required):
+        assert root == project and version == "0.5.4" and required is False
+        return selected if released else None
+
+    monkeypatch.setattr(publishing, "fetch", fetch)
+    if released:
+        publishing.publish(project, environ=environment)
+        assert renderer[0]["RELFLOW_EVIDENCE_PUBLICATION"] == str(selected)
+    else:
+        with pytest.raises(SystemExit) as cancelled:
+            publishing.publish(project, environ=environment)
+        assert cancelled.value.code == 183
+        assert not renderer
+        assert not Path(environment["READTHEDOCS_OUTPUT"]).exists()
+
+
 def test_unreleased_hosted_build_cannot_keep_an_ad_hoc_ci_override(project, environment, renderer, monkeypatch):
     (project / "evidence/experiments").mkdir(parents=True)
     environment.update(READTHEDOCS_VERSION_TYPE="branch", RELFLOW_EVIDENCE_PUBLICATION="/unused/ci-preview.json")

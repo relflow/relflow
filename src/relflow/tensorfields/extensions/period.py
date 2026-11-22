@@ -177,7 +177,8 @@ def second_of_minute(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-dateparts: Extension = Extension(name="dateparts", types=(str | date | datetime,), callbacks=(Metrics,))
+# Persisted schemas identify Period as dateparts.
+period: Extension = Extension(name="dateparts", types=(str | date | datetime,), callbacks=(Metrics,))
 
 
 class Arcs(Totals):
@@ -251,13 +252,13 @@ def parse(
     return result
 
 
-@dateparts.register(Component.Request)
+@period.register(Component.Request)
 class Request(RequestBase):
     """Calendar components represented as cyclical sine/cosine pairs.
 
     ``Period("day_of_week", "hour_of_day")`` selects a nonempty, unique
     sequence of ``DatePart`` members or names. Names normalize to a list of
-    enum members. ``DateParts`` and the ``dateparts=`` keyword remain compatible.
+    enum members. The ``dateparts=`` keyword accepts the same selection.
     Inputs may be dates, datetimes, or strings, with optional ``pattern``
     specifying string parsing. Zone-aware timestamps describe their own wall
     clock; strings carrying an offset are read as UTC. ``jitter`` perturbs
@@ -350,7 +351,7 @@ class Request(RequestBase):
         return v
 
 
-@dateparts.register(Component.TensorField)
+@period.register(Component.TensorField)
 @tensorclass
 class TensorField(TensorFieldBase[TensorDict]):
     state: torch.Tensor
@@ -431,7 +432,7 @@ class TensorField(TensorFieldBase[TensorDict]):
         return result, observation, binding
 
 
-@dateparts.register(Component.Embedder)
+@period.register(Component.Embedder)
 class Embedder(EmbedderBase):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
@@ -477,7 +478,7 @@ class Embedder(EmbedderBase):
         )
 
 
-@dateparts.register(Component.Decoder)
+@period.register(Component.Decoder)
 class Decoder(DecoderBase):
     coordinatewise = True
 
@@ -511,7 +512,7 @@ class Decoder(DecoderBase):
         )
 
 
-@dateparts.register(Component.loss)
+@period.register(Component.loss)
 def loss(
     module: Model,
     prediction: Prediction,

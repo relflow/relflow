@@ -1,0 +1,711 @@
+"""Audio references, concurrent decoding, resampling, and frozen audio-encoder embeddings."""
+
+from __future__ import annotations
+
+import enum
+import importlib.util
+import io
+import json
+import os
+import platform
+import sys
+from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import InitVar
+from functools import cache, partial
+from tempfile import SpooledTemporaryFile
+from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias, Unpack, cast
+
+import numpy as np
+import pydantic
+import torch
+from tensordict import TensorDict, tensorclass
+
+from relflow.data.ragged import Sources
+from relflow.structs.enums import Component
+from relflow.structs.tree import Address, FieldOptions
+from relflow.tensorfields.base import Context, Extension, RequestBase, TensorFieldBase
+from relflow.tensorfields.shared import media
+from relflow.tensorfields.shared.cache import Payloads
+from relflow.tensorfields.shared.counter import CounterUpdateCallback
+from relflow.tensorfields.shared.frozen import Backbone, Objective, learn, loss, observe
+from relflow.tensorfields.shared.frozen import Decoder as FrozenDecoder
+from relflow.tensorfields.shared.jitter import Jitter
+from relflow.tensorfields.shared.reconstruction import Metrics
+
+if TYPE_CHECKING:
+    from soundfile import SoundFile
+    from transformers import PreTrainedModel
+
+    from relflow.structs.experiment import Schema
+
+DEFAULT_MODEL = "openai/whisper-base"
+DEFAULT_WINDOW = 10.0
+
+audio = Extension(
+    name="audio",
+    types=(str,),
+    requires={
+        "soundfile": "relflow[audio]",
+        "soxr": "relflow[audio]",
+        "transformers": "relflow[audio]",
+        "moka_py": "relflow[audio]",
+    },
+    callbacks=(CounterUpdateCallback, Metrics),
+)
+
+
+Clip: TypeAlias = Literal["chunks", "head", "center", "tail"]
+
+
+class Pooling(enum.StrEnum):
+    auto = "auto"
+    mean = "mean"
+    cls = "cls"
+    pooler = "pooler"
+
+
+class CachedModel(Backbone):
+    @classmethod
+    def get_model(cls, key: str) -> Backbone:
+        if key not in cls._models:
+            from transformers import AutoConfig, AutoModel
+
+            # Version counters must remain available after inference-only warm-up.
+            with torch.inference_mode(False):
+                config = AutoConfig.from_pretrained(key)
+                kind = getattr(config, "model_type", None)
+                if kind in {"clap", "clap_audio_model"}:
+                    from transformers import ClapAudioModelWithProjection
+
+                    loaded: Any = ClapAudioModelWithProjection.from_pretrained(key).audio_model
+                else:
+                    loaded = AutoModel.from_pretrained(key)
+                    if getattr(config, "is_encoder_decoder", False) and callable(getattr(loaded, "get_encoder", None)):
+                        loaded = loaded.get_encoder()
+                model = cast("PreTrainedModel", loaded)
+            model.eval()
+            model.requires_grad_(False)
+            hidden_size = getattr(model.config, "hidden_size", None)
+            if hidden_size is None:
+                raise ValueError(f"encoder '{key}' does not expose `config.hidden_size`")
+            cls._models[key] = cls(key=key, model=model, hidden_size=int(hidden_size))
+        return cls._models[key]
+
+
+@audio.register(Component.Request)
+class Request(RequestBase):
+    """Use a local audio path or an object-store URI as context for prediction.
+
+    The frozen audio encoder supplies one vector per clip. Decoding, channel
+    selection, and high-quality resampling run in a bounded thread pool;
+    encoder_batch_size limits each model call. Recordings longer than window use
+    clip="chunks" by default, averaging up to max_windows sampled windows
+    into one deterministic vector. clip="head", "center", and "tail" read a
+    single window. A reconstructing mask targets the pristine vector.
+    embed=True exports the field's learned representation.
+
+    Relative paths resolve against base (the working directory by default).
+    Set immutable=True only for paths that always identify the same bytes,
+    such as content-addressed object names. Warm hits then skip source storage.
+    Mutable local paths use file identity and timestamps; mutable remote paths
+    use a hash of the object bytes. store, memory, resident, and cache follow
+    the Text and Image cache contract. Encoder assets and caches live outside
+    checkpoints.
+    """
+
+    model_config = pydantic.ConfigDict(str_strip_whitespace=True, allow_inf_nan=False)
+    type: Literal["audio"] = "audio"
+    model: Annotated[str, pydantic.Field(min_length=1)] = DEFAULT_MODEL
+    base: Annotated[str, pydantic.Field(min_length=1)] | None = None
+    immutable: pydantic.StrictBool = False
+    offset: Annotated[float, pydantic.Field(ge=0.0)] = 0.0
+    duration: Annotated[float, pydantic.Field(gt=0.0)] | None = None
+    window: Annotated[float, pydantic.Field(gt=0.0)] | None = None
+    stride: Annotated[float, pydantic.Field(gt=0.0)] | None = None
+    max_windows: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 4
+    clip: Clip = "chunks"
+    channels: Literal["mean"] | Annotated[pydantic.StrictInt, pydantic.Field(ge=0)] = "mean"
+    encoder_pooling: Pooling = Pooling.auto
+    read_workers: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 4
+    encoder_batch_size: Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = 16
+    cache: pydantic.StrictBool | Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = True
+    store: Annotated[str, pydantic.Field(min_length=1)] | None = None
+    memory: Annotated[pydantic.StrictInt, pydantic.Field(ge=0)] | None = None
+    resident: Annotated[pydantic.StrictInt, pydantic.Field(ge=0)] | None = None
+    objective: Objective = Objective.l2
+    jitter: Jitter = pydantic.Field(default_factory=Jitter)
+
+    @pydantic.field_validator("offset", "duration", "window", "stride", mode="before")
+    @classmethod
+    def check_seconds(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("audio time bounds must be numbers, not booleans")
+        return value
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            model: str = DEFAULT_MODEL,
+            base: str | None = None,
+            immutable: bool = False,
+            offset: float = 0.0,
+            duration: float | None = None,
+            window: float | None = None,
+            stride: float | None = None,
+            max_windows: int = 4,
+            clip: Clip = "chunks",
+            channels: Literal["mean"] | int = "mean",
+            encoder_pooling: Pooling | Literal["auto", "mean", "cls", "pooler"] = Pooling.auto,
+            read_workers: int = 4,
+            encoder_batch_size: int = 16,
+            cache: bool | int = True,
+            store: str | None = None,
+            memory: int | None = None,
+            resident: int | None = None,
+            objective: Objective | Literal["l1", "l2"] = Objective.l2,
+            jitter: Jitter = ...,
+            type: Literal["audio"] = "audio",
+            **options: Unpack[FieldOptions],
+        ) -> None: ...
+
+
+remote = media.remote
+stamp = media.stamp
+
+
+def location(value: str, base: str | None) -> str:
+    return media.location(value, base, kind="audio")
+
+
+def open_audio(path: str):
+    return media.open_stream(path, remote, seekable=True)
+
+
+def snapshot(path: str, immutable: bool) -> tuple[bytes, bytes | None]:
+    return media.snapshot(path, immutable, open_audio)
+
+
+def native_window(extractor: Any) -> float | None:
+    chunk = getattr(extractor, "chunk_length", None)
+    if isinstance(chunk, (int, float)) and chunk > 0:
+        return float(chunk)
+    maximum = getattr(extractor, "max_length_s", None)
+    if isinstance(maximum, (int, float)) and maximum > 0:
+        return float(maximum)
+    frames = getattr(extractor, "max_length", None)
+    if type(extractor).__name__ == "ASTFeatureExtractor" and isinstance(frames, int) and frames > 0:
+        return float(frames) * 0.01
+    return None
+
+
+def spans(
+    total: int,
+    rate: int,
+    *,
+    offset: float,
+    duration: float | None,
+    window: float,
+    stride: float | None,
+    max_windows: int,
+    clip: Clip,
+) -> list[tuple[int, int]]:
+    """Select deterministic sample intervals before reading full audio streams."""
+    if rate <= 0 or total <= 0:
+        raise ValueError("audio source contains no readable frames")
+    start = round(offset * rate)
+    stop = total if duration is None else min(total, start + max(1, round(duration * rate)))
+    if start >= stop:
+        raise ValueError(f"audio clip has no samples after offset={offset:g}s (source duration {total / rate:.3f}s)")
+    length = stop - start
+    width = max(1, round(window * rate))
+    if length <= width:
+        return [(start, stop)]
+    if clip == "head":
+        return [(start, start + width)]
+    if clip == "tail":
+        return [(stop - width, stop)]
+    if clip == "center" or max_windows == 1:
+        left = start + (length - width) // 2
+        return [(left, left + width)]
+    hop = max(1, round((window / 2.0 if stride is None else stride) * rate))
+    last = stop - width
+    # Include the final window even when it falls between hops.
+    if (last - start + hop - 1) // hop + 1 > max_windows:
+        starts = np.rint(np.linspace(start, last, max_windows)).astype(np.int64).tolist()
+    else:
+        starts = list(range(start, last, hop)) + [last]
+    return [(int(left), int(left) + width) for left in starts]
+
+
+@cache
+def reader_type() -> type[SoundFile]:
+    from soundfile import SoundFile
+
+    class Reader(SoundFile):
+        def seekable(self) -> bool:
+            # libsndfile may report an unknown-length FLAC as seekable. SoundFile
+            # would then seek after each sequential read, including at EOF.
+            return super().seekable() and 0 < self.frames < 2**60
+
+    return Reader
+
+
+def read_windows(
+    source: SoundFile,
+    *,
+    offset: float,
+    duration: float | None,
+    window: float,
+    stride: float | None,
+    max_windows: int,
+    clip: Clip,
+) -> list[np.ndarray]:
+    select = partial(
+        spans,
+        rate=source.samplerate,
+        offset=offset,
+        duration=duration,
+        window=window,
+        stride=stride,
+        max_windows=max_windows,
+        clip=clip,
+    )
+    if source.seekable():
+        pieces = []
+        for left, right in select(source.frames):
+            source.seek(left)
+            block = source.read(right - left, dtype="float32", always_2d=True)
+            if len(block):
+                pieces.append(block)
+        return pieces
+
+    if clip == "head" and (duration is None or window < duration):
+        duration = window
+    start = round(offset * source.samplerate)
+    stop = None if duration is None else start + max(1, round(duration * source.samplerate))
+    total = 0
+    frame_bytes = source.channels * np.dtype(np.float32).itemsize
+    # EOF determines the window positions. Spool just the eligible PCM so
+    # even a one-pass source can use the same window selection with bounded RAM.
+    with SpooledTemporaryFile(max_size=1024 * 1024) as pcm:
+        while stop is None or total < stop:
+            size = 16384 if stop is None else min(16384, stop - total)
+            block = source.read(size, dtype="float32", always_2d=True)
+            if not len(block):
+                break
+            end = total + len(block)
+            if end > start:
+                pcm.write(memoryview(block[max(0, start - total) :]).cast("B"))
+            total = end
+        pieces = []
+        for left, right in select(total):
+            pcm.seek((left - start) * frame_bytes)
+            block = np.empty((right - left, source.channels), dtype=np.float32)
+            pcm.readinto(memoryview(block).cast("B"))
+            pieces.append(block)
+        return pieces
+
+
+def waveforms(
+    record: bytes,
+    bodies: dict[bytes, bytes],
+    *,
+    target_rate: int,
+    offset: float,
+    duration: float | None,
+    window: float,
+    stride: float | None,
+    max_windows: int,
+    clip: Clip,
+    channels: Literal["mean"] | int,
+) -> list[np.ndarray]:
+    import soxr
+
+    Reader = reader_type()
+
+    path, version = json.loads(record)
+    try:
+        stream = io.BytesIO(bodies[record]) if isinstance(version, str) else open_audio(path)
+        with stream:
+            if isinstance(version, list) and list(stamp(os.fstat(stream.fileno()))) != version:
+                raise ValueError(f"audio {path!r} changed after tensorization; encode the observations again")
+            with Reader(stream) as source:
+                rate = int(source.samplerate)
+                count = int(source.channels)
+                if isinstance(channels, int) and channels >= count:
+                    raise ValueError(f"audio {path!r} has {count} channel(s); cannot select channel index {channels}")
+                pieces = read_windows(
+                    source,
+                    offset=offset,
+                    duration=duration,
+                    window=window,
+                    stride=stride,
+                    max_windows=max_windows,
+                    clip=clip,
+                )
+            if isinstance(version, list) and list(stamp(os.fstat(stream.fileno()))) != version:
+                raise ValueError(f"audio {path!r} changed during decoding; encode the observations again")
+        if not pieces:
+            raise ValueError(f"audio {path!r} yielded no decoded samples")
+        target_width = max(1, round(window * target_rate))
+        prepared: list[np.ndarray] = []
+        for block in pieces:
+            if channels == "mean":
+                mono = (
+                    np.ascontiguousarray(block[:, 0], dtype=np.float32)
+                    if block.shape[1] == 1
+                    else block.mean(axis=1, dtype=np.float32)
+                )
+            else:
+                mono = np.ascontiguousarray(block[:, channels], dtype=np.float32)
+            if not np.isfinite(mono).all():
+                raise ValueError(f"audio {path!r} contains non-finite samples")
+            if rate != target_rate:
+                mono = np.asarray(soxr.resample(mono, rate, target_rate, quality="HQ"), dtype=np.float32)
+                if len(mono) > target_width:
+                    mono = mono[:target_width]
+            if not len(mono):
+                raise ValueError(f"audio {path!r} resampled to zero samples at {target_rate} Hz")
+            prepared.append(mono)
+        return prepared
+    except (OSError, RuntimeError, ValueError) as error:
+        error.add_note(f"While reading or preparing audio {path!r}.")
+        raise
+
+
+class Store(media.ReferenceStore):
+    vector_namespace = "rf.audio.vec.f32/v1"
+    source_namespace = "rf.audio.source/v1"
+    kind = "audio"
+
+
+@audio.register(Component.TensorField)
+@tensorclass
+class TensorField(TensorFieldBase[TensorDict]):
+    content: TensorDict
+    state: torch.Tensor
+    present: torch.Tensor
+    trainable: torch.Tensor
+    inferred: torch.Tensor
+    targets: TensorDict
+
+    if TYPE_CHECKING:
+        batch_size: InitVar[int | torch.Size | list[int] | tuple[int, ...] | None] = None
+        device: InitVar[torch.device | str | int | None] = None
+        names: InitVar[list[str | None] | None] = None
+
+    @classmethod
+    def new(
+        cls, sources: Sources, *, schema: Schema, context: Context
+    ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
+        return media.tensorize(
+            cls,
+            sources,
+            schema=schema,
+            context=context,
+            kind="audio",
+            store_cls=Store,
+            opener=lambda path: open_audio(path),
+        )
+
+
+def pool_outputs(
+    outputs: Any,
+    model: Any,
+    attention_mask: torch.Tensor | None,
+    pooling: Pooling,
+    hidden_size: int,
+    model_name: str,
+) -> torch.Tensor:
+    kind = getattr(getattr(model, "config", None), "model_type", None)
+    if pooling == Pooling.pooler or (
+        pooling == Pooling.auto
+        and getattr(outputs, "pooler_output", None) is not None
+        and kind in {"audio-spectrogram-transformer", "clap", "clap_audio_model"}
+    ):
+        pooled = getattr(outputs, "pooler_output", None)
+        if pooled is None or pooled.ndim != 2 or pooled.shape[1] != hidden_size:
+            raise ValueError(f"audio encoder {model_name!r} must expose pooler_output of width {hidden_size}")
+        return pooled.float().contiguous()
+
+    hidden = getattr(outputs, "last_hidden_state", None)
+    if hidden is not None and hidden.ndim == 4 and pooling in {Pooling.auto, Pooling.mean}:
+        if hidden.shape[1] != hidden_size or hidden.shape[2] == 0 or hidden.shape[3] == 0:
+            raise ValueError(f"audio encoder {model_name!r} spatial output must have {hidden_size} channels")
+        return hidden.mean(dim=(-2, -1)).float().contiguous()
+    if hidden is None or hidden.ndim != 3 or hidden.shape[1] == 0 or hidden.shape[2] != hidden_size:
+        raise ValueError(f"audio encoder {model_name!r} must return [batch, frames, {hidden_size}] hidden states")
+    if pooling == Pooling.cls:
+        return hidden[:, 0].float().contiguous()
+    if attention_mask is None:
+        return hidden.mean(dim=1).float().contiguous()
+
+    frames = hidden.shape[1]
+    reduce_mask = getattr(model, "_get_feature_vector_attention_mask", None)
+    if callable(reduce_mask) and attention_mask.shape[1] != frames:
+        valid = cast(torch.Tensor, reduce_mask(frames, attention_mask)).bool()
+    elif attention_mask.shape[1] == frames:
+        valid = attention_mask.bool()
+    else:
+        scale = attention_mask.shape[1] / frames
+        counts = (attention_mask.sum(dim=-1).float() / scale).ceil().long().clamp(min=1, max=frames)
+        valid = torch.arange(frames, device=hidden.device).unsqueeze(0) < counts.unsqueeze(1)
+    empty = ~valid.any(dim=1)
+    if empty.any():
+        valid = valid.clone()
+        valid[empty, 0] = True
+    weights = valid.unsqueeze(-1).to(dtype=hidden.dtype)
+    return ((hidden * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)).float().contiguous()
+
+
+def minimum_samples(config: Any, rate: int) -> int:
+    receptive = 1
+    kernels = getattr(config, "conv_kernel", ()) or ()
+    strides = getattr(config, "conv_stride", ()) or ()
+    for kernel, step in reversed(list(zip(kernels, strides, strict=False))):
+        receptive = (receptive - 1) * int(step) + int(kernel)
+    return max(receptive, round(0.025 * rate), 1)
+
+
+def fusion_features(extractor: Any, clips: list[np.ndarray], model_name: str) -> dict[str, np.ndarray]:
+    """Apply CLAP's fusion mel filters to windows already selected by the audio field."""
+    limit = extractor.nb_max_samples
+    if any(len(clip) > limit for clip in clips):
+        raise ValueError(f"fused CLAP encoder {model_name!r} expects windows of at most {limit} samples")
+    # The batch extractor randomly marks one bounded clip as long. The per-window
+    # transform uses the checkpoint's fusion filters and padding without sampling.
+    mels = [
+        extractor._get_input_mel(clip.astype(np.float64, copy=False), limit, "fusion", extractor.padding)[0]
+        for clip in clips
+    ]
+    return {"input_features": np.asarray(mels, dtype=np.float32), "is_longer": np.zeros((len(clips), 1), dtype=bool)}
+
+
+def encode_clips(
+    model: Any,
+    extractor: Any,
+    clips: list[np.ndarray],
+    device: torch.device,
+    *,
+    rate: int,
+    pooling: Pooling,
+    hidden_size: int,
+    model_name: str,
+) -> torch.Tensor:
+    if not clips:
+        return torch.empty((0, hidden_size), dtype=torch.float32, device=device)
+    names = tuple(getattr(extractor, "model_input_names", ("input_values",)))
+    config = getattr(model, "config", None)
+    floor = minimum_samples(config, rate)
+    clips = [clip if len(clip) >= floor else np.pad(clip, (0, floor - len(clip))) for clip in clips]
+    kind = getattr(config, "model_type", None)
+    group_norm = getattr(config, "feat_extract_norm", None) == "group" and "input_values" in names
+
+    # Group-normalized waveform stems are sensitive to zero-padding across unequal clip lengths.
+    if group_norm and len({len(clip) for clip in clips}) > 1:
+        buckets: dict[int, list[int]] = {}
+        for index, clip in enumerate(clips):
+            buckets.setdefault(len(clip), []).append(index)
+        combined = torch.empty((len(clips), hidden_size), dtype=torch.float32, device=device)
+        for indices in buckets.values():
+            combined[indices] = encode_clips(
+                model,
+                extractor,
+                [clips[i] for i in indices],
+                device,
+                rate=rate,
+                pooling=pooling,
+                hidden_size=hidden_size,
+                model_name=model_name,
+            )
+        return combined
+
+    kwargs: dict[str, Any] = {"sampling_rate": rate, "return_tensors": "np"}
+    if "is_longer" in names:
+        if not getattr(config, "enable_fusion", False):
+            limit = getattr(extractor, "nb_max_samples", None)
+            if isinstance(limit, int) and limit > 0:
+                clips = [clip[:limit] for clip in clips]
+    elif "input_features" in names:
+        kwargs["return_attention_mask"] = True
+    elif "attention_mask" in names:
+        kwargs["padding"] = True
+        kwargs["return_attention_mask"] = True
+
+    with torch.autocast(device_type="cpu", enabled=False), torch.autocast(device_type=device.type, enabled=False):
+        if "is_longer" in names and getattr(config, "enable_fusion", False):
+            prepared = fusion_features(extractor, clips, model_name)
+        else:
+            prepared = extractor(clips, **kwargs)
+    mask_array = prepared.get("attention_mask")
+    attention_mask = torch.as_tensor(np.asarray(mask_array), device=device) if mask_array is not None else None
+    forward_inputs: dict[str, torch.Tensor] = {}
+    for key in names:
+        if key not in prepared or key == "attention_mask":
+            continue
+        forward_inputs[key] = torch.as_tensor(np.asarray(prepared[key]), device=device)
+    if attention_mask is not None and "attention_mask" in names and not group_norm and kind != "whisper":
+        forward_inputs["attention_mask"] = attention_mask
+    if not forward_inputs:
+        raise ValueError(f"audio feature extractor for {model_name!r} produced none of {names!r}")
+
+    with torch.no_grad():
+        outputs = model(**forward_inputs)
+    pooled = pool_outputs(outputs, model, attention_mask, pooling, hidden_size, model_name)
+    if pooled.shape != (len(clips), hidden_size):
+        raise ValueError(
+            f"audio encoder {model_name!r} returned shape {tuple(pooled.shape)}; expected {(len(clips), hidden_size)}"
+        )
+    return pooled
+
+
+@audio.register(Component.Embedder)
+class Embedder(media.MediaEmbedder):
+    backbone = CachedModel
+    kind = "audio"
+    store_cls = Store
+
+    def __init__(self, schema: Schema, address: Address):
+        super().__init__(schema=schema, address=address)
+        from transformers import AutoFeatureExtractor
+
+        self.request = cast(Request, schema.requests[address])
+        self.extractor = AutoFeatureExtractor.from_pretrained(self.request.model)
+        native = native_window(self.extractor)
+        requested = self.request.window
+        if (
+            getattr(self._cached_model.model.config, "model_type", None)
+            in {"whisper", "clap", "clap_audio_model", "audio-spectrogram-transformer"}
+            and native is not None
+            and requested is not None
+            and round(requested * self.sampling_rate) > round(native * self.sampling_rate)
+        ):
+            raise ValueError(
+                f"audio field {address} requests a {requested:g}s window for {self.request.model!r}, "
+                f"which supports up to {native:g}s. Omit window and use clip='chunks' for longer recordings."
+            )
+        self.window_seconds = requested or native or DEFAULT_WINDOW
+
+    def stream(self, path: str):
+        return open_audio(path)
+
+    @property
+    def sampling_rate(self) -> int:
+        rate = getattr(self.extractor, "sampling_rate", 16000)
+        if not isinstance(rate, int) or rate <= 0:
+            raise ValueError(f"audio feature extractor for {self.request.model!r} must expose a positive sampling_rate")
+        return rate
+
+    def variant(self, device: torch.device) -> str:
+        import soundfile as sf
+        import soxr
+        from transformers import __version__ as transformers
+
+        serialize = getattr(self.extractor, "to_json_string", None)
+        extractor_state = serialize() if callable(serialize) else repr(vars(self.extractor))
+        settings = (
+            type(self.extractor).__qualname__,
+            extractor_state,
+            self.sampling_rate,
+            self.request.offset,
+            self.request.duration,
+            self.window_seconds,
+            self.request.stride,
+            self.request.max_windows,
+            self.request.clip,
+            self.request.channels,
+            self.request.encoder_pooling.value,
+            sf.__version__,
+            getattr(sf, "__libsndfile_version__", None),
+            soxr.__version__,
+            getattr(soxr, "__libsoxr_version__", None),
+            importlib.util.find_spec("torchaudio") is not None,
+            sys.platform,
+            platform.machine(),
+            transformers,
+        )
+        if self.request.clip == "tail" and self.request.max_windows == 1:
+            settings += ("tail/v2",)
+        if getattr(self._cached_model.model.config, "enable_fusion", False):
+            settings += ("fusion/v2",)
+        return self._cached_model.variant(device, repr(settings))
+
+    def pool(
+        self, records: Sequence[bytes] | Payloads, device: torch.device, bodies: dict[bytes, bytes]
+    ) -> torch.Tensor:
+        """Decode and resample the next bounded batch on CPU while encoding the current batch."""
+        if isinstance(records, Payloads):
+            records = [bytes(row) for row in records]
+        if not records:
+            return torch.empty((0, self.hidden_size), dtype=torch.float32, device=device)
+        model = self._cached_model.module_for(device)
+        size = self.request.encoder_batch_size
+        rate = self.sampling_rate
+        starts = iter(range(0, len(records), size))
+        encoded: list[torch.Tensor] = []
+        prepare = partial(
+            waveforms,
+            bodies=bodies,
+            target_rate=rate,
+            offset=self.request.offset,
+            duration=self.request.duration,
+            window=self.window_seconds,
+            stride=self.request.stride,
+            max_windows=self.request.max_windows,
+            clip=self.request.clip,
+            channels=self.request.channels,
+        )
+        try:
+            with ThreadPoolExecutor(max_workers=self.request.read_workers) as executor:
+
+                def submit(start: int):
+                    return [executor.submit(prepare, row) for row in records[start : start + size]]
+
+                pending = submit(next(starts))
+                while pending:
+                    decoded = [job.result() for job in pending]
+                    following = next(starts, None)
+                    pending = submit(following) if following is not None else []
+
+                    flat = [window for windows in decoded for window in windows]
+                    counts = [len(windows) for windows in decoded]
+                    window_vectors = torch.cat(
+                        [
+                            encode_clips(
+                                model,
+                                self.extractor,
+                                flat[offset : offset + size],
+                                device,
+                                rate=rate,
+                                pooling=self.request.encoder_pooling,
+                                hidden_size=self.hidden_size,
+                                model_name=self.request.model,
+                            )
+                            for offset in range(0, len(flat), size)
+                        ],
+                        dim=0,
+                    )
+                    if all(count == 1 for count in counts):
+                        encoded.append(window_vectors)
+                    else:
+                        encoded.append(
+                            torch.stack([chunk.mean(dim=0) for chunk in window_vectors.split(counts, dim=0)], dim=0)
+                        )
+        except (OSError, RuntimeError, ValueError) as error:
+            error.add_note(f"While encoding audio field {self.address!s}.")
+            raise
+        return torch.cat(encoded, dim=0)
+
+
+@audio.register(Component.Decoder)
+class Decoder(FrozenDecoder):
+    coordinatewise = True
+    backbone = CachedModel
+
+
+audio.register(Component.observe, observe)
+audio.register(Component.learn, learn)
+audio.register(Component.loss, loss)

@@ -42,9 +42,10 @@ experiments, their protocol, runtime tests, and recorded results live in
 - Read the Docs uses `.readthedocs.yaml` and `python -m docs.publish` to select
   released Evidence assets and build Starlight for its exact hosted version URL.
   Preserve checkout-revision checks and digest-verified release selection.
-  Branch and PR docs use the latest formal release at version >=0.5.0, or show
-  pending measurements until one exists; tag builds require the
-  matching version and source revision. Never select PR-head CI measurements
+  `latest` builds wait for frozen Evidence for the checkout's package version.
+  Other branch and PR docs use the latest formal release at version >=0.5.0, or
+  show pending measurements until one exists. Tag builds require the matching
+  version and source revision. Never select PR-head CI measurements
   for hosted docs or publish per-commit Evidence releases. Preserve static
   validation before copying to `READTHEDOCS_OUTPUT/html`. Keep links, assets,
   canonical URLs, search, and browser navigation within the hosted version.

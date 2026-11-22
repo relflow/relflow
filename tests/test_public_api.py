@@ -34,7 +34,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Jitter.model_fields["add"].default == 0.0
     assert relflow.Jitter.model_fields["multiply"].default == 0.0
     assert relflow.Jitter.model_fields["normalize"].default is True
-    for tensorfield in (relflow.Number, relflow.Vector, relflow.DateParts, relflow.Text, relflow.Image):
+    for tensorfield in (relflow.Number, relflow.Vector, relflow.Period, relflow.Text, relflow.Image, relflow.Audio):
         assert isinstance(tensorfield.model_fields["jitter"].default_factory(), relflow.Jitter)
     assert relflow.where("type").name == "type"
     assert relflow.preprocess.__name__ == "preprocess"
@@ -61,6 +61,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Enum.model_fields["values"].is_required()
     assert relflow.Boolean.model_fields["type"].default == "boolean"
     assert relflow.Number.model_fields["type"].default == "number"
+    assert relflow.Audio is relflow.TENSORFIELDS["audio"].Request
     assert relflow.Duration is relflow.TENSORFIELDS["duration"].Request
     assert relflow.Ordinal is relflow.TENSORFIELDS["ordinal"].Request
     assert relflow.Quantile.model_fields["type"].default == "quantile"
@@ -76,14 +77,16 @@ def test_common_resources_are_available_from_package_root():
     assert "hash" in relflow.TENSORFIELDS
 
 
-def test_period_is_the_registered_dateparts_request_under_both_public_names():
-    from relflow import DateParts, Period
+def test_period_is_the_public_calendar_request():
+    from relflow.tensorfields.extensions import period
 
-    assert Period is DateParts is relflow.TENSORFIELDS["dateparts"].Request
+    assert relflow.Period is period.Request is relflow.TENSORFIELDS["dateparts"].Request
+    assert not hasattr(relflow, "DateParts")
     assert "Periods" not in relflow.__all__
     namespace: dict[str, object] = {}
     exec("from relflow import *", namespace)
-    assert namespace["Period"] is namespace["DateParts"] is Period
+    assert namespace["Period"] is relflow.Period
+    assert "DateParts" not in namespace
 
 
 def test_tensorfield_source_construction_replaces_the_derive_role():

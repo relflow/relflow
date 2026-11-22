@@ -108,6 +108,9 @@ jobs:
       actions: read
       contents: write
       id-token: write
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      source_sha: ${{ steps.prepare.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -137,3 +140,25 @@ jobs:
         uses: pypa/gh-action-pypi-publish@release/v1
       - name: Verify the complete published PyPI file inventory
         run: python scripts/release.py verify-pypi release-package
+
+  docs:
+    name: Refresh latest documentation
+    needs: [detect_version, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.detect_version.outputs.source_sha }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: '3.12'
+      - name: Install locked documentation tools
+        run: uv sync --project docs --locked
+      - name: Trigger Read the Docs and verify published Evidence
+        env:
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          VERSION: ${{ needs.publish.outputs.version }}
+          RELEASE_SOURCE_SHA: ${{ needs.publish.outputs.source_sha }}
+        run: uv run --project docs --no-sync python -m docs.refresh "$VERSION" "$RELEASE_SOURCE_SHA"

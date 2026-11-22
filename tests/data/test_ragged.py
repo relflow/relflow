@@ -415,7 +415,7 @@ def test_inactive_only_branch_does_not_ingest_same_named_source_value():
 
 
 def test_datetime_leaf_remains_arrow_backed():
-    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, created=rf.DateParts(dateparts=["day_of_year"]))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, created=rf.Period(dateparts=["day_of_year"]))
     value = datetime.datetime(2025, 2, 3, 4, 5, 6)
     field = (
         coalesce(
@@ -431,8 +431,8 @@ def test_datetime_leaf_remains_arrow_backed():
     assert field.values.to_pylist() == [value]
 
 
-def test_dateparts_tensorfield_encodes_arrow_timestamp_end_to_end():
-    model = rf.Model(preset="small", d_model=8, created=rf.DateParts(dateparts=["day_of_year", "hour_of_day"]))
+def test_period_tensorfield_encodes_arrow_timestamp_end_to_end():
+    model = rf.Model(preset="small", d_model=8, created=rf.Period(dateparts=["day_of_year", "hour_of_day"]))
     encoded = model.encode(
         table([{"created": datetime.datetime(2025, 2, 3, 4, 5, 6)}]),
         strata=Strata.train,

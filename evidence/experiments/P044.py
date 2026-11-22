@@ -103,7 +103,7 @@
 # Repeat the gates over three core seeds and at least ten calibration seeds.
 # Extend the family to week and multi-coordinate targets. Characterize timezone,
 # daylight-saving, and leap-day preprocessing policies separately rather than
-# assuming that DateParts adds those semantics.
+# assuming that Period adds those semantics.
 #
 
 # %%
@@ -173,7 +173,7 @@ def fit(
     lit.seed_everything(seed, workers=True)
 
     class PredictionModel(rf.Model):
-        observed_at = rf.DateParts(dateparts=list(dateparts))
+        observed_at = rf.Period(dateparts=list(dateparts))
         target = rf.Category(mask=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
