@@ -8,6 +8,7 @@ from typing import Any, Literal, TypeAlias, cast
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.compute as pc
 import torch
 from tensordict import TensorClass, TensorDict
 
@@ -109,6 +110,17 @@ def variants(values: pa.Array) -> tuple[np.ndarray, np.ndarray | None]:
         offset=values.offset,
     ).to_numpy(zero_copy_only=False)
     return codes, offsets
+
+
+def nullify(values: pa.Array | pa.ChunkedArray, present: pa.Array | pa.ChunkedArray) -> pa.Array | pa.ChunkedArray:
+    """Apply structural presence while preserving the Arrow type and row positions."""
+    if pa.types.is_string(values.type) or pa.types.is_large_string(values.type):
+        # Arrow 20's if_else can produce invalid offsets for sliced strings.
+        absent = pc.invert(present)
+        if isinstance(absent, pa.ChunkedArray):
+            absent = absent.combine_chunks()
+        return pc.replace_with_mask(values, absent, pa.scalar(None, type=values.type))
+    return pc.if_else(present, values, None)
 
 
 @dataclass(frozen=True, slots=True)

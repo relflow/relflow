@@ -99,12 +99,19 @@ records and exact executed scripts download from the same selection. Generated
 publications, report bundles, and proof sources stay outside Git. The historical
 bootstrap and its dedicated download routes have been removed.
 
-Hosted branch and PR builds show the latest formal relflow release's Evidence
-from version 0.5.0 onward. Until the first supported release, measurements remain
-pending. Pre-0.5 publications remain available in their historical releases.
-Tag builds require their own version's frozen publication and exact source
-revision. Successful PR checks remain in GitHub Actions and do not replace
-published measurements or trigger an Evidence-specific docs rebuild.
+Hosted `latest` builds select frozen Evidence for the package version in the
+checkout. A build for an unpublished version cancels with exit code 183 before
+rendering, leaving the deployed site in place. After publishing Evidence and
+verifying the package release on GitHub and PyPI, the Release workflow uses the
+`READTHEDOCS_TOKEN` Actions secret to refresh `latest` and confirm the live
+Evidence version and source revision. When the live selection already matches,
+the workflow skips the rebuild.
+
+Other branch and PR builds show Evidence from the latest formal relflow release
+at version 0.5.0 or later. Measurements remain pending until a supported release
+exists. Tag builds require their own version's frozen publication and exact
+source revision. Pre-0.5 publications remain available in their historical
+releases.
 
 The Release workflow freezes verified assets once under `evidence-v<version>`,
 with a title such as **relflow 0.5.0 evidence**. Downloads use these names:

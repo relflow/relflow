@@ -503,9 +503,11 @@ publication authenticates the exact successful CI attempt and its current inputs
 successful main CI; do not add a second matrix invocation to publication.
 Version releases retain verified evidence reports and a frozen publication JSON
 asset before publishing the package tag. New public assets use versioned
-`relflow-<version>-evidence*` filenames. Branch/PR documentation consumes the
-latest formal release at version >=0.5.0, or show pending measurements until
-one exists; tag docs require their matching frozen selection. Active Evidence
+`relflow-<version>-evidence*` filenames. The Release workflow refreshes `latest`
+after publishing Evidence and the package. `latest` requires frozen Evidence
+for the checkout's package version. Other branch and PR docs use the latest
+formal release at version >=0.5.0, or show pending measurements until one exists.
+Tag docs require their matching frozen selection. Active Evidence
 comparisons require a supported baseline under the policy in `evidence/releases.py`;
 retain the actual event base separately when the fixed 0.5 anchor is selected.
 Ordinary CI retains reports and plots as Actions artifacts and creates no

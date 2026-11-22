@@ -12,6 +12,7 @@ import pyarrow.compute as pc
 import pydantic
 from tensordict import TensorDict, tensorclass
 
+from relflow.data.arrow import nullify
 from relflow.data.query import Projection, Query, gather, listed, origin
 from relflow.structs.enums import Component
 from relflow.structs.tree import Address, FieldOptions
@@ -195,7 +196,7 @@ class TensorField(number.TensorField):
             _, expression = origin(request.queries()[0], address=str(address))
             start = previous(sources.collections, expression, address=address)
             present = current.present if current.present.type == pa.bool_() else pc.is_valid(current.present)
-            end = pc.if_else(present, current.values, None)
+            end = nullify(current.values, present)
         elif len(inputs) == 2:
             start, end = (item.values for item in inputs)
         elif len(inputs) == 1:

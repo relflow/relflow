@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.5.3"
+version = "0.5.4"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -166,6 +166,7 @@ files = [
     "docs/tests/__init__.py",
     "docs/publish.py",
     "docs/pyproject.toml",
+    "docs/refresh.py",
     "docs/starlight/.gitignore",
     "docs/starlight/.prettierignore",
     "docs/starlight/.prettierrc.json",
