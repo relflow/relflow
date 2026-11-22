@@ -196,7 +196,7 @@ def fit(
     lit.seed_everything(seed, workers=True)
 
     class PredictionModel(rf.Model):
-        observed_at = rf.DateParts(dateparts=list(dateparts))
+        observed_at = rf.Period(dateparts=list(dateparts))
         target = rf.Category(mask=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)

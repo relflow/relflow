@@ -1,4 +1,4 @@
-"""The Period constructor preserves DateParts' schema and trained state contracts."""
+"""Schema and checkpoint contracts for Period."""
 
 import inspect
 from datetime import datetime
@@ -10,23 +10,21 @@ import torch
 import yaml
 
 import relflow as rf
-from relflow.tensorfields.extensions.dateparts import DatePart
+from relflow.tensorfields.extensions.period import DatePart
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
-def test_period_selects_ordered_parts_with_keyword_options(constructor):
+def test_period_selects_ordered_parts_with_keyword_options():
     parts = ("HourOfDay", DatePart.day_of_week, "month-of-year")
-    request = constructor(*parts, pattern="%Y-%m-%d", jitter={"add": 0.1}, mask=True)
+    request = rf.Period(*parts, pattern="%Y-%m-%d", jitter={"add": 0.1}, mask=True)
     assert request.dateparts == [DatePart.hour_of_day, DatePart.day_of_week, DatePart.month_of_year]
     assert request.pattern == "%Y-%m-%d"
     assert request.jitter == rf.Jitter(add=0.1)
     assert request.mask == (rf.Mask(skip=True, reconstruct=True),)
-    assert constructor(dateparts=parts).dateparts == request.dateparts
+    assert rf.Period(dateparts=parts).dateparts == request.dateparts
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
-def test_period_signature_accepts_parts_and_keeps_options_keyword_only(constructor):
-    signature = inspect.signature(constructor)
+def test_period_signature_accepts_parts_and_keeps_options_keyword_only():
+    signature = inspect.signature(rf.Period)
     assert signature.parameters["parts"].kind is inspect.Parameter.VAR_POSITIONAL
     for name in ("dateparts", "pattern", "jitter", "mask"):
         assert signature.parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
@@ -34,17 +32,15 @@ def test_period_signature_accepts_parts_and_keeps_options_keyword_only(construct
     signature.bind("day_of_week", pattern="%Y-%m-%d")
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
 @pytest.mark.parametrize("options", [{}, {"dateparts": []}, {"dateparts": ()}])
-def test_period_requires_an_explicit_nonempty_selection(constructor, options):
+def test_period_requires_an_explicit_nonempty_selection(options):
     with pytest.raises(pydantic.ValidationError, match="dateparts cannot be empty"):
-        constructor(**options)
+        rf.Period(**options)
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
-def test_bare_period_class_requires_a_selection_in_a_schema(constructor):
+def test_bare_period_class_requires_a_selection_in_a_schema():
     with pytest.raises(pydantic.ValidationError, match="dateparts"):
-        rf.Model(preset="small", created=constructor)
+        rf.Model(preset="small", created=rf.Period)
 
 
 @pytest.mark.parametrize(
@@ -64,11 +60,10 @@ def test_period_validates_positional_parts_through_the_existing_validators(parts
         rf.Period(*parts)
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
 @pytest.mark.parametrize("selection", [None, [], ["hour_of_day"]])
-def test_period_rejects_mixed_selections(constructor, selection):
+def test_period_rejects_mixed_selections(selection):
     with pytest.raises(TypeError, match="positionally or with dateparts="):
-        constructor("day_of_week", dateparts=selection)
+        rf.Period("day_of_week", dateparts=selection)
 
 
 def test_period_preserves_rejection_of_a_null_keyword_selection():
@@ -76,9 +71,8 @@ def test_period_preserves_rejection_of_a_null_keyword_selection():
         rf.Period(dateparts=None)
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
-def test_period_preserves_json_yaml_and_legacy_request_restoration(constructor, tmp_path):
-    request = constructor("day_of_week", DatePart.hour_of_day, embed=True)
+def test_period_preserves_json_yaml_and_legacy_request_restoration(tmp_path):
+    request = rf.Period("day_of_week", DatePart.hour_of_day, embed=True)
     model = rf.Model(preset="small", d_model=8, events=rf.Branch(length=2, created=request))
     payload = model.schema.model_dump(mode="json")
     restored = rf.Schema.model_validate_json(model.schema.model_dump_json())
@@ -88,8 +82,8 @@ def test_period_preserves_json_yaml_and_legacy_request_restoration(constructor, 
     legacy = field.model_dump(mode="json")
     assert legacy["type"] == "dateparts"
     assert legacy["dateparts"] == ["day_of_week", "hour_of_day"]
-    assert constructor.model_validate(legacy).model_dump(mode="json") == legacy
-    assert constructor.model_validate_json(field.model_dump_json()).model_dump(mode="json") == legacy
+    assert rf.Period.model_validate(legacy).model_dump(mode="json") == legacy
+    assert rf.Period.model_validate_json(field.model_dump_json()).model_dump(mode="json") == legacy
     path = tmp_path / "period.yaml"
     path.write_text(yaml.safe_dump(payload))
     assert rf.Schema.model_validate(yaml.safe_load(path.read_text())).model_dump(mode="json") == payload
@@ -101,12 +95,11 @@ def test_period_preserves_json_yaml_and_legacy_request_restoration(constructor, 
     assert loaded.schema.model_dump() == rf.Model(preset="small", d_model=8, created=request).schema.model_dump()
 
 
-@pytest.mark.parametrize("constructor", [rf.Period, rf.DateParts])
-def test_period_checkpoint_preserves_parameters_and_predictions(constructor, tmp_path):
+def test_period_checkpoint_preserves_parameters_and_predictions(tmp_path):
     model = rf.Model(
         preset="small",
         d_model=8,
-        created=constructor("day_of_week", "hour_of_day", mask=True, embed=True),
+        created=rf.Period("day_of_week", "hour_of_day", mask=True, embed=True),
         label=rf.Boolean(mask=True),
     )
     inputs = pa.table({"created": [datetime(2026, 1, 1, 14), None]})

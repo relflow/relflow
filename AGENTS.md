@@ -188,7 +188,7 @@ model = rf.Model(
   its Branch collection, in source order and before cropping; records without
   a predecessor have a null duration. Endpoints must agree
   on aware versus naive semantics.
-- `Period` is for calendar parts (`DateParts` remains a compatible alias).
+- `Period` is for calendar parts. Saved schemas identify it with `type: dateparts`.
   Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label

@@ -13,7 +13,7 @@ from relflow.data.iterables import encode
 from relflow.structs.enums import Strata, TensorKey
 
 CASES = [
-    (rf.DateParts, [datetime(2026, 1, 1), None, datetime(2026, 2, 1)], {"dateparts": ["day_of_week"]}),
+    (rf.Period, [datetime(2026, 1, 1), None, datetime(2026, 2, 1)], {"dateparts": ["day_of_week"]}),
     (rf.Set, [["a", "b", "a"], [], None], {"p_unavailable": 0.0}),
     (rf.Group, ["a", None, "b"], {"n_groups": 3, "p_unavailable": 0.0}),
 ]
