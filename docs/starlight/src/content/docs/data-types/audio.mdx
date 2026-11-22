@@ -34,6 +34,29 @@ Training with automatic precision uses BF16 mixed precision on supported CUDA de
 
 Ordinary local paths are checked against file identity, size, and timestamps. Mutable object-store URIs read the object once per lookup to compute its SHA-256 digest and decode that same download on a cold miss. For content-addressed object names, set `immutable=True` so warm hits make zero storage requests. On a cold read, seekable object stores can fetch just the ranges needed by the codec.
 
+### Pin the encoder for deployment
+
+To use the same Whisper-base weights and feature extractor in training and serving, download a specific revision when preparing your deployment. This example fetches the three files relflow needs from the [revision used in the audio Evidence experiments](https://huggingface.co/openai/whisper-base/tree/e37978b90ca9030d5170a5c07aadb050351a65bb).
+
+```python
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="openai/whisper-base",
+    revision="e37978b90ca9030d5170a5c07aadb050351a65bb",
+    allow_patterns=["config.json", "preprocessor_config.json", "model.safetensors"],
+    local_dir="./models/whisper-base-e37978b",
+)
+```
+
+Ship that directory with your application and point the audio field at it. Each host can then load the encoder offline from the same path relative to its working directory.
+
+```python
+import relflow as rf
+
+recording = rf.Audio(model="./models/whisper-base-e37978b")
+```
+
 ## How is this leaf trained?
 
 Downstream targets train a field-specific projection into the model's representation space while the pretrained audio encoder remains frozen. A reconstructing mask adds state classification and an L1 or L2 objective against the pristine audio vector. Jitter applies only to eligible training inputs.
