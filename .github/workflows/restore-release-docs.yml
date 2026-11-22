@@ -3,6 +3,9 @@ name: Restore archived release documentation
 on:
   push:
     branches: [ops/restore-release-docs-v0.5.2]
+    paths:
+      - .github/workflows/restore-release-docs.yml
+      - docs/restore.py
 
 permissions:
   contents: read
@@ -13,7 +16,7 @@ concurrency:
 
 jobs:
   documentation:
-    if: github.repository == 'relflow/relflow' && github.event.created
+    if: github.repository == 'relflow/relflow'
     runs-on: ubuntu-24.04
     timeout-minutes: 42
     strategy:
@@ -31,4 +34,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+          VERIFY_REFRESH_ONLY: ${{ github.event.created == false }}
         run: python docs/restore.py "${{ matrix.operation }}"

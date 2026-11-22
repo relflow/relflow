@@ -76,7 +76,8 @@ def selection(slug, digest, build):
     def matches():
         url = f"{address}?build={build}&check={time.time_ns()}"
         try:
-            with urlopen(url, timeout=30) as response:
+            request = Request(url, headers={"User-Agent": "relflow-evidence-verification"})
+            with urlopen(request, timeout=30) as response:
                 content = response.read(PUBLICATION_LIMIT + 1)
         except HTTPError as error:
             if error.code in {404, 502, 503, 504}:
@@ -116,7 +117,8 @@ def refresh():
         slugs.append("latest")
     else:
         print(f"Main has advanced to {main}. Refreshing only the version tag.", flush=True)
-    builds = {slug: trigger(slug) for slug in slugs}
+    build_for = newest if os.environ.get("VERIFY_REFRESH_ONLY") == "true" else trigger
+    builds = {slug: build_for(slug) for slug in slugs}
     for slug, build in builds.items():
         verify(slug, build, SOURCE_053, DIGEST_053)
 
