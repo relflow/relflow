@@ -66,6 +66,8 @@ def remote(authority: str) -> tuple[fs.FileSystem, str]:
 def open_stream(
     path: str,
     resolver: Callable[[str], tuple[fs.FileSystem, str]] = remote,
+    *,
+    seekable: bool = False,
 ) -> io.BufferedReader | io.BytesIO:
     if "://" not in path:
         return open(path, "rb")
@@ -73,8 +75,16 @@ def open_stream(
     authority, _, key = rest.partition("/")
     storage, prefix = resolver(f"{scheme}://{authority}")
     name = f"{prefix.rstrip('/')}/{unquote(key)}" if prefix else unquote(key)
-    # Media codecs seek through container headers and frame tables. Download
-    # the compressed object sequentially once, then let the codec seek in memory.
+    if seekable:
+        try:
+            source = storage.open_input_file(name)
+        except (NotImplementedError, io.UnsupportedOperation):
+            pass
+        else:
+            if source.seekable():
+                return io.BufferedReader(cast(io.RawIOBase, source), buffer_size=128 * 1024)
+            source.close()
+    # Sequential backends and whole-object decoders seek in the downloaded bytes.
     with storage.open_input_stream(name, compression=None) as stream:
         return io.BytesIO(stream.read())
 

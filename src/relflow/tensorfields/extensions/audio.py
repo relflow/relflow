@@ -12,7 +12,8 @@ import sys
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import InitVar
-from functools import partial
+from functools import cache, partial
+from tempfile import SpooledTemporaryFile
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, TypeAlias, Unpack, cast
 
 import numpy as np
@@ -33,6 +34,7 @@ from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Metrics
 
 if TYPE_CHECKING:
+    from soundfile import SoundFile
     from transformers import PreTrainedModel
 
     from relflow.structs.experiment import Schema
@@ -98,7 +100,7 @@ class Request(RequestBase):
     The frozen audio encoder supplies one vector per clip. Decoding, channel
     selection, and high-quality resampling run in a bounded thread pool;
     encoder_batch_size limits each model call. Recordings longer than window use
-    clip="chunks" by default, averaging up to max_windows overlapping windows
+    clip="chunks" by default, averaging up to max_windows sampled windows
     into one deterministic vector. clip="head", "center", and "tail" read a
     single window. A reconstructing mask targets the pristine vector.
     embed=True exports the field's learned representation.
@@ -179,14 +181,14 @@ def location(value: str, base: str | None) -> str:
 
 
 def open_audio(path: str):
-    return media.open_stream(path, remote)
+    return media.open_stream(path, remote, seekable=True)
 
 
 def snapshot(path: str, immutable: bool) -> tuple[bytes, bytes | None]:
     return media.snapshot(path, immutable, open_audio)
 
 
-def native_window(extractor: Any) -> float:
+def native_window(extractor: Any) -> float | None:
     chunk = getattr(extractor, "chunk_length", None)
     if isinstance(chunk, (int, float)) and chunk > 0:
         return float(chunk)
@@ -196,7 +198,7 @@ def native_window(extractor: Any) -> float:
     frames = getattr(extractor, "max_length", None)
     if type(extractor).__name__ == "ASTFeatureExtractor" and isinstance(frames, int) and frames > 0:
         return float(frames) * 0.01
-    return DEFAULT_WINDOW
+    return None
 
 
 def spans(
@@ -223,19 +225,88 @@ def spans(
         return [(start, stop)]
     if clip == "head":
         return [(start, start + width)]
+    if clip == "tail":
+        return [(stop - width, stop)]
     if clip == "center" or max_windows == 1:
         left = start + (length - width) // 2
         return [(left, left + width)]
-    if clip == "tail":
-        return [(stop - width, stop)]
     hop = max(1, round((window / 2.0 if stride is None else stride) * rate))
     last = stop - width
-    starts = list(range(start, last + 1, hop))
-    if starts[-1] != last:
-        starts.append(last)
-    if len(starts) > max_windows:
+    # Include the final window even when it falls between hops.
+    if (last - start + hop - 1) // hop + 1 > max_windows:
         starts = np.rint(np.linspace(start, last, max_windows)).astype(np.int64).tolist()
+    else:
+        starts = list(range(start, last, hop)) + [last]
     return [(int(left), int(left) + width) for left in starts]
+
+
+@cache
+def reader_type() -> type[SoundFile]:
+    from soundfile import SoundFile
+
+    class Reader(SoundFile):
+        def seekable(self) -> bool:
+            # libsndfile may report an unknown-length FLAC as seekable. SoundFile
+            # would then seek after each sequential read, including at EOF.
+            return super().seekable() and 0 < self.frames < 2**60
+
+    return Reader
+
+
+def read_windows(
+    source: SoundFile,
+    *,
+    offset: float,
+    duration: float | None,
+    window: float,
+    stride: float | None,
+    max_windows: int,
+    clip: Clip,
+) -> list[np.ndarray]:
+    select = partial(
+        spans,
+        rate=source.samplerate,
+        offset=offset,
+        duration=duration,
+        window=window,
+        stride=stride,
+        max_windows=max_windows,
+        clip=clip,
+    )
+    if source.seekable():
+        pieces = []
+        for left, right in select(source.frames):
+            source.seek(left)
+            block = source.read(right - left, dtype="float32", always_2d=True)
+            if len(block):
+                pieces.append(block)
+        return pieces
+
+    if clip == "head" and (duration is None or window < duration):
+        duration = window
+    start = round(offset * source.samplerate)
+    stop = None if duration is None else start + max(1, round(duration * source.samplerate))
+    total = 0
+    frame_bytes = source.channels * np.dtype(np.float32).itemsize
+    # EOF determines the window positions. Spool just the eligible PCM so
+    # even a one-pass source can use the same window selection with bounded RAM.
+    with SpooledTemporaryFile(max_size=1024 * 1024) as pcm:
+        while stop is None or total < stop:
+            size = 16384 if stop is None else min(16384, stop - total)
+            block = source.read(size, dtype="float32", always_2d=True)
+            if not len(block):
+                break
+            end = total + len(block)
+            if end > start:
+                pcm.write(memoryview(block[max(0, start - total) :]).cast("B"))
+            total = end
+        pieces = []
+        for left, right in select(total):
+            pcm.seek((left - start) * frame_bytes)
+            block = np.empty((right - left, source.channels), dtype=np.float32)
+            pcm.readinto(memoryview(block).cast("B"))
+            pieces.append(block)
+        return pieces
 
 
 def waveforms(
@@ -251,8 +322,9 @@ def waveforms(
     clip: Clip,
     channels: Literal["mean"] | int,
 ) -> list[np.ndarray]:
-    import soundfile as sf
     import soxr
+
+    Reader = reader_type()
 
     path, version = json.loads(record)
     try:
@@ -260,41 +332,20 @@ def waveforms(
         with stream:
             if isinstance(version, list) and list(stamp(os.fstat(stream.fileno()))) != version:
                 raise ValueError(f"audio {path!r} changed after tensorization; encode the observations again")
-            with sf.SoundFile(stream) as source:
+            with Reader(stream) as source:
                 rate = int(source.samplerate)
                 count = int(source.channels)
                 if isinstance(channels, int) and channels >= count:
                     raise ValueError(f"audio {path!r} has {count} channel(s); cannot select channel index {channels}")
-                if source.seekable() and 0 < source.frames < 2**60:
-                    intervals = spans(
-                        int(source.frames),
-                        rate,
-                        offset=offset,
-                        duration=duration,
-                        window=window,
-                        stride=stride,
-                        max_windows=max_windows,
-                        clip=clip,
-                    )
-                    pieces = []
-                    for left, right in intervals:
-                        source.seek(left)
-                        block = source.read(right - left, dtype="float32", always_2d=True)
-                        if len(block):
-                            pieces.append(block)
-                else:
-                    full = source.read(dtype="float32", always_2d=True)
-                    intervals = spans(
-                        len(full),
-                        rate,
-                        offset=offset,
-                        duration=duration,
-                        window=window,
-                        stride=stride,
-                        max_windows=max_windows,
-                        clip=clip,
-                    )
-                    pieces = [full[left:right] for left, right in intervals if right > left]
+                pieces = read_windows(
+                    source,
+                    offset=offset,
+                    duration=duration,
+                    window=window,
+                    stride=stride,
+                    max_windows=max_windows,
+                    clip=clip,
+                )
             if isinstance(version, list) and list(stamp(os.fstat(stream.fileno()))) != version:
                 raise ValueError(f"audio {path!r} changed during decoding; encode the observations again")
         if not pieces:
@@ -419,6 +470,20 @@ def minimum_samples(config: Any, rate: int) -> int:
     return max(receptive, round(0.025 * rate), 1)
 
 
+def fusion_features(extractor: Any, clips: list[np.ndarray], model_name: str) -> dict[str, np.ndarray]:
+    """Apply CLAP's fusion mel filters to windows already selected by the audio field."""
+    limit = extractor.nb_max_samples
+    if any(len(clip) > limit for clip in clips):
+        raise ValueError(f"fused CLAP encoder {model_name!r} expects windows of at most {limit} samples")
+    # The batch extractor randomly marks one bounded clip as long. The per-window
+    # transform uses the checkpoint's fusion filters and padding without sampling.
+    mels = [
+        extractor._get_input_mel(clip.astype(np.float64, copy=False), limit, "fusion", extractor.padding)[0]
+        for clip in clips
+    ]
+    return {"input_features": np.asarray(mels, dtype=np.float32), "is_longer": np.zeros((len(clips), 1), dtype=bool)}
+
+
 def encode_clips(
     model: Any,
     extractor: Any,
@@ -471,7 +536,10 @@ def encode_clips(
         kwargs["return_attention_mask"] = True
 
     with torch.autocast(device_type="cpu", enabled=False), torch.autocast(device_type=device.type, enabled=False):
-        prepared = extractor(clips, **kwargs)
+        if "is_longer" in names and getattr(config, "enable_fusion", False):
+            prepared = fusion_features(extractor, clips, model_name)
+        else:
+            prepared = extractor(clips, **kwargs)
     mask_array = prepared.get("attention_mask")
     attention_mask = torch.as_tensor(np.asarray(mask_array), device=device) if mask_array is not None else None
     forward_inputs: dict[str, torch.Tensor] = {}
@@ -506,6 +574,20 @@ class Embedder(media.MediaEmbedder):
 
         self.request = cast(Request, schema.requests[address])
         self.extractor = AutoFeatureExtractor.from_pretrained(self.request.model)
+        native = native_window(self.extractor)
+        requested = self.request.window
+        if (
+            getattr(self._cached_model.model.config, "model_type", None)
+            in {"whisper", "clap", "clap_audio_model", "audio-spectrogram-transformer"}
+            and native is not None
+            and requested is not None
+            and round(requested * self.sampling_rate) > round(native * self.sampling_rate)
+        ):
+            raise ValueError(
+                f"audio field {address} requests a {requested:g}s window for {self.request.model!r}, "
+                f"which supports up to {native:g}s. Omit window and use clip='chunks' for longer recordings."
+            )
+        self.window_seconds = requested or native or DEFAULT_WINDOW
 
     def stream(self, path: str):
         return open_audio(path)
@@ -516,10 +598,6 @@ class Embedder(media.MediaEmbedder):
         if not isinstance(rate, int) or rate <= 0:
             raise ValueError(f"audio feature extractor for {self.request.model!r} must expose a positive sampling_rate")
         return rate
-
-    @property
-    def window_seconds(self) -> float:
-        return native_window(self.extractor) if self.request.window is None else self.request.window
 
     def variant(self, device: torch.device) -> str:
         import soundfile as sf
@@ -549,6 +627,10 @@ class Embedder(media.MediaEmbedder):
             platform.machine(),
             transformers,
         )
+        if self.request.clip == "tail" and self.request.max_windows == 1:
+            settings += ("tail/v2",)
+        if getattr(self._cached_model.model.config, "enable_fusion", False):
+            settings += ("fusion/v2",)
         return self._cached_model.variant(device, repr(settings))
 
     def pool(

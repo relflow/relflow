@@ -20,15 +20,19 @@ A null value takes the null field state and costs no audio read. An empty path, 
 
 ## Standardization and processor pipelines
 
-SoundFile reads WAV, FLAC, OGG Vorbis, OGG Opus, MP3, AIFF, and PCM variants from local paths and remote streams. Multi-channel recordings mix to mono by averaging channels, or select one zero-based channel index through `channels`. SoXR resamples each selected window to the checkpoint feature extractor's sampling rate when the source rate differs.
+SoundFile reads WAV, FLAC, OGG Vorbis, OGG Opus, MP3, AIFF, and PCM variants from local paths and remote streams. Decoder support depends on the container as well as the codec. For AAC in M4A or ADTS, Opus in WebM, or WMA, convert the recording to FLAC first. For example, `ffmpeg -i voice-note.m4a -c:a flac voice-note.flac` writes the decoded audio to a supported FLAC file.
 
-`offset` skips leading seconds and `duration` bounds the span analyzed per file. Recordings longer than `window` use `clip="chunks"` by default: up to `max_windows` overlapping windows across the span are encoded and averaged into one deterministic vector. `clip="head"`, `"center"`, and `"tail"` seek directly to a single window instead of reading the rest of a seekable file.
+Multi-channel recordings mix to mono by averaging channels, or select one zero-based channel index through `channels`. SoXR resamples each selected window to the checkpoint feature extractor's sampling rate when the source rate differs.
 
-The default [Whisper base encoder](https://huggingface.co/openai/whisper-base) unwraps its audio encoder tower and averages valid frames before the 30-second padding tail. Wav2Vec2, HuBERT, WavLM, AST, and CLAP checkpoints are also supported without custom code execution. Group-normalized waveform encoders bucket unequal clip lengths within a batch so padding cannot shift embeddings.
+`offset` skips leading seconds and `duration` bounds the span analyzed per file. Recordings longer than `window` use `clip="chunks"` by default. The field averages embeddings for up to `max_windows` windows from the recording. Windows can overlap or leave gaps on long recordings. With a single chunk it takes the center. `clip="head"`, `"center"`, and `"tail"` seek directly to a single window when the decoder can seek and the frame count is known. For streams with an unknown length, `"head"` stops after the requested window. Other modes read through `duration` or the end of the stream and can use temporary disk space for decoded samples.
+
+The default [Whisper base encoder](https://huggingface.co/openai/whisper-base) unwraps its audio encoder tower and averages valid frames before the 30-second padding tail. Wav2Vec2, HuBERT, WavLM, AST, and CLAP checkpoints are also supported without custom code execution. Fixed-window extractors reject an explicit window longer than their native capacity. To process a long call with Whisper, leave `window=None` and choose how many 30-second windows to sample with `max_windows`. Fused CLAP processes each selected window deterministically. Group-normalized waveform encoders bucket unequal clip lengths within a batch so padding cannot shift embeddings.
 
 On a cold cache, a bounded thread pool decodes and resamples distinct recordings while the frozen encoder processes batches on the model device. The cache stores the pristine vector before the learned projection or training jitter. Fields sharing the same audio version, clipping and channel settings, feature extractor, encoder weights, and execution precision reuse that vector across epochs and runs sharing a store.
 
-Ordinary local paths are checked against file identity, size, and timestamps. Mutable object-store URIs read the object once per lookup to compute its SHA-256 digest and decode that same download on a cold miss. For content-addressed object names, set `immutable=True` so warm hits make zero storage requests.
+Training with automatic precision uses BF16 mixed precision on supported CUDA devices. For direct prediction on a CUDA model, `with torch.autocast("cuda", dtype=torch.bfloat16):` selects BF16. Warm the cache under the same precision as prediction.
+
+Ordinary local paths are checked against file identity, size, and timestamps. Mutable object-store URIs read the object once per lookup to compute its SHA-256 digest and decode that same download on a cold miss. For content-addressed object names, set `immutable=True` so warm hits make zero storage requests. On a cold read, seekable object stores can fetch just the ranges needed by the codec.
 
 ## How is this leaf trained?
 
@@ -67,7 +71,7 @@ model = SupportCall(preset="small")
 | `duration` | `None` | Cap the span in seconds analyzed after `offset`. `None` uses the remainder of the recording. |
 | `window` | `None` | Set the encoder window length in seconds. `None` uses the checkpoint's native window, or 10 seconds for unbounded waveform encoders. |
 | `stride` | `None` | Set the hop in seconds between windows when `clip="chunks"`. `None` uses half of `window`. |
-| `max_windows` | `4` | Cap the number of windows averaged per recording when `clip="chunks"`. Longer spans space windows evenly from start to end. |
+| `max_windows` | `4` | Cap the number of windows averaged per recording when `clip="chunks"`. When the cap is exceeded, windows are spaced evenly across the span. A cap of one selects the center. |
 | `clip` | `"chunks"` | Choose `"chunks"`, `"head"`, `"center"`, or `"tail"` when the span exceeds `window`. |
 | `channels` | `"mean"` | Average channels to mono with `"mean"` or select a zero-based channel index. |
 | `encoder_pooling` | `"auto"` | Choose `"auto"`, `"mean"`, `"cls"`, or `"pooler"` over encoder outputs. |

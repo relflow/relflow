@@ -1,6 +1,9 @@
+import ast
+import io
 import os
 import threading
 from collections import Counter
+from functools import partial
 from types import SimpleNamespace
 
 import numpy as np
@@ -217,7 +220,7 @@ def test_channels_resampling_windowing_and_cache_invalidation(acoustic, tmp_path
     # Segment means in channel 0 over 0.1s windows are 0.2, 0.4, and 0.8.
     head = vectors(build(tmp_path, channels=0, window=0.1, clip="head"), [path.name])[0, 0, 0]
     center = vectors(build(tmp_path, channels=0, window=0.1, clip="center"), [path.name])[0, 0, 0]
-    tail = vectors(build(tmp_path, channels=0, window=0.1, clip="tail"), [path.name])[0, 0, 0]
+    tail = vectors(build(tmp_path, channels=0, window=0.1, clip="tail", max_windows=1), [path.name])[0, 0, 0]
     chunks = vectors(build(tmp_path, channels=0, window=0.1, stride=0.1, max_windows=3, clip="chunks"), [path.name])[
         0, 0, 0
     ]
@@ -298,6 +301,83 @@ def test_oversize_descriptor_batch_splits_and_chunked_dictionaries(acoustic, tmp
     assert model.predict(data.slice(0, 0)).height == 0
 
 
+def test_capped_span_planning(monkeypatch):
+    def bounded_range(*args):
+        hops = range(*args)
+        assert len(hops) <= 4
+        return hops
+
+    monkeypatch.setattr(audio, "range", bounded_range, raising=False)
+    plan = partial(audio.spans, 3600 * 16000, 16000, offset=0, window=1, clip="chunks", max_windows=4)
+    assert plan(duration=None, stride=0.0001) == [
+        (0, 16000),
+        (19194667, 19210667),
+        (38389333, 38405333),
+        (57584000, 57600000),
+    ]
+    assert plan(duration=2, stride=0.4) == [(0, 16000), (6400, 22400), (12800, 28800), (16000, 32000)]
+
+
+def test_legacy_tail_vectors_are_recomputed(acoustic, tmp_path, monkeypatch):
+    model = build(tmp_path, window=0.025, clip="tail", max_windows=1, resident=0)
+    embedder = model.nodes["/clip"].embedder
+    backbone = embedder._cached_model
+    variant = backbone.variant
+
+    def legacy(device, processing):
+        settings = ast.literal_eval(processing)
+        assert settings[-1] == "tail/v2"
+        return variant(device, repr(settings[:-1]))
+
+    with monkeypatch.context() as previous:
+        previous.setattr(backbone, "variant", legacy)
+        vectors(model, ["positive.wav"])
+    vectors(model, ["positive.wav"])
+    vectors(model, ["positive.wav"])
+    assert acoustic.batches == [1, 1]
+
+
+@pytest.mark.parametrize("access", ["seekable", "stream", "unsupported"])
+def test_remote_window_reads(acoustic, tmp_path, monkeypatch, access):
+    import json
+
+    path = tmp_path / "long.wav"
+    write_wave(path, np.linspace(-0.5, 0.5, 1_600_000, dtype=np.float32))
+    read = Counter()
+
+    class Reader(io.FileIO):
+        def seekable(self):
+            return access == "seekable"
+
+        def readinto(self, buf):
+            count = super().readinto(buf)
+            read["bytes"] += count
+            return count
+
+    class Storage:
+        def open_input_file(self, name):
+            assert name == path.name
+            if access == "unsupported":
+                raise NotImplementedError
+            return Reader(path, "rb")
+
+        def open_input_stream(self, name, *, compression):
+            read["full"] += 1
+            return path.open("rb")
+
+    monkeypatch.setattr(audio, "remote", lambda authority: (Storage(), ""))
+    opts = dict(
+        target_rate=16000, offset=0, duration=None, window=1, stride=None, max_windows=1, clip="tail", channels="mean"
+    )
+    remote = audio.waveforms(json.dumps(("s3://bucket/long.wav", None)).encode(), {}, **opts)
+    local = audio.waveforms(audio.snapshot(str(path), True)[0], {}, **opts)
+    np.testing.assert_array_equal(remote, local)
+    if access == "seekable":
+        assert 0 < read["bytes"] < path.stat().st_size // 2 and read["full"] == 0
+    else:
+        assert read["full"] == 1
+
+
 def test_deterministic_span_selection_and_pooling_modes():
     assert audio.spans(
         16000, 16000, offset=0.0, duration=None, window=2.0, stride=None, max_windows=4, clip="chunks"
@@ -332,48 +412,90 @@ def test_deterministic_span_selection_and_pooling_modes():
     )
 
 
-def test_unframed_stream_fallback_and_empty_pool(acoustic, tmp_path, monkeypatch):
-    model = build(tmp_path)
-    embedder = model.nodes["/clip"].embedder
+def test_empty_audio_pool(acoustic, tmp_path):
+    embedder = build(tmp_path).nodes["/clip"].embedder
     assert embedder.pool([], torch.device("cpu"), {}).shape == (0, 3)
 
-    real_soundfile = sf.SoundFile
 
-    class UnframedSoundFile:
-        def __init__(self, stream):
-            self.inner = real_soundfile(stream)
-            self.samplerate = self.inner.samplerate
-            self.channels = self.inner.channels
-            self.frames = 2**63 - 1
+@pytest.fixture
+def streaming_flac(tmp_path):
+    rate = 8000
+    t = np.arange(150_001) / rate
+    samples = np.column_stack((np.sin(140 * t), np.cos(310 * t)))
+    known = tmp_path / "known.flac"
+    sf.write(known, samples, rate, subtype="PCM_16")
+    data = bytearray(known.read_bytes())
+    # In FLAC STREAMINFO a zero 36-bit total sample count means the length is unknown.
+    assert data[:4] == b"fLaC" and int.from_bytes(data[18:26], "big") % (1 << 36) == len(t)
+    data[21] &= 0xF0
+    data[22:26] = bytes(4)
+    unknown = tmp_path / "streaming.flac"
+    unknown.write_bytes(data)
+    return known, unknown
 
-        def seekable(self):
-            return True
 
-        def read(self, *args, **kwargs):
-            return self.inner.read(*args, **kwargs)
-
-        def __enter__(self):
-            self.inner.__enter__()
-            return self
-
-        def __exit__(self, *args):
-            return self.inner.__exit__(*args)
-
-    monkeypatch.setattr(sf, "SoundFile", UnframedSoundFile)
-    record = audio.snapshot(str(tmp_path / "positive.wav"), True)[0]
-    pieces = audio.waveforms(
-        record,
-        {},
+@pytest.mark.parametrize("clip", ["head", "center", "tail", "chunks"])
+@pytest.mark.parametrize("offset,duration,channels", [(0, None, "mean"), (0.125125, 3.25, 1), (18.74, 2.0, 0)])
+def test_streaming_flac_windows_match_known_length(streaming_flac, clip, offset, duration, channels):
+    decode = partial(
+        audio.waveforms,
+        bodies={},
         target_rate=16000,
-        offset=0.0,
-        duration=None,
-        window=0.05,
+        offset=offset,
+        duration=duration,
+        window=0.2,
+        stride=None,
+        max_windows=3,
+        clip=clip,
+        channels=channels,
+    )
+    known, unknown = (decode(audio.snapshot(str(path), True)[0]) for path in streaming_flac)
+    np.testing.assert_array_equal(unknown, known)
+
+
+@pytest.mark.parametrize("clip,duration,stop", [("head", None, 8800), ("head", 0.05, 8400), ("tail", 0.4, 11200)])
+def test_streaming_flac_stops_at_requested_frame(streaming_flac, monkeypatch, clip, duration, stop):
+    read = sf.SoundFile.read
+    consumed = 0
+
+    def bounded(source, frames, **kwargs):
+        nonlocal consumed
+        assert 0 < frames <= stop - consumed
+        block = read(source, frames, **kwargs)
+        consumed += len(block)
+        return block
+
+    monkeypatch.setattr(sf.SoundFile, "read", bounded)
+    audio.waveforms(
+        audio.snapshot(str(streaming_flac[1]), True)[0],
+        {},
+        target_rate=8000,
+        offset=1,
+        duration=duration,
+        window=0.1,
         stride=None,
         max_windows=2,
-        clip="tail",
+        clip=clip,
         channels="mean",
     )
-    assert len(pieces) == 1 and len(pieces[0]) == 800
+    assert consumed == stop
+
+
+def test_streaming_flac_offset_past_end(streaming_flac):
+    record = audio.snapshot(str(streaming_flac[1]), True)[0]
+    with pytest.raises(ValueError, match=r"no samples after offset=20s .*18.750s"):
+        audio.waveforms(
+            record,
+            {},
+            target_rate=8000,
+            offset=20,
+            duration=None,
+            window=1,
+            stride=None,
+            max_windows=2,
+            clip="chunks",
+            channels="mean",
+        )
 
 
 @pytest.mark.integration
@@ -420,6 +542,10 @@ def test_whisper_hubert_ast_and_clap_encoder_contracts(tmp_path):
     assert whisper_backbone.hidden_size == 16 and not hasattr(whisper_backbone.model, "decoder")
     whisper_fe = WhisperFeatureExtractor.from_pretrained(whisper_dir)
     assert audio.native_window(whisper_fe) == 4.0
+    for window in (None, 4):
+        rf.Model(d_model=8, n_layers=1, n_heads=2, clip=rf.Audio(model=str(whisper_dir), window=window, cache=False))
+    with pytest.raises(ValueError, match=r"/clip.*4.1s.*up to 4s.*chunks"):
+        rf.Model(d_model=8, n_layers=1, n_heads=2, clip=rf.Audio(model=str(whisper_dir), window=4.1, cache=False))
     whisper_out = audio.encode_clips(
         whisper_backbone.model,
         whisper_fe,
@@ -535,6 +661,38 @@ def test_whisper_hubert_ast_and_clap_encoder_contracts(tmp_path):
         model_name="clap",
     )
     assert torch.equal(first_clap, second_clap)
+
+
+@pytest.mark.integration
+def test_fused_clap_bounded_windows_ignore_batch_order_and_rng(monkeypatch):
+    from transformers import ClapAudioConfig, ClapAudioModelWithProjection, ClapFeatureExtractor
+
+    model = ClapAudioModelWithProjection(
+        ClapAudioConfig(
+            hidden_size=32, depths=[1] * 4, num_attention_heads=[2] * 4, patch_embeds_hidden_size=4, enable_fusion=True
+        )
+    ).audio_model.eval()
+    fe = ClapFeatureExtractor(sampling_rate=48000, max_length_s=1, truncation="fusion")
+    encode = partial(
+        audio.encode_clips,
+        model,
+        fe,
+        device=torch.device("cpu"),
+        rate=48000,
+        pooling=audio.Pooling.auto,
+        hidden_size=32,
+        model_name="fused",
+    )
+    short = np.sin(np.arange(24000) * 0.1).astype(np.float32)
+    full = np.cos(np.arange(48000) * 0.7).astype(np.float32)
+    monkeypatch.setattr(np.random, "randint", lambda *args: pytest.fail("random selection for bounded CLAP windows"))
+    first = encode([short, short, full])
+    torch.testing.assert_close(first[0], first[1])
+    torch.testing.assert_close(first[0], encode([short])[0], atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(first, encode([full, short, short]).flip([0]), atol=1e-5, rtol=1e-5)
+    assert not torch.allclose(first[0], first[2])
+    with pytest.raises(ValueError, match="48000 samples"):
+        encode([np.concatenate([short, full])])
 
 
 @pytest.mark.integration

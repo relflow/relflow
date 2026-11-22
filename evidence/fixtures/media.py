@@ -13,9 +13,7 @@ from pathlib import Path
 import numpy as np
 import torch
 from huggingface_hub import snapshot_download
-from PIL import Image
 from transformers import AutoFeatureExtractor, AutoModel, AutoTokenizer
-from transformers.models.auto.image_processing_auto import AutoImageProcessor
 
 TEXT = ("sentence-transformers/all-MiniLM-L6-v2", "1110a243fdf4706b3f48f1d95db1a4f5529b4d41")
 IMAGE = ("facebook/dinov2-small", "ed25f3a31f01632728cabb09d1542f84ab7b0056")
@@ -75,6 +73,8 @@ Listen for the cellos in the quartet.""".splitlines()
 
 def tile(seed, striped):
     """Matched colors, spacing, rotation and phase for both patterns at each seed."""
+    from PIL import Image
+
     rng = np.random.default_rng(seed)
     y, x = np.mgrid[:144, :144]
     angle = rng.uniform(0, np.pi)
@@ -124,6 +124,8 @@ def embed(checkpoint, inputs, train, cache_dir=None):
         vectors = (model(**tokens).last_hidden_state * mask).sum(1) / mask.sum(1)
         pooling = "attention-mask mean"
     elif checkpoint == IMAGE:
+        from transformers.models.auto.image_processing_auto import AutoImageProcessor
+
         processor = AutoImageProcessor.from_pretrained(path, backend="pil", local_files_only=True)
         vectors = torch.cat(
             [
