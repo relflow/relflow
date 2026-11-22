@@ -17,6 +17,7 @@ const leaves = [
   'duration',
   'text',
   'image',
+  'audio',
 ];
 const headings = [
   'Input values',
@@ -74,7 +75,7 @@ test('all leaf references follow Number, show standalone output trees, and repor
       await expect(tree.locator('details[open]')).toHaveCount(0);
       await tree.getByRole('button', { name: 'Expand all', exact: true }).click();
       await expect(tree.locator('details:not([open])')).toHaveCount(0);
-      if (['hash', 'text', 'image', 'period'].includes(leaf)) {
+      if (['hash', 'text', 'image', 'audio', 'period'].includes(leaf)) {
         await expect(tree.locator('[data-value-name="representations"]')).toHaveCount(1);
         await expect(tree.locator('[data-value-name="predictions"]')).toHaveCount(0);
         await expect(tree).toContainText('With embed=True');

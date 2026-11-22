@@ -1,0 +1,132 @@
+---
+title: Audio
+description: Use the acoustic and spoken content of a recording alongside the other fields in a record.
+---
+
+import DataTypePage from '../../../components/DataTypePage.astro';
+import LeafEvidence from '../../../components/LeafEvidence.astro';
+import ValueTree from '../../../components/ValueTree.astro';
+import { outputs } from '../../../datatypes/predictions';
+
+Use `rf.Audio` when a support call, equipment recording, or voice note should help predict another field. Each recording supplies one vector. The rest of the model learns how much that audio evidence matters for the task.
+
+<DataTypePage name="Audio">
+
+## Input values
+
+Supply one path per recording, such as `"/mnt/calls/42.flac"` or `"s3://recordings/calls/42.wav"`. Use `base` to resolve relative names such as `"42.flac"` against a directory or object-store prefix. Train and predict in environments with access to those files. Use a repeated [Branch](/concepts/branches/) for a sequence of recordings.
+
+A null value takes the null field state and costs no audio read. An empty path, a missing file, an empty clip, and unreadable audio data raise errors. Install the [audio extra](/installation/#optional-dependencies) and provision the encoder on each training or prediction host.
+
+## Standardization and processor pipelines
+
+SoundFile reads WAV, FLAC, OGG Vorbis, OGG Opus, MP3, AIFF, and PCM variants from local paths and remote streams. Decoder support depends on the container as well as the codec. For AAC in M4A or ADTS, Opus in WebM, or WMA, convert the recording to FLAC first. For example, `ffmpeg -i voice-note.m4a -c:a flac voice-note.flac` writes the decoded audio to a supported FLAC file.
+
+Multi-channel recordings mix to mono by averaging channels, or select one zero-based channel index through `channels`. SoXR resamples each selected window to the checkpoint feature extractor's sampling rate when the source rate differs.
+
+`offset` skips leading seconds and `duration` bounds the span analyzed per file. Recordings longer than `window` use `clip="chunks"` by default. The field averages embeddings for up to `max_windows` windows from the recording. Windows can overlap or leave gaps on long recordings. With a single chunk it takes the center. `clip="head"`, `"center"`, and `"tail"` seek directly to a single window when the decoder can seek and the frame count is known. For streams with an unknown length, `"head"` stops after the requested window. Other modes read through `duration` or the end of the stream and can use temporary disk space for decoded samples.
+
+The default [Whisper base encoder](https://huggingface.co/openai/whisper-base) unwraps its audio encoder tower and averages valid frames before the 30-second padding tail. Wav2Vec2, HuBERT, WavLM, AST, and CLAP checkpoints are also supported without custom code execution. Fixed-window extractors reject an explicit window longer than their native capacity. To process a long call with Whisper, leave `window=None` and choose how many 30-second windows to sample with `max_windows`. Fused CLAP processes each selected window deterministically. Group-normalized waveform encoders bucket unequal clip lengths within a batch so padding cannot shift embeddings.
+
+On a cold cache, a bounded thread pool decodes and resamples distinct recordings while the frozen encoder processes batches on the model device. The cache stores the pristine vector before the learned projection or training jitter. Fields sharing the same audio version, clipping and channel settings, feature extractor, encoder weights, and execution precision reuse that vector across epochs and runs sharing a store.
+
+Training with automatic precision uses BF16 mixed precision on supported CUDA devices. For direct prediction on a CUDA model, `with torch.autocast("cuda", dtype=torch.bfloat16):` selects BF16. Warm the cache under the same precision as prediction.
+
+Ordinary local paths are checked against file identity, size, and timestamps. Mutable object-store URIs read the object once per lookup to compute its SHA-256 digest and decode that same download on a cold miss. For content-addressed object names, set `immutable=True` so warm hits make zero storage requests. On a cold read, seekable object stores can fetch just the ranges needed by the codec.
+
+### Pin the encoder for deployment
+
+To use the same Whisper-base weights and feature extractor in training and serving, download a specific revision when preparing your deployment. This example fetches the three files relflow needs from the [revision used in the audio Evidence experiments](https://huggingface.co/openai/whisper-base/tree/e37978b90ca9030d5170a5c07aadb050351a65bb).
+
+```python
+from huggingface_hub import snapshot_download
+
+snapshot_download(
+    repo_id="openai/whisper-base",
+    revision="e37978b90ca9030d5170a5c07aadb050351a65bb",
+    allow_patterns=["config.json", "preprocessor_config.json", "model.safetensors"],
+    local_dir="./models/whisper-base-e37978b",
+)
+```
+
+Ship that directory with your application and point the audio field at it. Each host can then load the encoder offline from the same path relative to its working directory.
+
+```python
+import relflow as rf
+
+recording = rf.Audio(model="./models/whisper-base-e37978b")
+```
+
+## How is this leaf trained?
+
+Downstream targets train a field-specific projection into the model's representation space while the pretrained audio encoder remains frozen. A reconstructing mask adds state classification and an L1 or L2 objective against the pristine audio vector. Jitter applies only to eligible training inputs.
+
+### Predictions
+
+An audio field ordinarily provides context for other predictions. Set `embed=True` to export its learned representation in the `representations` column. An audio reconstruction objective predicts a vector internally.
+
+<ValueTree
+  id="audio-predictions"
+  {...outputs.audio}
+  predictions
+  heading="Illustrative prediction output"
+  label="Audio representation output"
+/>
+
+## Leaf-specific parameters
+
+```python
+import relflow as rf
+
+class SupportCall(rf.Model):
+    recording = rf.Audio(base="s3://calls/by-digest/", immutable=True, max_windows=6)
+    escalated = rf.Boolean(mask=True)
+
+model = SupportCall(preset="small")
+```
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `model` | `"openai/whisper-base"` | Select a compatible Hugging Face audio encoder and feature extractor, or their local directory. |
+| `base` | `None` | Resolve relative file names against this directory or URI prefix. Relative local names otherwise use the working directory. |
+| `immutable` | `False` | Treat each resolved path as a permanent identity for a single version of the bytes. |
+| `offset` | `0.0` | Skip this many leading seconds before selecting windows. |
+| `duration` | `None` | Cap the span in seconds analyzed after `offset`. `None` uses the remainder of the recording. |
+| `window` | `None` | Set the encoder window length in seconds. `None` uses the checkpoint's native window, or 10 seconds for unbounded waveform encoders. |
+| `stride` | `None` | Set the hop in seconds between windows when `clip="chunks"`. `None` uses half of `window`. |
+| `max_windows` | `4` | Cap the number of windows averaged per recording when `clip="chunks"`. When the cap is exceeded, windows are spaced evenly across the span. A cap of one selects the center. |
+| `clip` | `"chunks"` | Choose `"chunks"`, `"head"`, `"center"`, or `"tail"` when the span exceeds `window`. |
+| `channels` | `"mean"` | Average channels to mono with `"mean"` or select a zero-based channel index. |
+| `encoder_pooling` | `"auto"` | Choose `"auto"`, `"mean"`, `"cls"`, or `"pooler"` over encoder outputs. |
+| `read_workers` | `4` | Bound concurrent reads, decoding, and resampling per encoder process. |
+| `encoder_batch_size` | `16` | Bound the number of audio windows in one encoder call. |
+| `cache` | `True` | Enable automatic reuse. A positive integer also caps hot entries. `False` disables the cache tiers. |
+| `store` | `None` | Choose the local cache directory. The default honors `RELFLOW_CACHE_DIR` and otherwise uses the platform cache. |
+| `memory` | `None` | Set the shared RAM budget in MiB. The default is 64 MiB. |
+| `resident` | `None` | Set the device table budget in MiB. CUDA defaults to one eighth of free memory up to 512 MiB. Other devices default to zero. |
+| `objective` | `"l2"` | Choose `"l1"` or `"l2"` coordinate error for a reconstruction objective. |
+| `jitter` | `rf.Jitter()` | Perturb pooled audio vectors during training. |
+
+### Request methods
+
+To prepare a cache ahead of training, call `model.nodes["/recording"].embedder.warm(paths)` with a file name or a sequence of file names on the intended device and precision.
+
+## Errors raised
+
+A failed read or unsupported codec identifies the affected path and field address. Selecting a channel index beyond a file's channel count, or setting `offset` at or past the end of the recording, raises a `ValueError`. A local file that changes between selection and cold decoding raises an error so the batch can be encoded again.
+
+### Footguns
+
+- **Using single-window `head` on long recordings whose signal appears later.** Everything past the first window is ignored. Keep `clip="chunks"` unless the relevant event is known to occur at a fixed boundary.
+- **Reusing a mutable filename with `immutable=True`.** Training can reuse an earlier recording even after its bytes change. Use distinct names per version or keep the default freshness policy. See [input values](#input-values).
+- **Serving paths supplied by callers.** The prediction process opens those paths with its storage access. Validate references at the application boundary and scope storage permissions to your media collection. See [HTTP serving](/advanced/inference-and-deployment/).
+
+## Relevant evidence
+
+<LeafEvidence type="Audio" />
+
+### Related types
+
+[Vector](/data-types/vector/) accepts audio embeddings already produced by an upstream pipeline. [Text](/data-types/text/) supplies context from transcripts or notes, and [Image](/data-types/image/) handles visual media references with the same cache architecture.
+
+</DataTypePage>

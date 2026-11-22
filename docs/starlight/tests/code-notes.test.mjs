@@ -89,6 +89,14 @@ writer = rf.Writer("predictions", format="ipc")`);
     ),
     [],
   );
+  const mediaNotes = await annotations(
+    'recording = rf.Audio(base="s3://calls/", immutable=True, max_windows=6, store="audio-cache")',
+  );
+  assert.match(mediaNotes.find((note) => note.value === 'rf.Audio').text, /frozen audio encoder/);
+  assert.match(mediaNotes.find((note) => note.value.startsWith('base=')).text, /URI prefix/);
+  assert.match(mediaNotes.find((note) => note.value === 'immutable=True').text, /zero source/);
+  assert.match(mediaNotes.find((note) => note.value === 'max_windows=6').text, /6 overlapping/);
+  assert.match(mediaNotes.find((note) => note.value.startsWith('store=')).text, /cache directory/);
 });
 
 test('Duration delta notes stay attached to Duration calls', async () => {

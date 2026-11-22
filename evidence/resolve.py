@@ -13,7 +13,7 @@ from pathlib import Path
 UV_VERSION = "0.13.7"
 PLATFORM = "x86_64-manylinux_2_28"
 PYTHON_VERSION = "3.12"
-EXTRAS = ("text", "image")
+EXTRAS = ("text", "image", "audio")
 
 
 def pins(path: Path) -> dict[str, set[str]]:

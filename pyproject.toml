@@ -51,6 +51,12 @@ image = [
     "pillow>=11",
     "moka-py>=0.5,<0.6",
 ]
+audio = [
+    "transformers>=5.9.0",
+    "soundfile>=0.13.0",
+    "soxr>=0.5.0",
+    "moka-py>=0.5,<0.6",
+]
 typing = [
     "pyarrow-stubs>=20.0.0.20260819",
     "types-PyYAML>=6.0.12",
@@ -77,6 +83,8 @@ dev = [
     "transformers>=5.9.0",
     "moka-py>=0.5,<0.6",
     "pillow>=11",
+    "soundfile>=0.13.0",
+    "soxr>=0.5.0",
     "duckdb>=1.5.0",
 ]
 
@@ -194,6 +202,7 @@ files = [
     "evidence/experiments/reporting.py",
     "evidence/experiments/run.py",
     "evidence/experiments/source.py",
+    "evidence/fixtures/audio.py",
     "evidence/fixtures/media.py",
     "evidence/fixtures/questions.py",
     "evidence/hosted.md",

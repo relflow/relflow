@@ -103,6 +103,7 @@ export default defineConfig({
               items: [
                 { label: 'Text', slug: 'data-types/text' },
                 { label: 'Image', slug: 'data-types/image' },
+                { label: 'Audio', slug: 'data-types/audio' },
               ],
             },
             {

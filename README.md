@@ -77,8 +77,8 @@ uv add relflow
 uv run relflow --version
 ```
 
-With pip, use `python -m pip install relflow`. Image fields use
-`uv add "relflow[image]"`. For text encoders and HTTP serving, use
+With pip, use `python -m pip install relflow`. Media fields use
+`uv add "relflow[image,audio]"`. For text encoders and HTTP serving, use
 `uv add "relflow[text,serving]"`. See
 [Installation](https://www.relflow.ai/latest/installation/) for the full list.
 
