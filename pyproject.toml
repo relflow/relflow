@@ -160,6 +160,7 @@ files = [
     "docs/tests/__init__.py",
     "docs/publish.py",
     "docs/pyproject.toml",
+    "docs/restore.py",
     "docs/starlight/.gitignore",
     "docs/starlight/.prettierignore",
     "docs/starlight/.prettierrc.json",

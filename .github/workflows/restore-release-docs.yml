@@ -1,0 +1,34 @@
+name: Restore archived release documentation
+
+on:
+  push:
+    branches: [ops/restore-release-docs-v0.5.2]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-release-docs-v0.5.2
+  cancel-in-progress: false
+
+jobs:
+  documentation:
+    if: github.repository == 'relflow/relflow' && github.event.created
+    runs-on: ubuntu-24.04
+    timeout-minutes: 42
+    strategy:
+      fail-fast: false
+      matrix:
+        operation: [refresh, restore]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore release documentation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          READTHEDOCS_TOKEN: ${{ secrets.READTHEDOCS_TOKEN }}
+        run: python docs/restore.py "${{ matrix.operation }}"

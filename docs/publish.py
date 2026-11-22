@@ -129,16 +129,19 @@ def publish(root: Path = ROOT, *, environ: Mapping[str, str] | None = None) -> P
     environment.update(RELFLOW_DOCS_URL=site_url, RELFLOW_DOCS_REVISION=revision, ASTRO_TELEMETRY_DISABLED="1")
 
     if (root / "evidence/experiments").is_dir():
-        version = (
-            environment.get("READTHEDOCS_GIT_IDENTIFIER")
-            if environment.get("READTHEDOCS_VERSION_TYPE") == "tag"
-            else None
-        )
+        kind = environment.get("READTHEDOCS_VERSION_TYPE")
+        identifier = environment.get("READTHEDOCS_GIT_IDENTIFIER")
+        version = identifier if kind == "tag" else None
+        evidence_revision = revision
+        if kind == "branch" and identifier == "ops/restore-release-docs-v0.5.2":
+            # The recovered site uses a new checkout with the original frozen package Evidence.
+            version = "v0.5.2"
+            evidence_revision = "0b700f2df4edda5a3353b9a83dd8cf73fbcc1394"
         # Hosted versions always select formal releases, never inherited CI overrides.
         environment.pop("RELFLOW_EVIDENCE_PUBLICATION", None)
         publication = fetch(root, version.removeprefix("v") if version else None, required=bool(version))
         if publication is not None:
-            if version and snapshot(publication)["revision"] != revision:
+            if version and snapshot(publication)["revision"] != evidence_revision:
                 raise ValueError("Released evidence does not match the documentation tag's source revision")
             environment["RELFLOW_EVIDENCE_PUBLICATION"] = str(publication)
 
