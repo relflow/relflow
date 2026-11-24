@@ -219,13 +219,24 @@ model = rf.Model(
   overlapping windows; `clip="head"`, `"center"`, and `"tail"` seek to a
   single window. Freshness, `immutable=True`, caching, `jitter`, and
   representation/reconstruction contracts match `Image` and `Text`.
+- `Video` accepts local video paths and Arrow object-store URIs. Install
+  `relflow[video]`. PyAV decodes distinct misses in bounded threads with
+  keyframe seeking, display-rotation normalization, and PIL frame
+  preprocessing before a frozen video encoder (`microsoft/xclip-base-patch32`
+  by default; VideoMAE, V-JEPA 2, ViViT, and TimeSformer are also supported
+  without `torchvision`) produces one pristine vector per video. With
+  `window=None`, `num_frames` frames are sampled uniformly across the span;
+  setting `window` enables `clip="chunks"`, `"head"`, `"center"`, or `"tail"`
+  with `stride` and `max_windows`. Freshness, `immutable=True`, caching,
+  `jitter`, and representation/reconstruction contracts match `Image`, `Audio`,
+  and `Text`.
 - `rf.Jitter(add=..., multiply=..., normalize=...)` is a shared frozen
   configuration whose `apply(inputs, mask)` method owns the vectorized affine
   tensor operation. Consumers own training activation, eligible coordinates,
   and normalization placement. `Number`, `Vector`, `Period`, `Text`, `Image`,
-  and `Audio` consume it. `Number` uses `normalize` to choose between raw and
-  standardized values. The other built-ins have one continuous representation
-  and apply jitter there without creating another normalizer.
+  `Audio`, and `Video` consume it. `Number` uses `normalize` to choose between
+  raw and standardized values. The other built-ins have one continuous
+  representation and apply jitter there without creating another normalizer.
 - Tensorfield extensions declare canonical Arrow atom compatibility families with
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
   with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of

@@ -21,6 +21,8 @@ export const reference = {
       'A frozen pretrained vision encoder supplies CLS vectors; a task projection learns how to use them.',
     Audio:
       'A frozen pretrained audio encoder supplies recording vectors; a task projection learns how to use them.',
+    Video:
+      'A frozen pretrained video encoder supplies clip vectors; a task projection learns how to use them.',
   }),
   types: /** @type {Record<string, Note>} */ ({
     Model: {
@@ -82,6 +84,10 @@ export const reference = {
     Audio: {
       title: 'Audio recording reference',
       text: 'Decode and resample local audio paths or object-store URIs, pool overlapping windows with a frozen audio encoder, and project the cached vector into model space.',
+    },
+    Video: {
+      title: 'Video clip reference',
+      text: 'Decode and sample frames from local video paths or object-store URIs, pool clips with a frozen video encoder, and project the cached vector into model space.',
     },
     Vector: {
       title: 'Fixed-width numeric values',
@@ -217,7 +223,7 @@ export const reference = {
     },
     objective: {
       title: 'Reconstruction loss',
-      text: 'Choose the loss for this field’s reconstruction objective. Number, Duration, and Ordinal use mae, mse, or huber; Vector, Text, Image, and Audio use l1 or l2. This option does not make a field a target by itself.',
+      text: 'Choose the loss for this field’s reconstruction objective. Number, Duration, and Ordinal use mae, mse, or huber; Vector, Text, Image, Audio, and Video use l1 or l2. This option does not make a field a target by itself.',
     },
     maxLength: (/** @type {{tokens: string | number}} */ { tokens }) => ({
       title: 'Text token limit',
@@ -252,7 +258,7 @@ export const reference = {
       text: 'Treat each resolved path as permanent for a single version of the bytes so warm cache hits make zero source storage requests.',
     },
     maxWindows: (/** @type {{count: string | number}} */ { count }) => ({
-      title: 'Maximum audio windows',
+      title: 'Maximum temporal windows',
       text: `Average at most ${count} overlapping windows across a long recording when clip="chunks".`,
     }),
     format: {

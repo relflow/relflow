@@ -19,6 +19,7 @@ export const leafTypes = [
   'Text',
   'Image',
   'Audio',
+  'Video',
 ] as const;
 export type LeafType = (typeof leafTypes)[number];
 

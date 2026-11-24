@@ -140,6 +140,10 @@ export const apiCatalog: ApiSection[] = [
         "guide": "/data-types/audio/"
       },
       {
+        "name": "rf.Video",
+        "guide": "/data-types/video/"
+      },
+      {
         "name": "rf.Vector",
         "guide": "/data-types/vector/"
       },
