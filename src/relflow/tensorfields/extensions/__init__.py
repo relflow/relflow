@@ -13,6 +13,7 @@ from relflow.tensorfields.extensions import quantile as quantile
 from relflow.tensorfields.extensions import set as set
 from relflow.tensorfields.extensions import text as text
 from relflow.tensorfields.extensions import vector as vector
+from relflow.tensorfields.extensions import video as video
 
 __all__ = [
     "audio",
@@ -30,4 +31,5 @@ __all__ = [
     "set",
     "text",
     "vector",
+    "video",
 ]

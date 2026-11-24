@@ -98,6 +98,7 @@ from relflow.tensorfields.extensions.quantile import Request as Quantile
 from relflow.tensorfields.extensions.set import Request as Set
 from relflow.tensorfields.extensions.text import Request as Text
 from relflow.tensorfields.extensions.vector import Request as Vector
+from relflow.tensorfields.extensions.video import Request as Video
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.vocabulary import VocabularySyncCallback
 
@@ -221,6 +222,7 @@ __all__ = [
     "Tokens",
     "TreeFieldInput",
     "Vector",
+    "Video",
     "VocabularySyncCallback",
     "Writer",
     "adamw",
