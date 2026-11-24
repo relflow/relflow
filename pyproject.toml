@@ -1,6 +1,6 @@
 [project]
 name = "relflow"
-version = "0.5.4"
+version = "0.5.5"
 description = "Relationship Flow: schema-first PyTorch models for hierarchical, nested, and sequence data"
 readme = "README.md"
 authors = [
@@ -10,6 +10,12 @@ authors = [
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.12"
+classifiers = [
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "beartype>=0.21.0",
     "pydantic>=2.11.7",
@@ -27,6 +33,12 @@ dependencies = [
     "rich>=14.0.0",
     "typer>=0.29.1,<0.30",
 ]
+
+[project.urls]
+Documentation = "https://www.relflow.ai/latest/"
+Source = "https://github.com/relflow/relflow"
+Issues = "https://github.com/relflow/relflow/issues"
+"Release Notes" = "https://github.com/relflow/relflow/releases"
 
 [project.scripts]
 relflow = "relflow.cli:main"
@@ -158,12 +170,14 @@ files = [
     ".readthedocs.yaml",
     "AGENTS.md",
     "CITATION.bib",
+    "CITATION.cff",
     "CLAUDE.md",
     "CONTRIBUTING.md",
     "LICENSE",
     "Makefile",
     "NOTICE",
     "README.md",
+    "SECURITY.md",
     "docs/AGENTS.md",
     "docs/README.md",
     "docs/api.py",

@@ -33,6 +33,31 @@ def test_distribution_artifact_name_requires_a_real_positive_attempt(attempt):
         release.artifact_name(attempt)
 
 
+@pytest.mark.parametrize("recover", [True, False])
+def test_github_read_retries_a_transient_server_error_with_a_bound(monkeypatch, recover):
+    sleeps = []
+    calls = []
+    monkeypatch.setattr(release.time, "sleep", sleeps.append)
+
+    def run(command, **kwargs):
+        calls.append(command)
+        if recover and len(calls) == 2:
+            return subprocess.CompletedProcess(command, 0, stdout='[{"jobs": []}]', stderr="")
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr="gh: Server Error (HTTP 502)")
+
+    monkeypatch.setattr(release.subprocess, "run", run)
+    if recover:
+        assert release.github(REPOSITORY, "actions/runs/71/attempts/1/jobs", paginate=True) == [{"jobs": []}]
+        assert sleeps == [1]
+    else:
+        with pytest.raises(RuntimeError, match="HTTP 502"):
+            release.github(REPOSITORY, "actions/runs/71/attempts/1/jobs", paginate=True)
+        assert sleeps == [1, 4]
+    assert calls == [["gh", "api", f"repos/{REPOSITORY}/actions/runs/71/attempts/1/jobs", "--paginate", "--slurp"]] * (
+        len(sleeps) + 1
+    )
+
+
 def distributions(root, name="package", source=SOURCE, content=b"original", run_id=71, version=VERSION, licensed=False):
     directory = root / name
     directory.mkdir()
@@ -434,10 +459,10 @@ def ci(monkeypatch):
         if path == "actions/runs/71":
             return state["latest"]
         assert kwargs == {"paginate": True}
-        if path == "actions/runs/71/attempts/1/jobs?per_page=100":
+        if path == "actions/runs/71/attempts/1/jobs?per_page=30":
             jobs = state["producer"] + (state["gate"] if state["latest"]["run_attempt"] == 1 else [])
             return [{"jobs": jobs[:1]}, {"jobs": jobs[1:]}]
-        assert path == f"actions/runs/71/attempts/{state['latest']['run_attempt']}/jobs?per_page=100"
+        assert path == f"actions/runs/71/attempts/{state['latest']['run_attempt']}/jobs?per_page=30"
         return [{"jobs": state["gate"]}]
 
     monkeypatch.setattr(release, "github", github)
@@ -457,8 +482,8 @@ def test_release_authenticates_original_build_and_current_full_gate_without_rewr
     original = copy.deepcopy(ci["receipt"])
     release.checked_run(REPOSITORY, ci["receipt"])
     assert ci["receipt"] == original
-    assert "actions/runs/71/attempts/1/jobs?per_page=100" in ci["reads"]
-    assert f"actions/runs/71/attempts/{3 if targeted else 1}/jobs?per_page=100" in ci["reads"]
+    assert "actions/runs/71/attempts/1/jobs?per_page=30" in ci["reads"]
+    assert f"actions/runs/71/attempts/{3 if targeted else 1}/jobs?per_page=30" in ci["reads"]
 
 
 @pytest.mark.parametrize("attempt", ["original", "latest"])

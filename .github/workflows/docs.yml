@@ -38,6 +38,8 @@ jobs:
       - name: Check documentation and Evidence contracts
         run: make check
       - name: Select verified release Evidence for the review site
+        env:
+          RELFLOW_EVIDENCE_GITHUB_TOKEN: ${{ github.token }}
         run: |
           uv run --project docs python - <<'PY'
           import os

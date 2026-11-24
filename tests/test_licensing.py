@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -19,6 +20,7 @@ def checkout(tmp_path):
         "LICENSE",
         "NOTICE",
         "CITATION.bib",
+        "CITATION.cff",
         "native/pyproject.toml",
         "native/Cargo.toml",
         "native/LICENSE",
@@ -51,6 +53,7 @@ def test_checked_out_sources_are_ready_for_apache_builds(checkout):
         "docs/starlight/package.json",
         "docs/starlight/package-lock.json",
         "CITATION.bib",
+        "CITATION.cff",
         "NOTICE",
         "native/NOTICE",
     ],
@@ -67,6 +70,17 @@ def test_source_gate_rejects_a_different_license(checkout, name, license):
 def test_source_gate_requires_real_license_and_notice_files(checkout, name):
     (checkout / name).unlink()
     with pytest.raises(ValueError, match="regular file"):
+        release.licensing(checkout)
+
+
+@pytest.mark.parametrize("name", ["CITATION.bib", "CITATION.cff"])
+def test_source_gate_rejects_a_stale_citation_version(checkout, name):
+    project = checkout / "pyproject.toml"
+    content = project.read_text()
+    version = tomllib.loads(content)["project"]["version"]
+    path = checkout / name
+    path.write_text(path.read_text().replace(version, "0.0.1"))
+    with pytest.raises(ValueError, match=rf"{name}: citation version must be {version}"):
         release.licensing(checkout)
 
 

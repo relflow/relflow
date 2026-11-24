@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: Please cite this software using the metadata in this file.
+type: software
+title: relflow
+version: 0.5.5
+license: Apache-2.0
+authors:
+  - family-names: Taylor
+    given-names: Grantham
+  - family-names: Taylor
+    given-names: Reid
+repository-code: https://github.com/relflow/relflow
+url: https://www.relflow.ai/latest/

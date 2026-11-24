@@ -96,17 +96,14 @@ tools and editors; `coverage.json` includes line and branch totals. Generated
 reports are ignored by Git. Normal tests and commit hooks run without tracing.
 There is no coverage threshold until the hosted baseline is established.
 
-README status badges follow `main`. After a successful same-repository push
-runs the Tests workflow, the Coverage badge workflow publishes a Shields JSON
+README status badges follow `main`. After CI passes on a same-repository push
+to `main`, the Coverage badge workflow publishes a Shields JSON
 endpoint at `badges:coverage.json` and a `summary.json` containing line and branch
 totals, the tested commit, and the source run URL. The badge displays line
 coverage and links to the test workflow's complete reports. These files live on
 the separate `badges` branch; source branches keep generated reports ignored.
 Pull requests and release validation cannot publish badge updates. Old runs
 cannot replace the current main commit's results, and test jobs stay read-only.
-The first live coverage badge appears after this workflow reaches `main` and
-that branch's tests pass. No coverage-service account or additional secret is
-required.
 
 ## Compatibility CI
 
@@ -118,7 +115,7 @@ Matplotlib 3.10.7 and checks modeling plus TorchMetrics plotting. See
 environment remedy.
 
 The Tests workflow runs the complete suite on Linux with Python 3.12, 3.13,
-and 3.14, plus macOS ARM and Windows with Python 3.12. It installs a wheel
+and 3.14, and on Windows with Python 3.12. It installs a wheel
 with all extras from the lockfile and verifies that imports come from site-packages.
 Linux/Python 3.12 also runs formatting, lint, typing, and coverage checks. Each
 job uploads its environment and JUnit results; the coverage job adds HTML, XML,
@@ -129,7 +126,7 @@ and Python 3.12. The check compares schema, learned state, prediction structure
 and values, then resaves the model and resumes one optimizer step. This verifies
 checkpoint portability across operating systems and Python versions.
 
-RelFlow 0.3.5 adds per-head query/key normalization and learned query scales to
+relflow 0.3.5 adds per-head query/key normalization and learned query scales to
 attention. Attention checkpoints from earlier releases lack this state and are
 intentionally rejected by strict loading. Use their original package version to
 load them, or retrain with 0.3.5; the portability check does not promise loading
@@ -145,10 +142,12 @@ python scripts/checkpoint.py check --input checkpoint-baseline --output checkpoi
 Output directories must not already exist. Keep checkpoint artifacts outside
 the source tree when running locally.
 
-The `Required tests` job fails if the checkpoint producer or any supported
-environment fails or is skipped. Use that check in branch protection.
-Publication runs the same workflow for the release commit and waits for
-success before building or publishing.
+Branch protection requires `CI / required`. It requires the structure check,
+package build, supported test matrix, native checks, documentation validation,
+and complete paired Evidence. On `main`, the Release workflow uses the checked
+distributions from that successful CI attempt. It publishes frozen Evidence
+and the package, then refreshes `latest` documentation. When bumping the package
+version, update `CITATION.bib` and `CITATION.cff` to match `pyproject.toml`.
 
 Python 3.15 also runs on every push and pull request as an advisory preview.
 It uses official nightly CPU PyTorch wheels while stable wheels are unavailable,

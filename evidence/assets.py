@@ -6,10 +6,12 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -25,16 +27,40 @@ PUBLICATION_LIMIT = 32 * 1024 * 1024
 
 def download(url: str, *, missing: bool = False, limit: int = METADATA_LIMIT) -> bytes | None:
     """Bound public asset reads and distinguish an unreleased version from an outage."""
-    try:
-        with urlopen(Request(url, headers={"User-Agent": "relflow-evidence-publication"}), timeout=30) as response:
-            content = response.read(limit + 1)
-    except HTTPError as error:
-        if missing and error.code == 404:
-            return None
-        raise
-    if len(content) > limit:
-        raise ValueError(f"Evidence publication response exceeds {limit} bytes: {url}")
-    return content
+    request = Request(url, headers={"User-Agent": "relflow-evidence-publication"})
+    token = os.environ.get("RELFLOW_EVIDENCE_GITHUB_TOKEN")
+    if token and url.startswith(f"https://api.github.com/repos/{REPOSITORY}/releases/"):
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    for delay in (1, 4, None):
+        try:
+            with urlopen(request, timeout=30) as response:
+                content = response.read(limit + 1)
+        except HTTPError as error:
+            if missing and error.code == 404:
+                return None
+            headers = error.headers or {}
+            retry_after = headers.get("Retry-After", "")
+            reset = headers.get("X-RateLimit-Reset", "")
+            exhausted = headers.get("X-RateLimit-Remaining") == "0"
+            if delay is None:
+                raise
+            if error.code in {403, 429}:
+                if retry_after.isascii() and retry_after.isdigit():
+                    delay = max(delay, int(retry_after))
+                elif exhausted and reset.isascii() and reset.isdigit():
+                    delay = max(delay, int(reset) - time.time())
+                else:
+                    raise
+            elif error.code not in {500, 502, 503, 504}:
+                raise
+            if delay > 10:
+                raise
+            error.close()
+            time.sleep(delay)
+        else:
+            if len(content) > limit:
+                raise ValueError(f"Evidence publication response exceeds {limit} bytes: {url}")
+            return content
 
 
 def fetch(root: Path, version: str | None = None, *, required: bool = False) -> Path | None:

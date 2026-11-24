@@ -212,6 +212,51 @@ def test_download_is_bounded_before_parsing(monkeypatch):
         assets.download("https://github.com/", limit=8)
 
 
+@pytest.mark.parametrize(("status", "headers", "delay"), [(502, {}, 1), (403, {"Retry-After": "2"}, 2)])
+def test_download_retries_transient_responses(monkeypatch, status, headers, delay):
+    sleeps = []
+    monkeypatch.setattr(assets.time, "sleep", sleeps.append)
+
+    def urlopen(request, **kwargs):
+        if not sleeps:
+            raise HTTPError(request.full_url, status, "temporary failure", headers, None)
+        return io.BytesIO(b"publication")
+
+    monkeypatch.setattr(assets, "urlopen", urlopen)
+    assert assets.download("https://api.github.com/repos/relflow/relflow/releases/latest") == b"publication"
+    assert sleeps == [delay]
+
+
+def test_download_fails_after_bounded_attempts(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(assets.time, "sleep", sleeps.append)
+
+    def unavailable(request, **kwargs):
+        raise HTTPError(request.full_url, 503, "still unavailable", {}, None)
+
+    monkeypatch.setattr(assets, "urlopen", unavailable)
+    with pytest.raises(HTTPError, match="503"):
+        assets.download("https://api.github.com/repos/relflow/relflow/releases/latest", missing=True)
+    assert sleeps == [1, 4]
+
+
+def test_download_authenticates_only_release_metadata_without_forwarding_credentials(monkeypatch):
+    requests = []
+    monkeypatch.setenv("RELFLOW_EVIDENCE_GITHUB_TOKEN", "fixture-token")
+
+    def urlopen(request, **kwargs):
+        requests.append(request)
+        return io.BytesIO(b"publication")
+
+    monkeypatch.setattr(assets, "urlopen", urlopen)
+    assets.download("https://api.github.com/repos/relflow/relflow/releases/latest")
+    assets.download("https://github.com/relflow/relflow/releases/download/evidence-v0.5.4/publication.json")
+    assets.download("https://www.relflow.ai/latest/evidence/selected.json")
+    assert requests[0].unredirected_hdrs["Authorization"] == "Bearer fixture-token"
+    assert all("Authorization" not in request.headers for request in requests)
+    assert all(not request.has_header("Authorization") for request in requests[1:])
+
+
 def test_canonical_sources_have_no_checked_in_measurements():
     root = Path(__file__).resolve().parents[1]
     assert not (root / "results.json").exists()
