@@ -212,6 +212,7 @@ files = [
     "evidence/fixtures/audio.py",
     "evidence/fixtures/media.py",
     "evidence/fixtures/questions.py",
+    "evidence/fixtures/video.py",
     "evidence/hosted.md",
     "evidence/hosted.py",
     "evidence/observations.py",
