@@ -113,6 +113,9 @@ export const outputs = {
   audio: representation(
     'Audio uses the frozen audio encoder vector as an internal reconstruction target.',
   ),
+  video: representation(
+    'Video uses the frozen video encoder vector as an internal reconstruction target.',
+  ),
   image: representation(
     'Image uses the frozen vision vector as an internal reconstruction target.',
   ),

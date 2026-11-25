@@ -34,7 +34,15 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Jitter.model_fields["add"].default == 0.0
     assert relflow.Jitter.model_fields["multiply"].default == 0.0
     assert relflow.Jitter.model_fields["normalize"].default is True
-    for tensorfield in (relflow.Number, relflow.Vector, relflow.Period, relflow.Text, relflow.Image, relflow.Audio):
+    for tensorfield in (
+        relflow.Number,
+        relflow.Vector,
+        relflow.Period,
+        relflow.Text,
+        relflow.Image,
+        relflow.Audio,
+        relflow.Video,
+    ):
         assert isinstance(tensorfield.model_fields["jitter"].default_factory(), relflow.Jitter)
     assert relflow.where("type").name == "type"
     assert relflow.preprocess.__name__ == "preprocess"
@@ -62,6 +70,7 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Boolean.model_fields["type"].default == "boolean"
     assert relflow.Number.model_fields["type"].default == "number"
     assert relflow.Audio is relflow.TENSORFIELDS["audio"].Request
+    assert relflow.Video is relflow.TENSORFIELDS["video"].Request
     assert relflow.Duration is relflow.TENSORFIELDS["duration"].Request
     assert relflow.Ordinal is relflow.TENSORFIELDS["ordinal"].Request
     assert relflow.Quantile.model_fields["type"].default == "quantile"

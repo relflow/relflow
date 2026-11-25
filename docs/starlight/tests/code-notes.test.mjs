@@ -97,6 +97,14 @@ writer = rf.Writer("predictions", format="ipc")`);
   assert.match(mediaNotes.find((note) => note.value === 'immutable=True').text, /zero source/);
   assert.match(mediaNotes.find((note) => note.value === 'max_windows=6').text, /6 overlapping/);
   assert.match(mediaNotes.find((note) => note.value.startsWith('store=')).text, /cache directory/);
+  const videoNotes = await annotations(
+    'footage = rf.Video(base="s3://clips/", immutable=True, max_windows=6, store="video-cache")',
+  );
+  assert.match(videoNotes.find((note) => note.value === 'rf.Video').text, /frozen video encoder/);
+  assert.match(videoNotes.find((note) => note.value.startsWith('base=')).text, /URI prefix/);
+  assert.match(videoNotes.find((note) => note.value === 'immutable=True').text, /zero source/);
+  assert.match(videoNotes.find((note) => note.value === 'max_windows=6').text, /6 overlapping/);
+  assert.match(videoNotes.find((note) => note.value.startsWith('store=')).text, /cache directory/);
 });
 
 test('Duration delta notes stay attached to Duration calls', async () => {

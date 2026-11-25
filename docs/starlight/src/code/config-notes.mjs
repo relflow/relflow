@@ -82,19 +82,19 @@ const pythonRules = [
   {
     pattern: /\bstore\s*=\s*["'][^"']+["']/g,
     accept: (_match, context, offset) =>
-      ['rf.Text', 'rf.Image', 'rf.Audio'].includes(context.callAt(offset)),
+      ['rf.Text', 'rf.Image', 'rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: reference.options.store,
   },
   {
     pattern: /\bcache\s*=\s*(?:True|False|\d+)\b/g,
     accept: (_match, context, offset) =>
-      ['rf.Text', 'rf.Image', 'rf.Audio'].includes(context.callAt(offset)),
+      ['rf.Text', 'rf.Image', 'rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: reference.options.cache,
   },
   {
     pattern: /\bmemory\s*=\s*(?:None|\d+)\b/g,
     accept: (_match, context, offset) =>
-      ['rf.Text', 'rf.Image', 'rf.Audio'].includes(context.callAt(offset)),
+      ['rf.Text', 'rf.Image', 'rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: reference.options.memory,
   },
   {
@@ -105,22 +105,24 @@ const pythonRules = [
   {
     pattern: /\bresident\s*=\s*(?:None|\d+)\b/g,
     accept: (_match, context, offset) =>
-      ['rf.Text', 'rf.Image', 'rf.Audio'].includes(context.callAt(offset)),
+      ['rf.Text', 'rf.Image', 'rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: reference.options.resident,
   },
   {
     pattern: /\bbase\s*=\s*["'][^"']+["']/g,
-    accept: (_match, context, offset) => ['rf.Image', 'rf.Audio'].includes(context.callAt(offset)),
+    accept: (_match, context, offset) =>
+      ['rf.Image', 'rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: reference.options.base,
   },
   {
     pattern: /\bimmutable\s*=\s*True\b/g,
-    accept: (_match, context, offset) => ['rf.Image', 'rf.Audio'].includes(context.callAt(offset)),
+    accept: (_match, context, offset) =>
+      ['rf.Image', 'rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: reference.options.immutable,
   },
   {
     pattern: /\bmax_windows\s*=\s*(\d+)\b/g,
-    accept: (_match, context, offset) => context.callAt(offset) === 'rf.Audio',
+    accept: (_match, context, offset) => ['rf.Audio', 'rf.Video'].includes(context.callAt(offset)),
     note: (match) => reference.options.maxWindows({ count: match[1] }),
   },
   {
