@@ -20,7 +20,7 @@ A null value takes the null field state and costs no video read. An empty path, 
 
 ## Standardization and processor pipelines
 
-PyAV decodes MP4, MOV, WebM, MKV, AVI, and other FFmpeg-supported containers and codecs (including H.264, HEVC, MPEG-4, VP8, VP9, AV1, and MJPEG) from local paths and remote streams. Display-rotation metadata (`DISPLAYMATRIX`) rotates coded frames to upright RGB before preprocessing, and containers missing duration metadata fall back to a lightweight packet-timestamp scan without decoding every frame.
+PyAV decodes MP4, MOV, WebM, MKV, AVI, and other FFmpeg-supported containers and codecs (including H.264, HEVC, MPEG-4, VP8, VP9, AV1, and MJPEG) from local paths and remote streams. Display-matrix metadata (`DISPLAYMATRIX`) rotates and mirrors coded frames to upright RGB before preprocessing, and containers missing duration metadata fall back to a lightweight packet-timestamp scan without decoding every frame.
 
 `offset` skips leading seconds and `duration` bounds the span analyzed per file. With `window=None` (the default), the field samples `num_frames` frames at evenly spaced bin midpoints across the selected span. Setting `window` enables temporal chunking: videos longer than `window` use `clip="chunks"` by default, averaging embeddings for up to `max_windows` windows into one deterministic vector. `clip="head"`, `"center"`, and `"tail"` sample a single window. Keyframe seeking jumps across long gaps so sparse sampling avoids decoding untouched segments.
 

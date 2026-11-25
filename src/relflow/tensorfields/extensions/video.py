@@ -234,28 +234,30 @@ def tubelet_size(config: Any) -> int | None:
     return None
 
 
-def load_processor(model_name: str) -> Any:
+def load_processor(model_name: str, config: Any = None) -> Any:
     """Load a PIL-backed frame processor without requiring torchvision."""
     from transformers.models.auto.image_processing_auto import AutoImageProcessor
+
+    kind = getattr(config, "model_type", None)
+    if kind == "vivit":
+        from transformers import VivitImageProcessor
+
+        return VivitImageProcessor.from_pretrained(model_name)
 
     try:
         return AutoImageProcessor.from_pretrained(model_name, backend="pil")
     except (OSError, ValueError, KeyError, ImportError) as image_error:
-        # Checkpoints such as V-JEPA 2 ship video_preprocessor_config.json only.
-        local = Path(model_name) / "video_preprocessor_config.json"
-        if local.is_file():
-            config_path: str | None = str(local)
-        else:
-            from transformers.utils.hub import cached_file
+        # Upstream ViViT checkpoints spell image_processor_type as "ViViTImageProcessor".
+        pre_path = resolve_asset(model_name, "preprocessor_config.json")
+        if pre_path is not None:
+            raw_pre = json.loads(Path(pre_path).read_text(encoding="utf-8"))
+            if str(raw_pre.get("image_processor_type", "")).lower() == "vivitimageprocessor":
+                from transformers import VivitImageProcessor
 
-            try:
-                config_path = cached_file(
-                    model_name,
-                    "video_preprocessor_config.json",
-                    _raise_exceptions_for_missing_entries=False,
-                )
-            except OSError:
-                config_path = None
+                return VivitImageProcessor.from_pretrained(model_name)
+
+        # Checkpoints such as V-JEPA 2 ship video_preprocessor_config.json only.
+        config_path = resolve_asset(model_name, "video_preprocessor_config.json")
         if config_path is None:
             raise ValueError(
                 f"video encoder {model_name!r} has neither a supported image processor nor video_preprocessor_config.json"
@@ -283,6 +285,19 @@ def load_processor(model_name: str) -> Any:
             edge = crop["height"] if isinstance(crop, dict) else int(crop)
             options["size"] = {"shortest_edge": int(edge * 256 / 224)}
         return VideoMAEImageProcessorPil(**options)
+
+
+def resolve_asset(model_name: str, filename: str) -> str | None:
+    root = Path(model_name)
+    if root.exists():
+        local = root / filename
+        return str(local) if local.is_file() else None
+    from transformers.utils.hub import cached_file
+
+    try:
+        return cached_file(model_name, filename, _raise_exceptions_for_missing_entries=False)
+    except (OSError, ValueError):
+        return None
 
 
 def spans(
@@ -329,8 +344,31 @@ def sample_times(start: float, stop: float, num_frames: int) -> list[float]:
     return [start + (index + 0.5) * width / num_frames for index in range(num_frames)]
 
 
-def orient(rgb: np.ndarray, rotation: int) -> np.ndarray:
-    quarter = round(rotation / 90) % 4
+def orient(frame: Any, rgb: np.ndarray) -> np.ndarray:
+    """Apply container DISPLAYMATRIX rotation and mirror flips so frames are upright."""
+    side_data = getattr(frame, "side_data", None)
+    matrix_data = side_data.get("DISPLAYMATRIX") if side_data is not None else None
+    if matrix_data is not None:
+        raw = bytes(matrix_data)
+        if len(raw) >= 36:
+            mat = np.frombuffer(raw[:36], dtype=np.int32).reshape(3, 3)
+            a, b = round(float(mat[0, 0]) / 65536.0), round(float(mat[0, 1]) / 65536.0)
+            c, d = round(float(mat[1, 0]) / 65536.0), round(float(mat[1, 1]) / 65536.0)
+            if abs(b) == 1 and abs(c) == 1 and a == 0 and d == 0:
+                out = np.transpose(rgb, (1, 0, 2))
+                if b < 0:
+                    out = out[::-1, :]
+                if c < 0:
+                    out = out[:, ::-1]
+                return np.ascontiguousarray(out)
+            if abs(a) == 1 and abs(d) == 1 and b == 0 and c == 0:
+                out = rgb
+                if d < 0:
+                    out = out[::-1, :]
+                if a < 0:
+                    out = out[:, ::-1]
+                return np.ascontiguousarray(out)
+    quarter = round(int(getattr(frame, "rotation", 0) or 0) / 90) % 4
     if quarter == 0:
         return rgb
     return np.ascontiguousarray(np.rot90(rgb, k=quarter))
@@ -408,18 +446,16 @@ def extract_frames(
     if not targets:
         return {}
     selected: dict[float, np.ndarray] = {}
-    rgb_cache: dict[int, np.ndarray] = {}
+    last_frame: Any | None = None
+    last_rgb: np.ndarray | None = None
 
     def as_rgb(frame: Any) -> np.ndarray:
-        token = id(frame)
-        cached = rgb_cache.get(token)
-        if cached is None:
-            cached = orient(frame.to_ndarray(format="rgb24"), int(getattr(frame, "rotation", 0) or 0))
-            # Keep cache bounded to the active previous/current frame pair.
-            if len(rgb_cache) > 4:
-                rgb_cache.clear()
-            rgb_cache[token] = cached
-        return cached
+        nonlocal last_frame, last_rgb
+        if frame is last_frame and last_rgb is not None:
+            return last_rgb
+        last_frame = frame
+        last_rgb = orient(frame, frame.to_ndarray(format="rgb24"))
+        return last_rgb
 
     def seek_to(seconds: float) -> Iterator[Any]:
         pts = max(0, int(seconds / time_base)) if origin >= 0.0 else int(seconds / time_base)
@@ -432,34 +468,36 @@ def extract_frames(
             return None, None, index
         return frame_time(frame, index, origin, step, time_base), frame, index + 1
 
+    def restart() -> tuple[Iterator[Any], float | None, Any | None, float | None, Any | None, int]:
+        container.seek(0)
+        stream_iter = iter(container.decode(video_stream))
+        first_t, first_frame, seen = pull(stream_iter, 0)
+        return stream_iter, None, None, first_t, first_frame, seen
+
     seekable = True
     absolute = [origin + timestamp for timestamp in targets]
     if absolute[0] > origin + SEEK_GAP_SECONDS:
         try:
             decoder = seek_to(absolute[0])
+            prev_t, prev_frame = None, None
+            curr_t, curr_frame, count = pull(decoder, 0)
         except (av.FFmpegError, OSError, ValueError):
             seekable = False
-            container.seek(0)
-            decoder = iter(container.decode(video_stream))
+            decoder, prev_t, prev_frame, curr_t, curr_frame, count = restart()
     else:
         decoder = iter(container.decode(video_stream))
-
-    prev_t: float | None = None
-    prev_frame: Any | None = None
-    curr_t, curr_frame, count = pull(decoder, 0)
+        prev_t, prev_frame = None, None
+        curr_t, curr_frame, count = pull(decoder, 0)
 
     # Guard against containers whose keyframe index overshoots the first requested timestamp.
     if (
         curr_frame is not None
         and curr_t is not None
-        and curr_t > absolute[0] + max(step * 2.0, 0.05)
+        and curr_t > absolute[0] + 1e-6
         and absolute[0] > origin + SEEK_GAP_SECONDS
     ):
         seekable = False
-        container.seek(0)
-        decoder = iter(container.decode(video_stream))
-        prev_t, prev_frame = None, None
-        curr_t, curr_frame, count = pull(decoder, 0)
+        decoder, prev_t, prev_frame, curr_t, curr_frame, count = restart()
 
     for rel, target in zip(targets, absolute, strict=True):
         if seekable and curr_t is not None and target - curr_t > SEEK_GAP_SECONDS:
@@ -467,7 +505,7 @@ def extract_frames(
             try:
                 candidate = seek_to(target)
                 next_t, next_frame, next_count = pull(candidate, count)
-                if next_frame is not None and next_t is not None and next_t <= target + max(step * 2.0, 0.05):
+                if next_frame is not None and next_t is not None and next_t <= target + 1e-6:
                     if next_t <= previous_pos:
                         # No closer keyframe exists between previous_pos and target; avoid repeated regressive seeks.
                         seekable = False
@@ -477,10 +515,7 @@ def extract_frames(
                 else:
                     # Overshot seek: fall back cleanly to sequential decoding from start.
                     seekable = False
-                    container.seek(0)
-                    decoder = iter(container.decode(video_stream))
-                    prev_t, prev_frame = None, None
-                    curr_t, curr_frame, count = pull(decoder, 0)
+                    decoder, prev_t, prev_frame, curr_t, curr_frame, count = restart()
             except (av.FFmpegError, OSError, ValueError):
                 seekable = False
 
@@ -677,8 +712,8 @@ class Embedder(media.MediaEmbedder):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
         self.request = cast(Request, schema.requests[address])
-        self.processor = load_processor(self.request.model)
         config = self._cached_model.model.config
+        self.processor = load_processor(self.request.model, config=config)
         kind = getattr(config, "model_type", None)
         native = native_frames(config)
         requested = self.request.num_frames

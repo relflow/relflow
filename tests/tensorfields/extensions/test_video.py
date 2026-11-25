@@ -54,6 +54,8 @@ def write_video(
     codec: str = "mpeg4",
     container_format: str | None = None,
     rotation: int = 0,
+    hflip: bool = False,
+    vflip: bool = False,
     gop_size: int | None = None,
     pts_offset: int = 0,
 ):
@@ -66,8 +68,8 @@ def write_video(
         stream.pix_fmt = "bgr0" if codec == "ffv1" else "yuvj420p" if codec == "mjpeg" else "yuv420p"
         if gop_size is not None:
             stream.codec_context.gop_size = gop_size
-        if rotation:
-            stream.set_display_rotation(rotation)
+        if rotation or hflip or vflip:
+            stream.set_display_rotation(rotation, hflip=hflip, vflip=vflip)
         for index, array in enumerate(frames):
             frame = av.VideoFrame.from_ndarray(np.asarray(array, dtype=np.uint8), format="rgb24")
             if pts_offset:
@@ -357,19 +359,25 @@ def test_single_frame_single_keyframe_nonzero_pts_and_unknown_duration(visual, t
 
 
 def test_display_rotation_metadata_normalization(tmp_path):
-    # Asymmetric 16x32 frame with a bright red square in top-left (y=0..4, x=0..4).
+    # Asymmetric 16x32 frame with distinct color markers in three corners.
     base = np.zeros((16, 32, 3), dtype=np.uint8)
-    base[:4, :4, 0] = 255
+    base[:4, :4, 0] = 255  # top-left red
+    base[:4, 28:, 1] = 255  # top-right green
+    base[12:, :4, 2] = 255  # bottom-left blue
     processor = FrameProcessor()
 
-    for angle, expected_shape, corner in [
-        (0, (16, 32), (slice(0, 4), slice(0, 4))),
-        (90, (32, 16), (slice(28, 32), slice(0, 4))),
-        (180, (16, 32), (slice(12, 16), slice(28, 32))),
-        (270, (32, 16), (slice(0, 4), slice(12, 16))),
-    ]:
-        path = tmp_path / f"rot_{angle}.mp4"
-        write_video(path, [base, base], fps=10, rotation=angle)
+    for angle, hflip, vflip in (
+        (0, False, False),
+        (90, False, False),
+        (180, False, False),
+        (270, False, False),
+        (0, True, False),
+        (0, False, True),
+        (90, True, False),
+        (270, False, True),
+    ):
+        path = tmp_path / f"rot_{angle}_{int(hflip)}_{int(vflip)}.mp4"
+        write_video(path, [base, base], fps=10, rotation=angle, hflip=hflip, vflip=vflip)
         prepared = video.clips(
             video.snapshot(str(path), True)[0],
             processor=processor,
@@ -382,12 +390,117 @@ def test_display_rotation_metadata_normalization(tmp_path):
             clip="head",
             num_frames=2,
         )
-        # Shape is (T, C, H, W)
-        assert prepared[0].shape == (2, 3, expected_shape[0], expected_shape[1])
-        red = prepared[0][0, 0]
-        assert red[corner].mean() > 0.6
-        # Opposite corner must stay dark.
-        assert red.mean() < 0.15
+        expected = np.rot90(base, k=(angle // 90) % 4)
+        if hflip:
+            expected = expected[:, ::-1]
+        if vflip:
+            expected = expected[::-1, :]
+        # Shape is (T, C, H, W); verify exact dimensions and every marker channel placement.
+        assert prepared[0].shape == (2, 3, expected.shape[0], expected.shape[1])
+        actual_rgb = np.transpose(prepared[0][0], (1, 2, 0))
+        expected_rgb = expected.astype(np.float32) / 255.0
+        for channel in range(3):
+            mask = expected_rgb[..., channel] > 0.5
+            assert actual_rgb[..., channel][mask].mean() > 0.65
+            assert actual_rgb[..., channel][~mask].mean() < 0.12
+
+
+def test_seek_parity_on_bframe_h264_and_vfr_matroska(tmp_path):
+    # 15-second multi-GOP H.264 with B-frames where each frame carries a unique RGB signature.
+    h264 = tmp_path / "bframes.mp4"
+    with av.open(str(h264), "w") as out:
+        st = out.add_stream("libx264", rate=10, options={"bf": "2", "g": "25", "crf": "0"})
+        st.width, st.height, st.pix_fmt = 32, 32, "yuv420p"
+        for i in range(150):
+            img = np.zeros((32, 32, 3), dtype=np.uint8)
+            img[:, :, 0] = (i * 7) % 256
+            img[:, :, 1] = (i * 13 + 40) % 256
+            img[:, :, 2] = (i * 19 + 80) % 256
+            for pkt in st.encode(av.VideoFrame.from_ndarray(img, format="rgb24")):
+                out.mux(pkt)
+        for pkt in st.encode():
+            out.mux(pkt)
+
+    targets = [0.25, 0.75, 5.15, 6.85, 11.45, 14.75]
+    with av.open(str(h264)) as container:
+        vs = container.streams.video[0]
+        origin, _, _ = video.stream_bounds(container, vs)
+        decoded_all = [(float(frame.time), frame.to_ndarray(format="rgb24")) for frame in container.decode(vs)]
+    expected = {t: min(decoded_all, key=lambda pair: abs(pair[0] - (origin + t)))[1] for t in targets}
+
+    with av.open(str(h264)) as container:
+        vs = container.streams.video[0]
+        origin, _, step = video.stream_bounds(container, vs)
+        got = video.extract_frames(container, vs, targets, origin=origin, step=step, time_base=float(vs.time_base))
+    for t in targets:
+        np.testing.assert_array_equal(got[t], expected[t])
+
+    # Variable-frame-rate MKV with dense start, sparse middle, dense tail.
+    vfr = tmp_path / "vfr.mkv"
+    pts_ms = [0, 50, 100, 200, 500, 1500, 4000, 8000, 9000, 9500, 9900]
+    with av.open(str(vfr), "w", format="matroska") as out:
+        st = out.add_stream("ffv1", rate=1000)
+        st.width, st.height, st.pix_fmt = 16, 16, "bgr0"
+        for idx, ms in enumerate(pts_ms):
+            frame = av.VideoFrame.from_ndarray(np.full((16, 16, 3), idx * 22, dtype=np.uint8), format="rgb24")
+            frame.pts = ms
+            for pkt in st.encode(frame):
+                out.mux(pkt)
+        for pkt in st.encode():
+            out.mux(pkt)
+
+    vfr_targets = [0.06, 0.3, 2.0, 6.5, 9.7]
+    with av.open(str(vfr)) as container:
+        vs = container.streams.video[0]
+        origin, _, _ = video.stream_bounds(container, vs)
+        all_vfr = [(float(frame.time), frame.to_ndarray(format="rgb24")) for frame in container.decode(vs)]
+    exp_vfr = {t: min(all_vfr, key=lambda pair: abs(pair[0] - (origin + t)))[1] for t in vfr_targets}
+    with av.open(str(vfr)) as container:
+        vs = container.streams.video[0]
+        origin, _, step = video.stream_bounds(container, vs)
+        got_vfr = video.extract_frames(
+            container, vs, vfr_targets, origin=origin, step=step, time_base=float(vs.time_base)
+        )
+    for t in vfr_targets:
+        np.testing.assert_array_equal(got_vfr[t], exp_vfr[t])
+
+
+def test_capped_span_planning_and_vivit_capitalization(tmp_path, monkeypatch):
+    def bounded_range(*args):
+        hops = range(*args)
+        assert len(hops) <= 4
+        return hops
+
+    monkeypatch.setattr(video, "range", bounded_range, raising=False)
+    planned = video.spans(3600.0, offset=0.0, duration=None, window=1.0, stride=0.0001, max_windows=4, clip="chunks")
+    assert len(planned) == 4 and planned[0] == (0.0, 1.0) and planned[-1] == (3599.0, 3600.0)
+
+    # Upstream google/vivit-b-16x2-kinetics400 spells image_processor_type as "ViViTImageProcessor".
+    vivit_hf = tmp_path / "vivit_hf"
+    vivit_hf.mkdir()
+    (vivit_hf / "preprocessor_config.json").write_text(
+        json.dumps(
+            {
+                "crop_size": {"height": 32, "width": 32},
+                "size": {"shortest_edge": 32},
+                "image_processor_type": "ViViTImageProcessor",
+                "do_resize": True,
+                "do_center_crop": True,
+                "do_rescale": True,
+                "do_normalize": True,
+                "image_mean": [0.5, 0.5, 0.5],
+                "image_std": [0.5, 0.5, 0.5],
+            }
+        )
+    )
+    proc = video.load_processor(str(vivit_hf))
+    assert proc(solid_frames(4, (128, 128, 128), size=(48, 64)), return_tensors="np")["pixel_values"].shape == (
+        1,
+        4,
+        3,
+        32,
+        32,
+    )
 
 
 def test_nested_fields_share_pristine_vectors_and_preserve_holes(visual, tmp_path):
@@ -536,6 +649,40 @@ def test_missing_processor_config_is_rejected(tmp_path):
     empty_dir.mkdir()
     with pytest.raises(ValueError, match="video_preprocessor_config.json"):
         video.load_processor(str(empty_dir))
+
+
+def test_jitter_and_l1_reconstruction_loss(visual, tmp_path):
+    torch.manual_seed(0)
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        clip=rf.Video(
+            model="tiny",
+            base=str(tmp_path),
+            objective="l1",
+            jitter=rf.Jitter(add=0.25, multiply=0.1),
+            mask=rf.Mask(rate=0.5, reconstruct=True),
+        ),
+    )
+    data = pl.DataFrame({"clip": ["bright.mp4", "glöcke.mp4", "bright.mp4", None]})
+    batch = model.encode(data, strata="train")
+    field = batch["/clip"]
+    inputs = rf.TensorInput(state=field.state, content=field.content)
+    embedder = model.nodes["/clip"].embedder
+    model.train()
+    first = embedder(inputs).payload
+    second = embedder(inputs).payload
+    assert not torch.equal(first, second)
+    model.eval()
+    assert torch.equal(embedder(inputs).payload, embedder(inputs).payload)
+    # Full forward + L1 reconstruction loss against pristine video vectors.
+    model.train()
+    predictions = model(batch, strata=rf.Strata.train)
+    total_loss = sum(
+        rf.TENSORFIELDS["video"].loss(model, pred, batch[pred.address], rf.Strata.train) for pred in predictions
+    )
+    assert torch.isfinite(total_loss) and total_loss.item() > 0.0
 
 
 @pytest.mark.integration
