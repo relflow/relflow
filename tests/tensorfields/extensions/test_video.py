@@ -651,6 +651,152 @@ def test_missing_processor_config_is_rejected(tmp_path):
         video.load_processor(str(empty_dir))
 
 
+def test_diverse_containers_pixel_formats_geometries_and_corrupt_files(tmp_path):
+    from fractions import Fraction
+
+    from PIL import Image
+    from transformers.models.videomae.image_processing_pil_videomae import VideoMAEImageProcessorPil
+
+    processor = VideoMAEImageProcessorPil(size={"shortest_edge": 32}, crop_size={"height": 32, "width": 32})
+
+    def decode(path, **options):
+        params = dict(
+            processor=processor,
+            bodies={},
+            offset=0.0,
+            duration=None,
+            window=None,
+            stride=None,
+            max_windows=4,
+            clip="chunks",
+            num_frames=4,
+        )
+        params.update(options)
+        out = video.clips(video.snapshot(str(path), True)[0], **params)
+        for clip_arr in out:
+            assert clip_arr.shape == (params["num_frames"], 3, 32, 32)
+            assert clip_arr.dtype == np.float32 and np.isfinite(clip_arr).all()
+        return out
+
+    # Animated GIF
+    gif = tmp_path / "anim.gif"
+    gif_frames = [Image.fromarray(np.full((40, 48, 3), i * 35, dtype=np.uint8)) for i in range(6)]
+    gif_frames[0].save(gif, save_all=True, append_images=gif_frames[1:], duration=100, loop=0)
+    assert len(decode(gif)) == 1
+
+    # Fractional NTSC 29.97 fps H.264 MP4 with multi-window chunking
+    ntsc = tmp_path / "ntsc.mp4"
+    with av.open(str(ntsc), "w") as out:
+        st = out.add_stream("libx264", rate=Fraction(30000, 1001))
+        st.width, st.height, st.pix_fmt = 64, 48, "yuv420p"
+        for i in range(60):
+            for pkt in st.encode(av.VideoFrame.from_ndarray(np.full((48, 64, 3), i * 4, np.uint8), format="rgb24")):
+                out.mux(pkt)
+        for pkt in st.encode():
+            out.mux(pkt)
+    assert len(decode(ntsc, window=0.5, max_windows=3)) == 3
+
+    # 10-bit yuv420p10le, grayscale gray8, odd 17x23, portrait 96x16, ultrawide 16x96, tiny 4x4
+    for name, pix, h, w in (
+        ("tenbit.mkv", "yuv420p10le", 32, 32),
+        ("gray.mkv", "gray", 32, 32),
+        ("odd.mkv", "bgr0", 17, 23),
+        ("portrait.mkv", "bgr0", 96, 16),
+        ("ultrawide.mkv", "bgr0", 16, 96),
+        ("tiny.mkv", "bgr0", 4, 4),
+    ):
+        path = tmp_path / name
+        with av.open(str(path), "w", format="matroska") as out:
+            st = out.add_stream("ffv1", rate=10)
+            st.width, st.height, st.pix_fmt = w, h, pix
+            for i in range(6):
+                arr = (
+                    np.full((h, w), 30 + i * 30, dtype=np.uint8)
+                    if pix == "gray"
+                    else np.full((h, w, 3), 30 + i * 30, dtype=np.uint8)
+                )
+                for pkt in st.encode(av.VideoFrame.from_ndarray(arr, format="gray" if pix == "gray" else "rgb24")):
+                    out.mux(pkt)
+            for pkt in st.encode():
+                out.mux(pkt)
+        assert len(decode(path)) == 1
+
+    # VP9 WebM, AVI MPEG-4, MPEG-TS broadcast transport stream, and muxed AAC+H.264 MP4
+    for name, fmt, codec in (
+        ("vp9.webm", "webm", "libvpx-vp9"),
+        ("clip.avi", "avi", "mpeg4"),
+        ("broadcast.ts", "mpegts", "libx264"),
+    ):
+        path = tmp_path / name
+        with av.open(str(path), "w", format=fmt) as out:
+            st = out.add_stream(codec, rate=10)
+            st.width, st.height, st.pix_fmt = 48, 32, "yuv420p"
+            for i in range(12):
+                for pkt in st.encode(
+                    av.VideoFrame.from_ndarray(np.full((32, 48, 3), 20 + i * 18, np.uint8), format="rgb24")
+                ):
+                    out.mux(pkt)
+            for pkt in st.encode():
+                out.mux(pkt)
+        assert len(decode(path, window=0.6, clip="tail")) == 1
+
+    muxed = tmp_path / "muxed.mp4"
+    with av.open(str(muxed), "w") as out:
+        ast = out.add_stream("aac", rate=16000)
+        vst = out.add_stream("libx264", rate=10)
+        vst.width, vst.height, vst.pix_fmt = 32, 32, "yuv420p"
+        for i in range(10):
+            for pkt in vst.encode(
+                av.VideoFrame.from_ndarray(np.full((32, 32, 3), 30 + i * 20, np.uint8), format="rgb24")
+            ):
+                out.mux(pkt)
+            af = av.AudioFrame.from_ndarray(np.zeros((1, 1024), dtype=np.float32), format="fltp", layout="mono")
+            af.sample_rate = 16000
+            for pkt in ast.encode(af):
+                out.mux(pkt)
+        for pkt in vst.encode():
+            out.mux(pkt)
+        for pkt in ast.encode():
+            out.mux(pkt)
+    assert len(decode(muxed)) == 1
+
+    # Very short 2-frame 60fps clip (33ms) sampled with num_frames=8
+    short = tmp_path / "short.mp4"
+    write_video(short, solid_frames(2, (120, 180, 60), size=(32, 32)), fps=60, codec="libx264")
+    assert len(decode(short, num_frames=8)) == 1
+
+    # Corrupt zero-byte and truncated MP4 fail cleanly with field/path context
+    zero = tmp_path / "zero.mp4"
+    zero.write_bytes(b"")
+    with pytest.raises((av.FFmpegError, OSError, ValueError)):
+        decode(zero)
+    trunc = tmp_path / "trunc.mp4"
+    trunc.write_bytes(ntsc.read_bytes()[: len(ntsc.read_bytes()) // 3])
+    with pytest.raises((av.FFmpegError, OSError, ValueError)):
+        decode(trunc)
+
+    # Embedded attached_pic cover-art stream is skipped; an audio+cover-art container has no video stream.
+    fake_pic = SimpleNamespace(disposition=av.stream.Disposition.attached_pic)
+    real_open = av.open
+
+    class CoverArtOnly:
+        def __init__(self, inner):
+            self._inner = inner
+            self.streams = SimpleNamespace(video=[fake_pic])
+
+        def __enter__(self):
+            self._inner.__enter__()
+            return self
+
+        def __exit__(self, *args):
+            return self._inner.__exit__(*args)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(av, "open", lambda *args, **kwargs: CoverArtOnly(real_open(*args, **kwargs)))
+        with pytest.raises(ValueError, match="no video stream"):
+            decode(short)
+
+
 def test_jitter_and_l1_reconstruction_loss(visual, tmp_path):
     torch.manual_seed(0)
     model = rf.Model(

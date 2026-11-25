@@ -214,32 +214,24 @@ def snapshot(path: str, immutable: bool) -> tuple[bytes, bytes | None]:
     return media.snapshot(path, immutable, open_video)
 
 
-def native_frames(config: Any) -> int | None:
-    for owner in (config, getattr(config, "vision_config", None)):
-        if owner is None:
-            continue
-        for attribute in ("num_frames", "frames_per_clip"):
-            value = getattr(owner, attribute, None)
-            if isinstance(value, int) and value > 0:
-                return value
-    return None
-
-
-def tubelet_size(config: Any) -> int | None:
-    value = getattr(config, "tubelet_size", None)
-    if isinstance(value, (list, tuple)) and value and isinstance(value[0], int) and value[0] > 0:
-        return int(value[0])
-    if isinstance(value, int) and value > 0:
-        return value
-    return None
-
-
 def load_processor(model_name: str, config: Any = None) -> Any:
     """Load a PIL-backed frame processor without requiring torchvision."""
     from transformers.models.auto.image_processing_auto import AutoImageProcessor
 
-    kind = getattr(config, "model_type", None)
-    if kind == "vivit":
+    def asset(filename: str) -> Path | None:
+        root = Path(model_name)
+        if root.exists():
+            candidate = root / filename
+            return candidate if candidate.is_file() else None
+        from transformers.utils.hub import cached_file
+
+        try:
+            resolved = cached_file(model_name, filename, _raise_exceptions_for_missing_entries=False)
+        except (OSError, ValueError):
+            return None
+        return Path(resolved) if resolved is not None else None
+
+    if getattr(config, "model_type", None) == "vivit":
         from transformers import VivitImageProcessor
 
         return VivitImageProcessor.from_pretrained(model_name)
@@ -248,16 +240,15 @@ def load_processor(model_name: str, config: Any = None) -> Any:
         return AutoImageProcessor.from_pretrained(model_name, backend="pil")
     except (OSError, ValueError, KeyError, ImportError) as image_error:
         # Upstream ViViT checkpoints spell image_processor_type as "ViViTImageProcessor".
-        pre_path = resolve_asset(model_name, "preprocessor_config.json")
-        if pre_path is not None:
-            raw_pre = json.loads(Path(pre_path).read_text(encoding="utf-8"))
+        if (pre := asset("preprocessor_config.json")) is not None:
+            raw_pre = json.loads(pre.read_text(encoding="utf-8"))
             if str(raw_pre.get("image_processor_type", "")).lower() == "vivitimageprocessor":
                 from transformers import VivitImageProcessor
 
                 return VivitImageProcessor.from_pretrained(model_name)
 
         # Checkpoints such as V-JEPA 2 ship video_preprocessor_config.json only.
-        config_path = resolve_asset(model_name, "video_preprocessor_config.json")
+        config_path = asset("video_preprocessor_config.json")
         if config_path is None:
             raise ValueError(
                 f"video encoder {model_name!r} has neither a supported image processor nor video_preprocessor_config.json"
@@ -265,7 +256,7 @@ def load_processor(model_name: str, config: Any = None) -> Any:
 
         from transformers.models.videomae.image_processing_pil_videomae import VideoMAEImageProcessorPil
 
-        raw = json.loads(Path(config_path).read_text(encoding="utf-8"))
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
         allowed = (
             "do_resize",
             "size",
@@ -285,19 +276,6 @@ def load_processor(model_name: str, config: Any = None) -> Any:
             edge = crop["height"] if isinstance(crop, dict) else int(crop)
             options["size"] = {"shortest_edge": int(edge * 256 / 224)}
         return VideoMAEImageProcessorPil(**options)
-
-
-def resolve_asset(model_name: str, filename: str) -> str | None:
-    root = Path(model_name)
-    if root.exists():
-        local = root / filename
-        return str(local) if local.is_file() else None
-    from transformers.utils.hub import cached_file
-
-    try:
-        return cached_file(model_name, filename, _raise_exceptions_for_missing_entries=False)
-    except (OSError, ValueError):
-        return None
 
 
 def spans(
@@ -347,31 +325,17 @@ def sample_times(start: float, stop: float, num_frames: int) -> list[float]:
 def orient(frame: Any, rgb: np.ndarray) -> np.ndarray:
     """Apply container DISPLAYMATRIX rotation and mirror flips so frames are upright."""
     side_data = getattr(frame, "side_data", None)
-    matrix_data = side_data.get("DISPLAYMATRIX") if side_data is not None else None
-    if matrix_data is not None:
-        raw = bytes(matrix_data)
-        if len(raw) >= 36:
-            mat = np.frombuffer(raw[:36], dtype=np.int32).reshape(3, 3)
-            a, b = round(float(mat[0, 0]) / 65536.0), round(float(mat[0, 1]) / 65536.0)
-            c, d = round(float(mat[1, 0]) / 65536.0), round(float(mat[1, 1]) / 65536.0)
-            if abs(b) == 1 and abs(c) == 1 and a == 0 and d == 0:
-                out = np.transpose(rgb, (1, 0, 2))
-                if b < 0:
-                    out = out[::-1, :]
-                if c < 0:
-                    out = out[:, ::-1]
-                return np.ascontiguousarray(out)
-            if abs(a) == 1 and abs(d) == 1 and b == 0 and c == 0:
-                out = rgb
-                if d < 0:
-                    out = out[::-1, :]
-                if a < 0:
-                    out = out[:, ::-1]
-                return np.ascontiguousarray(out)
+    matrix = side_data.get("DISPLAYMATRIX") if side_data is not None else None
+    if matrix is not None and len(raw := bytes(matrix)) >= 36:
+        a, b, _, c, d = (round(int(v) / 65536) for v in np.frombuffer(raw[:20], dtype=np.int32))
+        if abs(b) == abs(c) == 1 and a == d == 0:
+            return np.ascontiguousarray(np.transpose(rgb, (1, 0, 2))[:: -1 if b < 0 else 1, :: -1 if c < 0 else 1])
+        if abs(a) == abs(d) == 1 and b == c == 0:
+            if a == 1 and d == 1:
+                return rgb
+            return np.ascontiguousarray(rgb[:: -1 if d < 0 else 1, :: -1 if a < 0 else 1])
     quarter = round(int(getattr(frame, "rotation", 0) or 0) / 90) % 4
-    if quarter == 0:
-        return rgb
-    return np.ascontiguousarray(np.rot90(rgb, k=quarter))
+    return np.ascontiguousarray(np.rot90(rgb, k=quarter)) if quarter else rgb
 
 
 def stream_bounds(container: Any, video_stream: Any) -> tuple[float, float, float]:
@@ -421,16 +385,6 @@ def stream_bounds(container: Any, video_stream: Any) -> tuple[float, float, floa
     return origin, max(packets * step, step), step
 
 
-def frame_time(frame: Any, index: int, origin: float, step: float, time_base: float) -> float:
-    if frame.time is not None:
-        return float(frame.time)
-    if frame.pts is not None:
-        return float(frame.pts * time_base)
-    if frame.dts is not None:
-        return float(frame.dts * time_base)
-    return origin + index * step
-
-
 def extract_frames(
     container: Any,
     video_stream: Any,
@@ -457,67 +411,68 @@ def extract_frames(
         last_rgb = orient(frame, frame.to_ndarray(format="rgb24"))
         return last_rgb
 
-    def seek_to(seconds: float) -> Iterator[Any]:
-        pts = max(0, int(seconds / time_base)) if origin >= 0.0 else int(seconds / time_base)
-        container.seek(pts, backward=True, stream=video_stream)
-        return iter(container.decode(video_stream))
-
     def pull(decoder: Iterator[Any], index: int) -> tuple[float | None, Any | None, int]:
         frame = next(decoder, None)
         if frame is None:
             return None, None, index
-        return frame_time(frame, index, origin, step, time_base), frame, index + 1
+        timestamp = (
+            float(frame.time)
+            if frame.time is not None
+            else float(frame.pts * time_base)
+            if frame.pts is not None
+            else float(frame.dts * time_base)
+            if frame.dts is not None
+            else origin + index * step
+        )
+        return timestamp, frame, index + 1
 
-    def restart() -> tuple[Iterator[Any], float | None, Any | None, float | None, Any | None, int]:
-        container.seek(0)
+    def open_at(
+        seconds: float | None,
+    ) -> tuple[Iterator[Any], float | None, Any | None, float | None, Any | None, int]:
+        if seconds is None:
+            container.seek(0)
+        else:
+            pts = max(0, int(seconds / time_base)) if origin >= 0.0 else int(seconds / time_base)
+            container.seek(pts, backward=True, stream=video_stream)
         stream_iter = iter(container.decode(video_stream))
         first_t, first_frame, seen = pull(stream_iter, 0)
         return stream_iter, None, None, first_t, first_frame, seen
 
     seekable = True
-    absolute = [origin + timestamp for timestamp in targets]
-    if absolute[0] > origin + SEEK_GAP_SECONDS:
-        try:
-            decoder = seek_to(absolute[0])
-            prev_t, prev_frame = None, None
-            curr_t, curr_frame, count = pull(decoder, 0)
-        except (av.FFmpegError, OSError, ValueError):
-            seekable = False
-            decoder, prev_t, prev_frame, curr_t, curr_frame, count = restart()
-    else:
-        decoder = iter(container.decode(video_stream))
-        prev_t, prev_frame = None, None
-        curr_t, curr_frame, count = pull(decoder, 0)
+    decoder: Iterator[Any] | None = None
+    prev_t: float | None = None
+    prev_frame: Any | None = None
+    curr_t: float | None = None
+    curr_frame: Any | None = None
+    count = 0
 
-    # Guard against containers whose keyframe index overshoots the first requested timestamp.
-    if (
-        curr_frame is not None
-        and curr_t is not None
-        and curr_t > absolute[0] + 1e-6
-        and absolute[0] > origin + SEEK_GAP_SECONDS
-    ):
-        seekable = False
-        decoder, prev_t, prev_frame, curr_t, curr_frame, count = restart()
-
-    for rel, target in zip(targets, absolute, strict=True):
-        if seekable and curr_t is not None and target - curr_t > SEEK_GAP_SECONDS:
+    for rel in targets:
+        target = origin + rel
+        if seekable and target - (origin if curr_t is None else curr_t) > SEEK_GAP_SECONDS:
             previous_pos = curr_t
             try:
-                candidate = seek_to(target)
-                next_t, next_frame, next_count = pull(candidate, count)
+                cand, _, _, next_t, next_frame, next_count = open_at(target)
                 if next_frame is not None and next_t is not None and next_t <= target + 1e-6:
-                    if next_t <= previous_pos:
-                        # No closer keyframe exists between previous_pos and target; avoid repeated regressive seeks.
+                    if previous_pos is not None and next_t <= previous_pos:
+                        # No closer keyframe exists before target; stop seeking backward.
                         seekable = False
-                    decoder = candidate
-                    prev_t, prev_frame = None, None
-                    curr_t, curr_frame, count = next_t, next_frame, next_count
+                    decoder, prev_t, prev_frame, curr_t, curr_frame, count = (
+                        cand,
+                        None,
+                        None,
+                        next_t,
+                        next_frame,
+                        next_count,
+                    )
                 else:
-                    # Overshot seek: fall back cleanly to sequential decoding from start.
                     seekable = False
-                    decoder, prev_t, prev_frame, curr_t, curr_frame, count = restart()
+                    decoder, prev_t, prev_frame, curr_t, curr_frame, count = open_at(None)
             except (av.FFmpegError, OSError, ValueError):
                 seekable = False
+
+        if decoder is None:
+            decoder = iter(container.decode(video_stream))
+            curr_t, curr_frame, count = pull(decoder, 0)
 
         while curr_frame is not None and curr_t is not None and curr_t < target:
             prev_t, prev_frame = curr_t, curr_frame
@@ -525,10 +480,8 @@ def extract_frames(
 
         if prev_frame is not None and curr_frame is not None and prev_t is not None and curr_t is not None:
             chosen = prev_frame if abs(target - prev_t) <= abs(curr_t - target) else curr_frame
-        elif curr_frame is not None:
-            chosen = curr_frame
-        elif prev_frame is not None:
-            chosen = prev_frame
+        elif curr_frame is not None or prev_frame is not None:
+            chosen = curr_frame if curr_frame is not None else prev_frame
         else:
             raise ValueError("video source yielded no decoded frames")
         selected[rel] = as_rgb(chosen)
@@ -558,9 +511,12 @@ def clips(
             if isinstance(version, list) and list(stamp(os.fstat(stream.fileno()))) != version:
                 raise ValueError(f"video {path!r} changed after tensorization; encode the observations again")
             with av.open(stream) as container:
-                if not container.streams.video:
+                video_stream = next(
+                    (s for s in container.streams.video if not (s.disposition & av.stream.Disposition.attached_pic)),
+                    None,
+                )
+                if video_stream is None:
                     raise ValueError(f"video {path!r} contains no video stream")
-                video_stream = container.streams.video[0]
                 video_stream.thread_count = 1
                 time_base = float(video_stream.time_base) if video_stream.time_base is not None else 1.0 / av.time_base
                 origin, total, step = stream_bounds(container, video_stream)
@@ -670,16 +626,6 @@ def pool_outputs(
     return hidden.mean(dim=1).float().contiguous()
 
 
-def input_key(model: Any) -> str:
-    kind = getattr(getattr(model, "config", None), "model_type", None)
-    if kind == "vjepa2":
-        return "pixel_values_videos"
-    parameters = inspect.signature(model.forward).parameters
-    if "pixel_values_videos" in parameters and "pixel_values" not in parameters:
-        return "pixel_values_videos"
-    return "pixel_values"
-
-
 def encode_clips(
     model: Any,
     windows: Sequence[np.ndarray],
@@ -692,7 +638,8 @@ def encode_clips(
     if not windows:
         return torch.empty((0, hidden_size), dtype=torch.float32, device=device)
     batch = torch.from_numpy(np.stack(windows)).to(device)
-    key = input_key(model)
+    params = inspect.signature(model.forward).parameters
+    key = "pixel_values_videos" if "pixel_values_videos" in params and "pixel_values" not in params else "pixel_values"
     with torch.no_grad():
         outputs = model(**{key: batch})
     pooled = pool_outputs(outputs, model, pooling, hidden_size, model_name)
@@ -715,7 +662,15 @@ class Embedder(media.MediaEmbedder):
         config = self._cached_model.model.config
         self.processor = load_processor(self.request.model, config=config)
         kind = getattr(config, "model_type", None)
-        native = native_frames(config)
+        native = next(
+            (
+                value
+                for owner in (config, getattr(config, "vision_config", None))
+                for attribute in ("num_frames", "frames_per_clip")
+                if isinstance((value := getattr(owner, attribute, None)), int) and value > 0
+            ),
+            None,
+        )
         requested = self.request.num_frames
         if (
             kind in {"videomae", "vivit", "xclip"}
@@ -730,7 +685,8 @@ class Embedder(media.MediaEmbedder):
             )
         chosen = requested or native or DEFAULT_FRAMES
         if kind == "vjepa2":
-            tubelet = tubelet_size(config) or 2
+            raw_tubelet = getattr(config, "tubelet_size", 2)
+            tubelet = int(raw_tubelet[0]) if isinstance(raw_tubelet, (list, tuple)) else int(raw_tubelet or 2)
             if chosen % tubelet != 0:
                 raise ValueError(
                     f"video field {address} requests num_frames={chosen} for {self.request.model!r}, "
