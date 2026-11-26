@@ -69,7 +69,7 @@ class Artifact:
         return model
 
     def report(self) -> dict[str, Any]:
-        nodes = {**self.schema.branches, **self.schema.requests}
+        nodes = {**self.schema.branches, **self.schema.requests, **self.schema.twigs}
         tensors = (
             []
             if self.state is None

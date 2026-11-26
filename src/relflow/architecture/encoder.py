@@ -14,6 +14,7 @@ from relflow.architecture.pool import LearnedQueryCrossAttention, MeanPool, Pool
 from relflow.structs.packages import Parcel
 from relflow.structs.reduction import Attention, Mean
 from relflow.structs.tree import Address, Leaf, Node
+from relflow.structs.twigs import Twig, indexed
 
 if TYPE_CHECKING:
     from relflow.data.arrow import Geometry
@@ -89,6 +90,21 @@ def sequence(
         spans = spans + (count if parcel.spans is None else parcel.spans)
         lead = lead + width
     return torch.cat(positions, dim=-1), spans, torch.cat(slots, dim=-1)
+
+
+def spread(parcels: list[Parcel], positions: torch.Tensor) -> torch.Tensor:
+    """Give every token its item's index position, in the token order of ``sequence``.
+
+    ``positions`` holds one index position per item of each branch instance.
+    Every parcel lays its tokens out item by item with an equal count per
+    item, so all of an item's leaf tokens and routed child tokens share its
+    position.
+    """
+    items = positions.shape[-1]
+    return torch.cat(
+        [positions.repeat_interleave(parcel.payload.shape[-2] // items if items else 0, dim=-1) for parcel in parcels],
+        dim=-1,
+    )
 
 
 class RotaryTransformerEncoderLayer(torch.nn.Module):
@@ -217,9 +233,12 @@ class BranchEncoder(torch.nn.Module):
 
         self.encoder = torch.nn.ModuleList(layers)
 
+        # Twigs shape the branch but contribute no tokens.
+        members = [child for child in branch.fields if not isinstance(child, Twig)]
+        # An Index rotates this branch's attention by record index instead of record ordinal.
+        self.indexed = indexed(branch) is not None
         widths = [
-            int(child.active) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
-            for child in branch.fields
+            int(child.active) if isinstance(child, Leaf) else schema.branch_outputs[child.address] for child in members
         ]
         child_width = None if any(width is None for width in widths) else sum(cast(list[int], widths))
         self.input_width = None if branch.length is None or child_width is None else branch.length * child_width
@@ -228,7 +247,7 @@ class BranchEncoder(torch.nn.Module):
         # then leaves every existing prediction in place.
         visible = [
             int(child.embedded) if isinstance(child, Leaf) else schema.branch_outputs[child.address]
-            for child in branch.fields
+            for child in members
         ]
         visible_width = None if any(width is None for width in visible) else sum(cast(list[int], visible))
         self.visible_width = None if branch.length is None or visible_width is None else branch.length * visible_width
@@ -249,14 +268,14 @@ class BranchEncoder(torch.nn.Module):
 
         self.coordinate_origins = frozenset(
             child.address
-            for child in branch.fields
+            for child in members
             if isinstance(child, Leaf) and (child.embedded if branch.cross else child.active)
         )
         # A reduced child branch contributes its summary tokens to each item's
         # coordinate, so leaf-times-child interactions form before reduction.
         self.coordinate_branches: dict[Address, int] = {
             child.address: cast(int, schema.branch_outputs[child.address])
-            for child in branch.fields
+            for child in members
             if not isinstance(child, Leaf)
             and cast("Branch", child).reduction is not None
             and schema.branch_outputs[child.address]
@@ -266,7 +285,7 @@ class BranchEncoder(torch.nn.Module):
         if branch.cross and coordinate_tokens > 1:
             slots = tuple(
                 (child.address, index)
-                for child in branch.fields
+                for child in members
                 for index in range(
                     1 if child.address in self.coordinate_origins else self.coordinate_branches.get(child.address, 0)
                 )
@@ -358,7 +377,14 @@ class BranchEncoder(torch.nn.Module):
             ]
         parcels = self.contextualize(parcels)
         positions, spans, slots = sequence(parcels)
-        positioned = any(parcel.positions is not None for parcel in parcels)
+        positioned = self.indexed or any(parcel.positions is not None for parcel in parcels)
+        # Index positions steer only this branch's attention and pool; routed
+        # sequences keep structural positions for their parent and decoders.
+        rotated = (
+            spread(parcels, cast(torch.Tensor, cast("Geometry", cast(TensorDict, geometry)[self.origin]).positions))
+            if self.indexed
+            else positions
+        )
         payloads = [parcel.payload for parcel in parcels]
         presence = [parcel.present for parcel in parcels]
         for parcel in parcels:
@@ -377,7 +403,7 @@ class BranchEncoder(torch.nn.Module):
         present = present.reshape(rows, L)
         if isinstance(self.pool, Pool):
             self.pool.observe(present)
-        flat_positions = positions.reshape(rows, L)
+        flat_positions = rotated.reshape(rows, L)
         active = present.any(dim=1)
         indices = active.nonzero(as_tuple=False).reshape(-1)
 

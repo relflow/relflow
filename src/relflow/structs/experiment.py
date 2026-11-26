@@ -24,6 +24,7 @@ from relflow.structs.selectors import (
 )
 from relflow.structs.structure import Branch, Mask, RequestTypes
 from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate
+from relflow.structs.twigs import Twig
 from relflow.tensorfields.base import TENSORFIELDS
 
 __all__ = [
@@ -37,7 +38,7 @@ __all__ = [
     "where",
 ]
 
-TreeFieldInput: TypeAlias = SchemaField | type[Leaf] | type[Branch]
+TreeFieldInput: TypeAlias = SchemaField | type[Leaf] | type[Branch] | type[Twig]
 Defaults: TypeAlias = Callable[[TreeFieldInput], Mapping[str, Any]]
 
 _MISSING = object()
@@ -56,20 +57,25 @@ def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | No
     """Bind a fresh subtree without changing the reusable definition or its parent links."""
     if isinstance(value, type) and issubclass(value, Branch):
         value = value()
-    if isinstance(value, type) and issubclass(value, Leaf):
+    if isinstance(value, type) and issubclass(value, (Leaf, Twig)):
         payload = {} if defaults is None else dict(defaults(value))
         bound = value.model_validate({**payload, "name": name})
         if defaults is not None:
             object.__setattr__(bound, "__pydantic_fields_set__", set(type(bound).model_fields))
         return bound
-    if not isinstance(value, (Branch, Leaf)):
-        raise TypeError(f"tree field {name!r} must be a Branch or Leaf instance or class; got {type(value).__name__}")
+    if not isinstance(value, (Branch, Leaf, Twig)):
+        raise TypeError(
+            f"tree field {name!r} must be a Branch, Leaf, or Twig instance or class; got {type(value).__name__}"
+        )
 
     excluded = {"name", "mask"}
     if isinstance(value, Branch):
         excluded.add("fields")
     payload = value.model_dump(mode="python", round_trip=True, exclude=excluded)
-    payload.update(name=name, mask=value.mask)
+    payload["name"] = name
+    # Masks round-trip as normalized policies; twigs have none.
+    if not isinstance(value, Twig):
+        payload["mask"] = value.mask
     if defaults is not None:
         payload.update(
             {option: default for option, default in defaults(value).items() if option not in value.model_fields_set}
@@ -248,6 +254,10 @@ class Schema(Node):
         return {node.address: node for node in self.descendants if isinstance(node, Leaf)}
 
     @functools.cached_property
+    def twigs(self) -> dict[Address, Twig]:
+        return {node.address: node for node in self.descendants if isinstance(node, Twig)}
+
+    @functools.cached_property
     def active_requests(self) -> dict[Address, RequestTypes]:
         return {node.address: node for node in self.requests.values() if node.active}
 
@@ -293,7 +303,9 @@ class Schema(Node):
         widths: dict[Address, int | None] = {}
         for address, branch in self.branches.items():
             parts = [
-                int(child.active) if isinstance(child, Leaf) else outputs[child.address] for child in branch.fields
+                int(child.active) if isinstance(child, Leaf) else outputs[child.address]
+                for child in branch.fields
+                if not isinstance(child, Twig)
             ]
             widths[address] = (
                 None
@@ -331,6 +343,7 @@ class Schema(Node):
             "roles",
             "branches",
             "requests",
+            "twigs",
             "active_requests",
             "shapes",
             "branch_outputs",
@@ -376,6 +389,9 @@ class Schema(Node):
                         f"n_heads={n_heads}, position={branch.reduction.position}; "
                         "override d_model or the reduction's n_heads"
                     )
+
+        for twig in self.twigs.values():
+            twig.post_bind_validate()
 
         decoded = {*self.objectives, *self.embed}
         for request in self.requests.values():
@@ -480,7 +496,8 @@ class Schema(Node):
                     if isinstance(node, Branch):
                         excluded.add("fields")
                     payload = node.model_dump(mode="python", round_trip=True, exclude=excluded)
-                    payload["mask"] = cast(SchemaField, node).mask
+                    if isinstance(node, (Branch, Leaf)):
+                        payload["mask"] = node.mask
                     if isinstance(node, Branch):
                         payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in node.fields]
                     payload.update(applicable_values)

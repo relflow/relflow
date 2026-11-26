@@ -10,8 +10,9 @@ import pydantic
 
 from relflow.structs.structure import Branch
 from relflow.structs.tree import Leaf, Node
+from relflow.structs.twigs import Twig
 
-SchemaField: TypeAlias = Branch | Leaf
+SchemaField: TypeAlias = Branch | Leaf | Twig
 
 
 class NodePredicate(pydantic.BaseModel):

@@ -12,6 +12,7 @@ from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
+from relflow.structs.twigs import TWIGS, Twig
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
 from relflow.tensorfields.base import TENSORFIELDS
 
@@ -58,7 +59,8 @@ class Branch(Node, metaclass=BranchMeta):
     testing, and prediction. Crops replay from the data seed, epoch, batch
     ordinal, branch address, and parent position within the batch; changing
     batching or row order can change them. ``reduction`` controls the context
-    passed to the parent branch.
+    passed to the parent branch. An ``Index`` child positions the records in
+    this branch's attention by their index values instead of their order.
 
     During inference, unbounded collections in untrusted input are a
     denial-of-service (DoS/DDoS) attack vector: requests can exhaust memory or
@@ -87,12 +89,15 @@ class Branch(Node, metaclass=BranchMeta):
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
     # The before-validator normalizes this public Boolean default to a tuple.
     mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
-    fields: list[Branch | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]]] = pydantic.Field(default_factory=list)
+    fields: list[
+        Branch | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]] | pydantic.SerializeAsAny[pydantic.InstanceOf[Twig]]
+    ] = pydantic.Field(default_factory=list)
 
     def __init__(
         self,
         *,
-        fields: Mapping[str, Branch | Leaf | builtins.type[Leaf] | builtins.type[Branch]] | None = None,
+        fields: Mapping[str, Branch | Leaf | Twig | builtins.type[Leaf] | builtins.type[Branch] | builtins.type[Twig]]
+        | None = None,
         query: str | None = None,
         description: str | None = None,
         embed: bool = False,
@@ -107,7 +112,7 @@ class Branch(Node, metaclass=BranchMeta):
         dropout: Rate | None = cast(Rate | None, OMITTED),
         mask: MaskInput = False,
         type: Literal["branch"] = "branch",
-        **children: Branch | Leaf | builtins.type[Leaf] | builtins.type[Branch],
+        **children: Branch | Leaf | Twig | builtins.type[Leaf] | builtins.type[Branch] | builtins.type[Twig],
     ) -> None:
         from relflow.structs.experiment import bind_fields
 
@@ -161,6 +166,9 @@ class Branch(Node, metaclass=BranchMeta):
             field_type = payload.get("type")
             if field_type == "branch":
                 fields.append(Branch.model_validate(payload, context=info.context))
+                continue
+            if isinstance(field_type, str) and field_type in TWIGS:
+                fields.append(TWIGS[field_type].model_validate(payload))
                 continue
             if not isinstance(field_type, str) or field_type not in TENSORFIELDS:
                 raise ValueError(f"unknown tensor field type: {field_type}")

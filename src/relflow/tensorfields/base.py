@@ -47,6 +47,7 @@ from relflow.data.arrow import Geometry, variants
 from relflow.structs.enums import Component, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, Leaf
+from relflow.structs.twigs import Twig
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -375,13 +376,14 @@ class DecoderBase(torch.nn.Module):
             addresses = [node.address]
             if getattr(node, "type", None) == "branch" and node.reduction is None:
                 for child in node.fields:
-                    addresses.extend(visible(child))
+                    if not isinstance(child, Twig):
+                        addresses.extend(visible(child))
             return addresses
 
         context_addresses: list[Address] = []
         if conditioned:
             for child in cast("Branch", request.parent).fields:
-                if child.address == address:
+                if child.address == address or isinstance(child, Twig):
                     continue
                 context_addresses.extend(visible(child))
         self.context_addresses = tuple(dict.fromkeys(context_addresses))

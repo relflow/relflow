@@ -188,6 +188,16 @@ model = rf.Model(
   its Branch collection, in source order and before cropping; records without
   a predecessor have a null duration. Endpoints must agree
   on aware versus naive semantics.
+- `rf.Index` is a twig: a third node kind beside `Branch` and `Leaf`, declared
+  like a field (`at=rf.Index`, `rf.Index(query=..., granularity="hours")`) but
+  never embedded, masked, decoded, or written. It reads one integer, date, or
+  timestamp per record of its own Branch. That Branch's encoder and Attention
+  reduction rotate each record's tokens by its index, counted from the
+  collection's smallest value, instead of its ordinal; routed sequences and
+  decoders keep structural positions. Integers reject `granularity`; dates and
+  timestamps default to days. At most one Index per Branch, none at the root,
+  nulls rejected, and the Branch needs attention or a positional Attention
+  reduction. Positions travel as float32 `Geometry.positions`.
 - `Period` is for calendar parts. Saved schemas identify it with `type: dateparts`.
   Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset

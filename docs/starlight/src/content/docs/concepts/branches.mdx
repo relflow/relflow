@@ -25,6 +25,34 @@ Reductions occur after attention is applied within and across observations withi
 
 Relflow currently offers reductions as a cross-attention, algebraic mean, or an identity forward-pass. For the attention-based reduction of information, users may explicitly declare the number of outputs of this reduction. The Mean branch reduction averages the encoded values while also retaining a learned count signal.
 
+## Position records by their index
+
+Attention within a branch normally measures how far apart two records are by their order in the collection: the third reading is two steps from the first, whether they were taken an hour or a month apart. Add an `rf.Index` to measure that distance with a value each record carries instead, such as a timestamp or a sequence number.
+
+```python
+class Reading(rf.Branch):
+    """One sensor reading."""
+
+    recorded_at = rf.Index(granularity="hours")
+    temperature = rf.Number
+    vibration = rf.Number
+
+
+class Equipment(rf.Model):
+    """One machine at its observation cutoff."""
+
+    sensor_readings = Reading(length=168, overflow="tail")
+    failure = rf.Boolean(mask=True)
+```
+
+An index is declared like a field but is a different kind of node, a twig: it shapes its branch rather than contributing a value to it.
+
+- It reads one integer, date, or timestamp per record, from its own name or from `query`. Integers count their own units; dates and timestamps count `granularity` units, which default to days.
+- The branch's attention and its attention reduction rotate each record by its index rather than its position in the collection. Only differences matter, so shifting every index by the same amount changes nothing, and records need not be sorted.
+- The index is never embedded or predicted. To also learn from the same timestamp, add a field that reads it, such as `recorded_on = rf.Period("day_of_week", query="recorded_at")`.
+- A branch holds at most one index, and every retained record needs a value. The model root holds one record per observation, so it cannot hold an index.
+- The branch's `length` and `overflow` still count and crop records in their supplied order. Decoders and the parent branch still locate each record by its slot in the collection.
+
 :::tip[Interested in contributing new reductions?]
 
 Join our [Discord here](https://discord.gg/DVyZUkvTFA) and view our [contributing guide](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/CONTRIBUTING.md).

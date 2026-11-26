@@ -107,7 +107,7 @@ def test_random_windows_preserve_null_empty_short_and_null_item_geometry():
     for strata in rf.Strata:
         resolved = coalesce(source, configured, strata, seed=7)
         layout = resolved.layouts["/events"]
-        axes = geometry(resolved.layouts, rows=4)["/events"]
+        axes = geometry(resolved, rows=4)["/events"]
         assert layout.lengths.tolist() == [[0], [0], [1], [3]]
         assert layout.valid.tolist() == [[False], [True], [True], [True]]
         assert axes.slots.tolist() == [
@@ -165,7 +165,7 @@ def test_random_windows_align_nested_records_queries_masks_and_geometry():
         assert record["parent"] == records[position // 2]["value"]
     nested = resolved.fields["/events/children/value"].single().pristine.values.to_numpy().reshape(-1, 2)
     assert np.all(np.diff(nested, axis=1) == 1)
-    axes = geometry(resolved.layouts, rows=16)
+    axes = geometry(resolved, rows=16)
     assert axes["/events"].slots.reshape(-1).sum().item() == len(records)
     assert axes["/events/children"].slots.reshape(-1).sum().item() == len(inner.records)
 
