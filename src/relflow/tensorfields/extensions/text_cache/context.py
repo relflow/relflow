@@ -10,7 +10,8 @@ from typing import Any
 import numpy as np
 import pyarrow as pa
 
-from relflow.tensorfields.shared.cache import MAX_FRAME, MAX_ROWS, Endpoint, Payloads
+from relflow.tensorfields.extensions.text_cache.tokens import tokens
+from relflow.tensorfields.shared.cache import MAX_FRAME, MAX_ROWS, Endpoint
 from relflow.tensorfields.shared.cache.vectors import VectorCache
 
 
@@ -47,25 +48,6 @@ def tokenizer_identity(tokenizer: Any) -> str:
         code = getattr(type(tokenizer).__call__, "__code__", None)
         payload = repr((type(tokenizer).__module__, type(tokenizer).__qualname__, code.co_code if code else None))
     return hashlib.sha256(payload.encode()).hexdigest()
-
-
-def tokens(rows: np.ndarray) -> Payloads:
-    """Versioned token records preserve both matrices and their explicit length."""
-    length = rows.shape[-1]
-    codec = np.dtype([("length", "<u4"), ("tokens", "<i8", (2, length))])
-    records = np.empty(len(rows), dtype=codec)
-    records["length"], records["tokens"] = length, rows
-    return Payloads.fixed(records, codec.itemsize)
-
-
-def token_rows(payloads: Payloads, length: int) -> np.ndarray:
-    codec = np.dtype([("length", "<u4"), ("tokens", "<i8", (2, length))])
-    if np.any(np.diff(payloads.offsets) != codec.itemsize):
-        raise ValueError("cached text preparation has a different token shape")
-    records = np.frombuffer(payloads.data, dtype=codec)
-    if np.any(records["length"] != length):
-        raise ValueError("cached text preparation has a different token length")
-    return records["tokens"].copy()
 
 
 class Encoding(VectorCache):
@@ -114,7 +96,7 @@ class Encoding(VectorCache):
                 self.namespace = ""
             if self.settings != settings or not self.namespace:
                 self.namespace = hashlib.sha256(
-                    repr(("rf.text.tokens/v1", self.model, self.base, self.length, settings)).encode()
+                    repr(("rf.text.tokens/v2", self.model, self.base, self.length, settings)).encode()
                 ).hexdigest()
                 self.settings = settings
             output = np.empty(len(texts), dtype=np.int64)
@@ -142,6 +124,8 @@ class Encoding(VectorCache):
                         raise ValueError(
                             f"text tokenizer '{self.model}' returned {rows.shape}; expected {(len(missing), 2, self.length)}"
                         )
-                    ids[missing] = self.client.bind(references.take(missing), tokens(rows), self.namespace)
+                    ids[missing] = self.client.bind(
+                        references.take(missing), tokens(rows, tokenizer.pad_token_id), self.namespace
+                    )
                 output[start : start + len(selected)] = ids
             return output

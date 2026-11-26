@@ -8,6 +8,7 @@ import pytest
 import torch
 
 import relflow as rf
+from relflow.structs.enums import Tokens
 from relflow.tensorfields.extensions.text import IDENTIFIERS, INPUT_IDS, CachedModel
 from tests.tensorfields.extensions.test_text import patch_hf
 
@@ -103,14 +104,13 @@ def test_fields_share_frozen_vectors_but_keep_their_projections(encoder):
     assert model.nodes["/body"].embedder.linear is not model.nodes["/title"].embedder.linear
 
 
-def test_precision_namespaces_do_not_alias(encoder):
+def test_cpu_autocast_reuses_fp32_vectors(encoder):
     model = build()
     first = encoded(model, ["alpha"])
     with torch.autocast("cpu", dtype=torch.bfloat16):
-        encoded(model, ["alpha"])
-        encoded(model, ["alpha"])
-    assert torch.equal(first, encoded(model, ["alpha"]))
-    assert encoder.calls == 2
+        assert torch.equal(first, encoded(model, ["alpha"]))
+        assert model.nodes["/body"].embedder.warm(["alpha"]) == 0
+    assert encoder.calls == 1
 
 
 @pytest.mark.parametrize("operation", [deepcopy, pickle.loads])
@@ -229,3 +229,89 @@ def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
     before = embedder.store.stats()["results"]
     embedder.encode(content=actual.content, state=actual.state)
     assert embedder.store.stats()["results"] > before
+
+
+def test_text_projection_scale_and_legacy_checkpoint(encoder, tmp_path):
+    source = pl.DataFrame({"events": [[{"body": "two"}, {"body": None}]]})
+    legacy = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        events=rf.Branch(length=2, body=rf.Text(model=MODEL, encoder_pooling="cls", encoder_rms=False, embed=True)),
+    )
+    path = tmp_path / "model.ckpt"
+    legacy.save(path)
+    saved = torch.load(path, weights_only=False)
+    request = saved["schema"]["fields"]["fields"][0]["fields"][0]
+    del request["encoder_rms"]
+    torch.save(saved, path)
+    restored = rf.Model.load(path)
+    assert rf.inspect(path)["schema"]["fields"]["fields"][0]["fields"][0]["encoder_rms"] is False
+    assert restored.schema.requests["/events/body"].encoder_rms is False
+    assert restored.predict(source).equals(legacy.predict(source))
+
+    request["encoder_rms"] = True
+    restored.restore_checkpoint_state(saved)
+    embedder = restored.nodes["/events/body"].embedder
+    batch = restored.encode(source)["/events/body"]
+    pristine = embedder.encode(content=batch.content, state=batch.state)
+    seen = []
+    hook = embedder.linear.register_forward_pre_hook(lambda module, args: seen.append(args[0].detach().clone()))
+    embedder.eval().embed(batch)
+    hook.remove()
+    projected = seen[0].reshape_as(pristine)
+    valued = batch.state.eq(Tokens.valued.value)
+    torch.testing.assert_close(projected[valued].square().mean(-1), torch.ones_like(projected[valued][:, 0]))
+    assert torch.equal(projected[~valued], torch.zeros_like(projected[~valued]))
+    torch.testing.assert_close(
+        torch.nn.functional.normalize(projected[valued]), torch.nn.functional.normalize(pristine[valued])
+    )
+    restored.save(path)
+    assert rf.Model.load(path).predict(source).equals(restored.predict(source))
+
+    # Lightning's tensor restore also accepts v1 weights in a matching user-constructed graph.
+    weights = saved["state_dict"]
+    weights._metadata["nodes./events/body.embedder"]["version"] = 1
+    restored.load_state_dict(weights)
+    assert restored.schema.requests["/events/body"].encoder_rms is False
+    assert restored.predict(source).equals(legacy.predict(source))
+
+
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+def test_cpu_encoder_uses_fp32_with_reduced_checkpoint(tmp_path, dtype):
+    from transformers import BertConfig, BertModel, BertTokenizerFast
+
+    assets = tmp_path / "reduced"
+    native = BertModel(
+        BertConfig(vocab_size=8, hidden_size=8, num_hidden_layers=1, num_attention_heads=2, intermediate_size=16)
+    )
+    native.to(dtype=dtype).save_pretrained(assets)
+    vocab = ["[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]", "hello", "text", "world"]
+    BertTokenizerFast(vocab={label: i for i, label in enumerate(vocab)}).save_pretrained(assets)
+    resource = CachedModel.get_model(str(assets))
+    cpu = torch.device("cpu")
+    with torch.inference_mode():
+        first = resource.module_for(cpu)
+        assert first is resource.module_for(cpu)
+        assert first.dtype == torch.float32
+        assert resource.model.dtype == dtype
+        assert all(not torch.is_inference(value) for value in (*first.parameters(), *first.buffers()))
+    first_weight = next(first.parameters())
+    with torch.no_grad():
+        next(resource.model.parameters()).add_(1)
+    current = resource.module_for(cpu)
+    assert current is not first
+    assert not torch.equal(first_weight, next(current.parameters()))
+    torch.testing.assert_close(next(current.parameters()), next(resource.model.parameters()).float())
+    model = rf.Model(preset="small", body=rf.Text(model=str(assets), cache=False))
+    embedder = model.nodes["/body"].embedder
+    ids = torch.tensor([[2, 5, 3]])
+    mask = torch.ones_like(ids)
+    autocast = []
+    hook = current.register_forward_pre_hook(lambda *_: autocast.append(torch.is_autocast_enabled("cpu")))
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        actual = embedder.pool(ids, mask)
+    hook.remove()
+    assert autocast == [False]
+    torch.testing.assert_close(actual, current(input_ids=ids, attention_mask=mask).last_hidden_state[:, 0])
+    assert resource.module_for(torch.device("meta")).dtype == dtype

@@ -119,9 +119,14 @@ class CheckpointState:
         return state
 
     @staticmethod
+    def schema(state: dict[str, Any]) -> Schema:
+        """Restore resolved field options, including defaults in effect when saved."""
+        return Schema.model_validate(state["schema"], context={"checkpoint": True})
+
+    @staticmethod
     def build(model_cls: type[M], state: dict[str, Any]) -> M:
         """Construct the saved graph from validated CPU state and restore its provenance."""
-        model = model_cls(schema=Schema.model_validate(state["schema"]), batch_size=state["batch_size"])
+        model = model_cls(schema=CheckpointState.schema(state), batch_size=state["batch_size"])
         CheckpointState.restore_metadata(model, state)
         model.load_state_dict(state_dict=state["state_dict"])
         return model
@@ -140,7 +145,7 @@ class CheckpointState:
         previous_preset = module.preset
         previous_version = module.version
         try:
-            module.schema = Schema.model_validate(checkpoint["schema"])
+            module.schema = CheckpointState.schema(checkpoint)
             module.batch_size = checkpoint["batch_size"]
             CheckpointState.restore_metadata(module, checkpoint)
             ModelGraph.install(module)

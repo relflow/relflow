@@ -193,7 +193,10 @@ model = rf.Model(
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
-- `Text` caches automatically: workers send stable IDs; a bounded device
+- `Text` defaults to all-MiniLM-L6-v2 with masked mean pooling. New fields
+  scale each pooled input to unit RMS before jitter and projection. Frozen
+  reconstruction targets retain their original scale. CPU encoding uses fp32.
+  Workers send stable IDs for compact token records. A bounded device
   table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
   durable cold tier. `store` selects a local directory, `memory` budgets RAM
   (default 64 MiB), and `resident` budgets device tables and replacement
