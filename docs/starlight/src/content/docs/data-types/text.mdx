@@ -25,17 +25,20 @@ value and is processed by the tokenizer.
 
 Install the [`text` extra](/installation/#optional-dependencies) before constructing a model that uses this field.
 
-The default encoder is `google/bert_uncased_L-2_H-128_A-2`. The encoder and its
-tokenizer must be available at runtime; the first use of a remote model can
-download them. Set `model` to a compatible Hugging Face model name or a local
-model directory to choose another encoder.
+The default encoder is `sentence-transformers/all-MiniLM-L6-v2`. It averages
+attended token vectors into a 384-dimensional representation. The first use can
+download the encoder and tokenizer. Set `model` to a compatible Hugging Face model name or a local
+model directory to choose another encoder. [MiniLM model card](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
 
 ## Standardization and processor pipelines
 
 The tokenizer truncates each supplied string to `max_length` tokens.
 A frozen encoder produces token vectors; `encoder_pooling` selects the
-string-level vector. A field-specific learned projection places that vector
-in model space and combines it with the field’s state embedding.
+string-level vector. By default, each pooled vector is scaled to unit root mean
+square (RMS) before training jitter and the field’s learned projection. This
+preserves direction and gives encoders with different output magnitudes a
+common input scale. Set `encoder_rms=False` to use the original magnitudes.
+The projection combines the result with the field’s state embedding.
 
 The text encoder stays frozen. Training jitter perturbs the pooled input
 representation after pristine frozen vectors have been prepared, while
@@ -45,6 +48,15 @@ Caching is automatic across training, validation, and prediction. Loader workers
 send compact text IDs to a shared local cache; tokenization and frozen encoding
 are reused when their inputs and settings match. Fields can share frozen
 vectors while retaining their own learned task projections.
+
+SQLite stores the attended token IDs as variable-length int32 records and
+restores the tokenizer’s exact IDs and attention mask when needed. The compact
+format has its own namespace and warms as strings are encountered.
+
+The frozen encoder runs in float32 on CPU, including during mixed-precision
+training. On accelerators it uses the checkpoint and trainer precision.
+`rf.Model.load(path)` restores an older checkpoint’s encoder, pooling, and
+projection scale. Use the loaded model when resuming an older training run.
 
 The cache distinguishes encoder weights, tokenizer configuration, pooling,
 device type, and precision. It stores pristine values before training jitter,
@@ -104,11 +116,12 @@ message = rf.Text(
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `model` | `"google/bert_uncased_L-2_H-128_A-2"` | Select the frozen encoder by Hugging Face model name or local directory. |
+| `model` | `"sentence-transformers/all-MiniLM-L6-v2"` | Select the frozen encoder by Hugging Face model name or local directory. |
 | `max_length` | `128` | Bound tokenized length, including special tokens. Longer text is truncated. |
 | `tokenizer_batch_size` | `4096` | Bound the number of strings prepared in one tokenizer call, independently of encoder batches. |
 | `encoder_batch_size` | `32` | Bound the number of strings encoded together. Reduce it if encoding uses too much memory. |
-| `encoder_pooling` | `"cls"` | Reduce token vectors with `"cls"`, `"mean"`, or `"pooler"`, as appropriate for the encoder. |
+| `encoder_pooling` | `"mean"` for the default MiniLM, `"cls"` for other model IDs | Select masked mean, first token, or the encoder’s `"pooler"` output. |
+| `encoder_rms` | `True` | Scale each pooled input to unit RMS before projection. Reconstruction uses the pristine pooled vector. |
 | `cache` | `True` | Reuse prepared text and frozen vectors through bounded hot tiers and a persistent disk store. A positive integer also caps hot entries; `False` disables every cache tier. |
 | `store` | `None` | Choose a writable local cache directory. The default uses `RELFLOW_CACHE_DIR` when set, otherwise the platform cache directory. |
 | `memory` | `None` | Budget the store's shared RAM cache payload in MiB. `None` uses 64 MiB; process overhead and the OS file cache are additional. |

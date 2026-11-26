@@ -111,7 +111,9 @@ class Backbone:
     def module_for(self, device: torch.device) -> PreTrainedModel:
         target = torch.device(device)
         if self.device != target:
-            self.model.to(target)
+            # Device transfers can replace buffers. Cache identity needs their version counters.
+            with torch.inference_mode(False):
+                self.model.to(target)
             self.device = target
 
         self.model.eval()
@@ -163,6 +165,7 @@ class Embedder(EmbedderBase):
         self._cached_model = self.backbone.get_model(request.model)
         self.hidden_size = self._cached_model.hidden_size
         self.jitter: Jitter = request.jitter
+        self.input_norm: torch.nn.Module = torch.nn.Identity()
 
         self.embeddings = torch.nn.Embedding(
             num_embeddings=len(Tokens),
@@ -186,7 +189,7 @@ class Embedder(EmbedderBase):
         state = inputs.state.reshape(D)
         valued = state.eq(Tokens.valued.value).unsqueeze(-1)
         encoded = self.encode(content=cast(TensorDict, inputs.content), state=inputs.state)
-        encoded = encoded.reshape(D, self.hidden_size)
+        encoded = self.input_norm(encoded.reshape(D, self.hidden_size))
         if self.training:
             eligible = valued & torch.isfinite(encoded)
             encoded = self.jitter.apply(encoded, eligible)

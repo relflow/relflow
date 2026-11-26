@@ -140,7 +140,7 @@ class Branch(Node, metaclass=BranchMeta):
 
     @pydantic.field_validator("fields", mode="before")
     @classmethod
-    def check_fields(cls, value: Any) -> Any:
+    def check_fields(cls, value: Any, info: pydantic.ValidationInfo) -> Any:
         """Resolve serialized leaf requests against the live extension registry."""
 
         if not isinstance(value, (list, tuple)):
@@ -160,12 +160,12 @@ class Branch(Node, metaclass=BranchMeta):
             payload = dict(field)
             field_type = payload.get("type")
             if field_type == "branch":
-                fields.append(Branch.model_validate(payload))
+                fields.append(Branch.model_validate(payload, context=info.context))
                 continue
             if not isinstance(field_type, str) or field_type not in TENSORFIELDS:
                 raise ValueError(f"unknown tensor field type: {field_type}")
 
-            fields.append(TENSORFIELDS[field_type].Request.model_validate(payload))
+            fields.append(TENSORFIELDS[field_type].Request.model_validate(payload, context=info.context))
 
         return fields
 

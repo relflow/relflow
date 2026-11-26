@@ -50,7 +50,7 @@ class Artifact:
             version = __version__
         else:
             state = CheckpointState.read(path)
-            schema = Schema.model_validate(state["schema"])
+            schema = CheckpointState.schema(state)
             profile = None if state.get("preset") is None else Preset.model_validate(state["preset"])
             batch_size, version = state["batch_size"], state["version"]
         return cls(path, schema, profile, batch_size, version, state)
