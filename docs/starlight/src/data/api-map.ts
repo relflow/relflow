@@ -47,6 +47,10 @@ export const apiCatalog: ApiSection[] = [
         "name": "rf.Mean"
       },
       {
+        "name": "rf.Index",
+        "guide": "/concepts/branches/#position-records-by-their-index"
+      },
+      {
         "name": "rf.presets",
         "guide": "/concepts/runtime/"
       },
@@ -353,6 +357,9 @@ export const apiCatalog: ApiSection[] = [
       },
       {
         "name": "rf.Leaf"
+      },
+      {
+        "name": "rf.Twig"
       },
       {
         "name": "rf.TensorFieldBase"

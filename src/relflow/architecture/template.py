@@ -17,6 +17,7 @@ from relflow.structs.experiment import TreeFieldInput
 from relflow.structs.reduction import ReductionConfig
 from relflow.structs.structure import Branch
 from relflow.structs.tree import Mask, MaskInput, Rate
+from relflow.structs.twigs import TWIGS
 from relflow.tensorfields.base import TENSORFIELDS
 
 if TYPE_CHECKING:
@@ -93,10 +94,14 @@ def fields(value: Any, *, location: str = "fields", ancestors: tuple[int, ...] =
             payload["fields"] = list(
                 fields(payload.get("fields"), location=f"{child}.fields", ancestors=ancestors).values()
             )
+        elif isinstance(kind, str) and kind in TWIGS:
+            request = TWIGS[kind]
         elif isinstance(kind, str) and kind in TENSORFIELDS:
             request = TENSORFIELDS[kind].Request
         else:
-            raise ValueError(f"{child}: unknown field type {kind!r}; use 'branch' or a registered tensorfield type")
+            raise ValueError(
+                f"{child}: unknown field type {kind!r}; use 'branch', a twig type, or a registered tensorfield type"
+            )
         payload["name"] = name
         try:
             if "mask" in payload:

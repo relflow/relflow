@@ -12,6 +12,7 @@ from relflow.structs.experiment import Schema, TreeFieldInput, build
 from relflow.structs.reduction import ReductionConfig
 from relflow.structs.structure import OMITTED, Branch
 from relflow.structs.tree import MaskInput, Rate
+from relflow.structs.twigs import Twig
 
 __all__ = ["BranchDefaults", "LeafDefaults", "FitDefaults", "Preset", "resolve"]
 
@@ -72,7 +73,9 @@ class Preset(pydantic.BaseModel):
     fit: FitDefaults | None = None
 
     def defaults(self, definition: TreeFieldInput) -> Mapping[str, Any]:
-        """Select the architecture defaults for one unbound branch or leaf."""
+        """Select the architecture defaults for one unbound branch or leaf; twigs have none."""
+        if isinstance(definition, Twig) or isinstance(definition, type) and issubclass(definition, Twig):
+            return {}
         branch = isinstance(definition, Branch) or isinstance(definition, type) and issubclass(definition, Branch)
         scope = self.branch if branch else self.leaf
         return {option: getattr(scope, option) for option in type(scope).model_fields}

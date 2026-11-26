@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping
 from typing import Any, cast
 
 import numpy as np
@@ -13,18 +12,20 @@ from tensordict import TensorDict
 
 from relflow.data.arrow import Encoded, Geometry, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
-from relflow.data.ragged import Layout, Sources, coalesce
+from relflow.data.ragged import Coalesced, Sources, coalesce
 from relflow.structs.enums import Component, Strata
 from relflow.structs.experiment import Schema
 from relflow.structs.tree import Address, Node
+from relflow.structs.twigs import indexed
 from relflow.tensorfields.base import TENSORFIELDS, Context, TensorFieldBase
 
 
-def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
-    """Move shared Arrow structural coordinates into the Torch batch plane."""
+def geometry(coalesced: Coalesced, *, rows: int) -> TensorDict:
+    """Move shared Arrow structural coordinates and index positions into the Torch batch plane."""
 
+    positions = coalesced.positions
     axes: dict[Address, Geometry] = {}
-    for address, layout in layouts.items():
+    for address, layout in coalesced.layouts.items():
         slots = np.zeros(layout.shape, dtype=bool)
         slots.reshape(-1)[layout.placement] = True
         axes[address] = Geometry(
@@ -32,6 +33,7 @@ def geometry(layouts: Mapping[Address, Layout], *, rows: int) -> TensorDict:
             present=torch.from_numpy(layout.present),
             valid=torch.from_numpy(layout.valid),
             slots=torch.from_numpy(slots),
+            positions=torch.from_numpy(positions[address]) if address in positions else None,
             batch_size=[rows],
         )
     return TensorDict(source=cast(Any, axes), batch_size=[rows])
@@ -110,7 +112,7 @@ def encode(
             bindings[address] = binding[0]
 
     inputs = TensorDict(source=cast(Any, out), batch_size=[batch.num_rows])
-    inputs[Address()] = geometry(coalesced.layouts, rows=batch.num_rows)
+    inputs[Address()] = geometry(coalesced, rows=batch.num_rows)
     return Encoded(tensors=inputs, source=batch, retain=retain, observations=observations, bindings=bindings)
 
 
@@ -137,6 +139,7 @@ def mock(schema: Schema, batch_size: int) -> EncodedInput:
             present=torch.zeros(parent, dtype=torch.bool),
             valid=torch.zeros(parent, dtype=torch.bool),
             slots=torch.zeros((*parent, 0), dtype=torch.bool),
+            positions=None if indexed(branch) is None else torch.zeros((*parent, 0), dtype=torch.float32),
             batch_size=[batch_size],
         )
 

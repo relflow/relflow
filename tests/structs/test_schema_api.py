@@ -189,7 +189,7 @@ def test_schema_rejects_string_none_attention(nested: bool) -> None:
 
 @pytest.mark.parametrize("constructor", [rf.Model, rf.Schema.from_tree])
 def test_tree_constructors_reject_children_that_are_not_definitions(constructor) -> None:
-    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch or Leaf instance or class"):
+    with pytest.raises(TypeError, match="tree field 'unexpected'.*must be a Branch, Leaf, or Twig instance or class"):
         constructor(amount=rf.Number(), d_model=16, n_layers=1, n_heads=4, unexpected=2)
 
 

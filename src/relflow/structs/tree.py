@@ -157,7 +157,7 @@ class Address(str):
 
 
 class Node(NodeMixin, pydantic.BaseModel):
-    """Base schema tree node shared by branches and tensorfield requests."""
+    """Base schema tree node shared by branches, tensorfield requests, and twigs."""
 
     model_config = pydantic.ConfigDict(extra="forbid")
 

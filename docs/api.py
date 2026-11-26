@@ -55,11 +55,25 @@ def members(package: griffe.Module, obj: griffe.Class) -> dict[str, griffe.Objec
                     queue.pop(0)
         return order
 
+    def variable(member: griffe.Object) -> bool:
+        """Griffe strips ``ClassVar`` and labels the annotated member a class attribute only."""
+        return (
+            member.is_attribute
+            and getattr(member, "annotation", None) is not None
+            and member.labels >= {"class-attribute"}
+            and "instance-attribute" not in member.labels
+        )
+
     result: dict[str, griffe.Object] = {}
     for node in reversed(linearize(obj)):
         for name, member in node.members.items():
-            if not member.is_alias:
-                result[name] = member
+            if member.is_alias:
+                continue
+            # A class variable over an inherited field removes that option from the subclass.
+            if name in result and variable(member) and not variable(result[name]):
+                del result[name]
+                continue
+            result[name] = member
     return result
 
 

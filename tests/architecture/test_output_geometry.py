@@ -34,7 +34,7 @@ def project(source: pa.Table, configured: Schema, address: str) -> Projection:
     prediction = Prediction(
         address=Address(address),
         payload=TensorDict({}, batch_size=[source.num_rows]),
-        geometry=geometry(resolved.layouts, rows=source.num_rows),
+        geometry=geometry(resolved, rows=source.num_rows),
         batch_size=[source.num_rows],
     )
     return projection(entry, prediction, source.num_rows)
@@ -148,7 +148,7 @@ def test_pooled_outputs_exist_for_empty_and_missing_own_collections():
     prediction = Prediction(
         address=Address("/events"),
         payload=TensorDict({}, batch_size=[2]),
-        geometry=geometry(resolved.layouts, rows=2),
+        geometry=geometry(resolved, rows=2),
         batch_size=[2],
     )
 
@@ -182,7 +182,7 @@ def test_nested_pooled_outputs_keep_parent_ordinals_without_null_ancestor_output
     prediction = Prediction(
         address=Address("/parents/children"),
         payload=TensorDict({}, batch_size=[1]),
-        geometry=geometry(resolved.layouts, rows=1),
+        geometry=geometry(resolved, rows=1),
         batch_size=[1],
     )
 
@@ -320,7 +320,7 @@ def test_child_geometry_cannot_exist_under_a_null_parent_item():
     parent = pa.struct([("children", pa.list_(EVENT))])
     source = pa.table({"parents": pa.array([[None, {"children": [{"value": 1.0}]}]], type=pa.list_(parent))})
     resolved = coalesce(source, configured, Strata.predict)
-    metadata = geometry(resolved.layouts, rows=1)
+    metadata = geometry(resolved, rows=1)
     cast(Geometry, metadata["/parents/children"]).present[0, 0, 0] = True
     entry = cast(
         OutputEntry,

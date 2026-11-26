@@ -14,11 +14,13 @@ import pyarrow as pa
 import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
+from relflow.data.positions import place
 from relflow.data.query import Literal, Member, MissingFieldError, Query, compile, listed, member, origin, parts, query
 from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
 from relflow.structs.enums import Overflow, Strata, Tokens
 from relflow.structs.tree import Address, Leaf
+from relflow.structs.twigs import Twig, indexed
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
@@ -339,10 +341,11 @@ class Sources:
 
 @dataclass(frozen=True, slots=True)
 class Coalesced:
-    """Policy-resolved fields and their shared, pristine branch layouts."""
+    """Policy-resolved fields, their shared pristine branch layouts, and indexed branch positions."""
 
     fields: dict[Address, Sources]
     layouts: dict[Address, Layout]
+    positions: dict[Address, np.ndarray]
 
 
 def head(expression: Query) -> str:
@@ -370,11 +373,11 @@ def referenced(branch: Branch) -> set[str]:
             branch_child = cast("Branch", child)
             names.add(head(compile(branch_child.query)) if branch_child.query is not None else cast(str, child.name))
         else:
-            for expression in cast(Leaf, child).queries():
+            for expression in cast(Leaf | Twig, child).queries():
                 depth, path = origin(expression, address=str(child.address))
                 if not depth:
                     names.add(head(path))
-        for mask in child.mask:
+        for mask in () if isinstance(child, Twig) else child.mask:
             if mask.query is not None and getattr(child, "type", None) != "branch":
                 names.add(head(compile(mask.query)))
     for child in branch.descendants:
@@ -907,6 +910,7 @@ def coalesce(
 
     fields: dict[Address, Sources] = {}
     layouts: dict[Address, Layout] = {}
+    positions: dict[Address, np.ndarray] = {}
 
     def visit(
         branch: Branch,
@@ -915,6 +919,9 @@ def coalesce(
         ancestors: tuple[Layout, ...],
     ) -> None:
         layouts[branch.address] = layout
+        index = indexed(branch)
+        if index is not None:
+            positions[branch.address] = place(layout, index)
         for child in branch.fields:
             if getattr(child, "type", None) == "branch":
                 child = cast("Branch", child)
@@ -949,7 +956,7 @@ def coalesce(
     decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
     visit(schema.fields, layout, decisions, ())
 
-    return Coalesced(fields=fields, layouts=layouts)
+    return Coalesced(fields=fields, layouts=layouts, positions=positions)
 
 
 __all__ = ["Coalesced", "Projection", "RaggedField"]

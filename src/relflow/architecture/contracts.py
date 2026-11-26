@@ -13,6 +13,7 @@ from tensordict import TensorDict
 from relflow.data.arrow import Geometry
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.tree import Address
+from relflow.structs.twigs import indexed
 from relflow.tensorfields.base import TENSORFIELDS, TensorFieldBase
 
 if TYPE_CHECKING:
@@ -247,6 +248,8 @@ def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple
     if metadata is None:
         if any(size is None for address in paths for size in module.schema.shapes[address]):
             raise ForwardContractError("forward inputs with automatic branch lengths require branch geometry at '/'")
+        if module.schema.twigs:
+            raise ForwardContractError("forward inputs for a model with an Index require branch geometry at '/'")
         first = next(iter(paths), None)
         state = (
             None
@@ -301,6 +304,22 @@ def require_geometry(module: "Model", inputs: TensorDict) -> dict[Address, tuple
                 f"forward branch geometry '{address}' slots must start with parent shape {parent_shape}, "
                 f"got {tuple(geometry.slots.shape)}"
             )
+        index = indexed(branch)
+        positions = geometry.positions
+        if index is None and positions is not None:
+            raise ForwardContractError(f"forward branch geometry '{address}' carries positions but declares no Index")
+        if index is not None:
+            if not isinstance(positions, torch.Tensor):
+                raise ForwardContractError(
+                    f"forward branch geometry '{address}' needs positions for Index '{index.address}'; "
+                    "encode batches with model.encode or an rf data module"
+                )
+            if positions.dtype != torch.float32 or positions.shape != geometry.slots.shape:
+                raise ForwardContractError(
+                    f"forward branch geometry '{address}' positions must be float32 with shape "
+                    f"{tuple(geometry.slots.shape)}, got {positions.dtype} with shape {tuple(positions.shape)}"
+                )
+            devices.add(positions.device)
         extent = geometry.slots.shape[-1]
         if (address == Address() and extent != 1) or (branch.length is not None and extent > branch.length):
             raise ForwardContractError(
@@ -336,6 +355,8 @@ def require_geometry_values(module: "Model", inputs: TensorDict) -> None:
         positions = torch.arange(geometry.slots.shape[-1], device=geometry.slots.device)
         if (geometry.slots & (positions >= geometry.lengths.unsqueeze(-1))).any():
             raise ForwardContractError(f"forward branch geometry '{address}' slots must lie within collection lengths")
+        if geometry.positions is not None and not torch.isfinite(geometry.positions).all():
+            raise ForwardContractError(f"forward branch geometry '{address}' index positions must be finite")
         if address == Address():
             if not geometry.present.all() or not geometry.valid.all() or (geometry.lengths != 1).any():
                 raise ForwardContractError("forward root geometry must preserve one collection slot per batch row")
