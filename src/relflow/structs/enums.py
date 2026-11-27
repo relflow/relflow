@@ -64,6 +64,7 @@ class Metric(enum.StrEnum):
     specificity = "specificity"
     loss = "loss"
     sigma = "sigma"
+    sigreg = "sigreg"
     throughput = "throughput"
     mae = "mae"
     rmse = "rmse"

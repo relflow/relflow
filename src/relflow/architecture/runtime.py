@@ -218,8 +218,12 @@ def forward(
     strata: Strata | str,
     dataloader_idx: int = 0,
     participating: set[Address] | None = None,
+    routed: dict[Address, Parcel] | None = None,
 ) -> list[Prediction]:
-    """Validate encoded fields and decode the routes active in this loop phase."""
+    """Validate encoded fields and decode the routes active in this loop phase.
+
+    ``routed`` receives every leaf embedding and branch summary by origin.
+    """
     strata = Strata.normalize(strata)
     sanitize(module, inputs, strata=strata, dataloader_idx=dataloader_idx)
     participating = participation(module, inputs, strata)[1] if participating is None else participating
@@ -228,7 +232,7 @@ def forward(
     decoders = tuple(
         route for route in plan.decoders if route.embed or (route.decode if predict else route.address in participating)
     )
-    return compute(module, inputs, plan=plan, decoders=decoders, predict=predict)
+    return compute(module, inputs, plan=plan, decoders=decoders, predict=predict, routed=routed)
 
 
 def compute(
@@ -238,11 +242,12 @@ def compute(
     plan: ExecutionPlan,
     decoders: tuple[DecoderRoute, ...],
     predict: bool,
+    routed: dict[Address, Parcel] | None = None,
 ) -> list[Prediction]:
     """Execute the model graph after host validation and objective selection."""
 
     processed: dict[Address, list[Parcel]] = defaultdict(list)
-    outgoing: dict[Address, Parcel] = {}
+    outgoing: dict[Address, Parcel] = {} if routed is None else routed
     predictions: list[Prediction] = []
     geometry = cast(TensorDict, inputs[Address()]) if Address() in inputs.keys() else None
 
@@ -336,8 +341,12 @@ def objective(
     local: set[Address],
     participating: set[Address],
     batch_idx: int,
+    regularization: torch.Tensor | None = None,
 ) -> torch.Tensor:
-    """Evaluate local reconstruction losses and retain every participating decoder's backward edges."""
+    """Evaluate local reconstruction losses and retain every participating decoder's backward edges.
+
+    ``regularization`` is the global SIGReg statistic, identical on every rank.
+    """
 
     losses: dict[Address, torch.Tensor] = {}
     anchors: list[torch.Tensor] = []
@@ -384,6 +393,12 @@ def objective(
         ).warning(f"reconstruction targets are present only on peer ranks, returning {suffix}")
 
     total = torch.stack(tuple(losses.values())).sum() + anchor if losses else anchor
+    penalty = None
+    if regularization is not None:
+        assert module.sigreg is not None
+        module.track((Metric.sigreg, strata), value=regularization, rows=rows(module, inputs), uniform=True)
+        penalty = regularization * module.sigreg.weight
+        total = total + penalty
     loss = module.track((Metric.loss, strata), value=total, rows=weight, uniform=True)
     if strata == Strata.train:
         module.track(
@@ -404,6 +419,8 @@ def objective(
             ordered = [
                 losses.get(address, zero) for address in execution(module).objectives if address in participating
             ]
+            if penalty is not None:
+                ordered.append(penalty)
             return combine(module, ordered, anchor)
     return loss
 
@@ -476,12 +493,14 @@ def step(
         raise TypeError("prediction batches must retain their Arrow source")
     compiled = output.plan(module, batch.retain) if isinstance(batch, Encoded) and strata == Strata.predict else None
     local, participating = participation(module, inputs, strata)
+    routed: dict[Address, Parcel] | None = None if strata == Strata.predict or module.sigreg is None else {}
     predictions = forward(
         module,
         inputs,
         strata=strata,
         dataloader_idx=dataloader_idx,
         participating=participating,
+        routed=routed,
     )
 
     if strata == Strata.predict:
@@ -505,6 +524,12 @@ def step(
             return None
         return Output(loss=torch.tensor(0.0, device=inputs.device))
 
+    regularization = None
+    if routed is not None:
+        from relflow.architecture.sigreg import regularize
+
+        regularization = regularize(module, routed, execution(module), batch_idx=batch_idx)
+
     return Output(
         loss=objective(
             module,
@@ -514,6 +539,7 @@ def step(
             local=local,
             participating=participating,
             batch_idx=batch_idx,
+            regularization=regularization,
         )
     )
 

@@ -27,9 +27,9 @@ def test_forward_and_training_step_share_compute_after_host_preparation(monkeypa
     calls = []
     original = runtime.compute
 
-    def compute(module, inputs, *, plan, decoders, predict):
+    def compute(module, inputs, *, plan, decoders, predict, routed=None):
         calls.append((module, inputs, decoders, predict, rf.Number.normalization(module, "/value")))
-        return original(module, inputs, plan=plan, decoders=decoders, predict=predict)
+        return original(module, inputs, plan=plan, decoders=decoders, predict=predict, routed=routed)
 
     monkeypatch.setattr(runtime, "compute", compute)
     monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)

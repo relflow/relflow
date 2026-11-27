@@ -42,6 +42,7 @@ from relflow.architecture.runtime import (
     step,
     transfer,
 )
+from relflow.architecture.sigreg import SIGReg
 from relflow.data.arrow import Encoded, Retain
 from relflow.data.datasets.base import EncodedInput, InterprocessEncodingContext
 from relflow.data.processors import PostprocessorInput, PreprocessorInput, arrow, polars
@@ -158,6 +159,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        sigreg: SIGReg | None = None,
         **field_kwargs: TreeFieldInput,
     ) -> None: ...
 
@@ -183,6 +185,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        sigreg: SIGReg | None = None,
         **field_kwargs: TreeFieldInput,
     ) -> None: ...
 
@@ -196,6 +199,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
+        sigreg: SIGReg | None = None,
     ) -> None: ...
 
     @beartype
@@ -221,6 +225,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         optimizer: OptimizerConfig | None = None,
         scheduler: Any = None,  # Lightning validates custom schedulers at fit time.
         jacobian: bool = False,
+        sigreg: SIGReg | None = None,
         **field_kwargs: Any,
     ) -> None:
         """Build a model from tree fields, or from an existing ``schema``.
@@ -254,6 +259,12 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         objectives during training and requires ``relflow[torchjd]``.
         Lightning retains automatic backward and optimization. This training
         policy is not saved in model checkpoints; select it before compiling.
+
+        ``sigreg=rf.SIGReg(...)`` adds LeJEPA's sketched isotropic Gaussian
+        regularizer over every leaf embedding and branch summary during
+        training and evaluation. With ``jacobian=True`` it is one more
+        UPGrad objective. Like ``jacobian``, it is a session policy that is
+        not saved in schemas or checkpoints; assign ``model.sigreg`` to change it.
 
         A positional ``Schema`` or ``schema=...`` restores an existing
         architecture and cannot be combined with tree fields or dimensions.
@@ -324,6 +335,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         object.__setattr__(self, "optimizer", optimizer)
         object.__setattr__(self, "scheduler", scheduler)
         self.jacobian: bool = jacobian
+        self.sigreg: SIGReg | None = sigreg
         self.locks: Counter[str | Strata] = Counter()
         self.nodes: torch.nn.ModuleDict = torch.nn.ModuleDict()
         self._schema_editor: SchemaEditor = SchemaEditor(self)

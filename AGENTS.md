@@ -271,6 +271,12 @@ fitting. Enable it before `model.compile(...)`; after loading,
 opt in explicitly before fitting again. Single-device and unsharded DDP training
 are supported; validation and prediction keep ordinary loss/output behavior.
 
+`Model(..., sigreg=rf.SIGReg(...))` or `model.sigreg = ...` adds LeJEPA SIGReg
+over every embedded leaf and branch summary in training and evaluation steps.
+It reads routed parcels after `runtime.compute`, never inside encoders, and
+joins UPGrad as one more objective. Like `jacobian`, it is an uncheckpointed
+session policy.
+
 Set `batch_size` on `fit`, `validate`, `test`, or `predict` to update the model's
 current positive integer batch size. Arrow data modules read it when creating
 loaders; custom Lightning data modules own their loader behavior. The size is per

@@ -22,6 +22,7 @@ from relflow.architecture.root import (
     SchedulerConfig,
     SchedulerOptions,
 )
+from relflow.architecture.sigreg import SIGReg
 from relflow.data.datasets import (
     ArrowDataModule,
     ArrowInput,
@@ -205,6 +206,7 @@ __all__ = [
     "RollbackCheckpoint",
     "RuntimePlacementCallback",
     "Set",
+    "SIGReg",
     "SchedulerConfig",
     "Scheduler",
     "SchedulerOptions",
