@@ -2,7 +2,7 @@ cff-version: 1.2.0
 message: Please cite this software using the metadata in this file.
 type: software
 title: relflow
-version: 0.5.5
+version: 0.6.0
 license: Apache-2.0
 authors:
   - family-names: Taylor
