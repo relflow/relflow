@@ -19,7 +19,7 @@
 #     direction: Lower error indicates more accurate recovery of the hidden readings.
 #   note: The six sensors have a common scalar signal and no measurement noise.
 # evidence-plot:
-#   mode: summary
+#   renderer: plot
 #   focus: Does each hidden reading follow the visible sensors from the same observation?
 #   comparison: Reassign the visible context across test records and score the original hidden answers.
 #   limit: This experiment measures reconstruction on correlated numeric fields.
@@ -69,7 +69,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "training"
@@ -217,6 +217,36 @@ def run(seed, steps, accelerator):
         "Reassigning the visible sensors harms each readout": reassigned > 0.8,
         "Overwriting requested answers preserves their predictions": all(t["hidden_drift"] < 1e-6 for t in trials),
     }
+
+
+def plot(bundle, spec):
+    """Show every hidden reading's error with its own visible sensors and with reassigned sensors."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    trials = bundle.record["metrics"]["trials"]
+    labels = ["North", "South", "East", "West", "Upper", "Lower"]
+    fig, (aligned, reassigned) = axes_pair()
+    dots(
+        aligned,
+        labels,
+        {f"Seed {t['seed']}": t["aligned"] for t in trials},
+        xlabel="Normalized RMSE on requested readings",
+        reference=(0.5, "Recovery criterion"),
+    )
+    aligned.set_title("Sensors from the same observation")
+    dots(
+        reassigned,
+        labels,
+        {f"Seed {t['seed']}": t["reassigned"] for t in trials},
+        xlabel="Normalized RMSE on requested readings",
+        reference=(0.8, "Control criterion"),
+    )
+    reassigned.set_title("Sensors reassigned across records")
+    return (
+        fig,
+        "Each reading is scored only where it was requested. Reassigning the visible sensors keeps the hidden answers fixed.",
+        {},
+    )
 
 
 if __name__ == "__main__":

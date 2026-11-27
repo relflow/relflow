@@ -19,7 +19,7 @@
 #     direction: Lower error indicates more accurate calibration.
 #   note: Replicates share a deterministic answer for a given reference reading.
 # evidence-plot:
-#   mode: summary
+#   renderer: plot
 #   focus: Does the intermittent target remain predictable from its reference reading?
 #   comparison: Compare its held-out error with the reference intact and reassigned.
 #   limit: The synthetic calibration functions are linear.
@@ -58,7 +58,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "reliability"
@@ -192,6 +192,40 @@ def run(seed, steps, accelerator):
             for t in trials
         ),
     }
+
+
+def plot(bundle, spec):
+    """Show both child targets with intact references and the intermittent target with reassigned ones."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    trials = bundle.record["metrics"]["trials"]
+    labels = [f"Seed {t['seed']}" for t in trials]
+    fig, (intact, reassigned) = axes_pair()
+    dots(
+        intact,
+        labels,
+        {
+            "Complete target": [t["complete"] for t in trials],
+            "Intermittent target": [t["intermittent"] for t in trials],
+        },
+        xlabel="Normalized RMSE on held-out rows",
+        reference=(0.30, "Learning criterion"),
+    )
+    intact.set_title("References intact")
+    dots(
+        reassigned,
+        labels,
+        {"Intermittent target": [t["control"] for t in trials]},
+        xlabel="Normalized RMSE on held-out rows",
+        reference=(0.80, "Control criterion"),
+    )
+    reassigned.set_title("References reassigned")
+    return (
+        fig,
+        "Each seed scores the same held-out rows. Reassigning the references rolls them across records, so a learned "
+        "calibration should fail there.",
+        {},
+    )
 
 
 if __name__ == "__main__":

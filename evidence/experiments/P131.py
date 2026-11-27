@@ -19,7 +19,7 @@
 #     direction: Lower error indicates better recovery of the held-out answer.
 #   note: This measures two disjoint numeric targets with independent linear signals.
 # evidence-plot:
-#   mode: summary
+#   renderer: plot
 #   focus: Do both learned outputs depend on their own reference signal?
 #   comparison: Reassign the source of one answer at a time in the same held-out observations.
 #   limit: Each calibration has one informative scalar input.
@@ -183,6 +183,42 @@ def run(seed, steps, accelerator):
         "Supplying different hidden answers preserves both predictions": all(t["drift"] < 1e-6 for t in trials),
         "Only flagged readings request reconstruction": all(t["routing"] for t in trials),
     }
+
+
+def plot(bundle, spec):
+    """Show each task's held-out error with its own reference and with that reference reassigned."""
+    from evidence.diagnostics.plots import axes_pair, dots
+
+    trials = bundle.record["metrics"]["trials"]
+    labels = [f"Seed {t['seed']}" for t in trials]
+    fig, (aligned, reassigned) = axes_pair()
+    dots(
+        aligned,
+        labels,
+        {
+            "Supervised result": [t["supervised"] for t in trials],
+            "Reconstructed meter": [t["reconstructed"] for t in trials],
+        },
+        xlabel="Normalized RMSE on held-out observations",
+        reference=(0.30, "Learning criterion"),
+    )
+    aligned.set_title("Correct references")
+    dots(
+        reassigned,
+        labels,
+        {
+            "Supervised result": [t["controls"][0] for t in trials],
+            "Reconstructed meter": [t["controls"][1] for t in trials],
+        },
+        xlabel="Normalized RMSE on held-out observations",
+        reference=(0.80, "Control criterion"),
+    )
+    reassigned.set_title("One reference reassigned")
+    return (
+        fig,
+        "Each control reassigns only the reference of the task being scored, in the same held-out observations.",
+        {},
+    )
 
 
 if __name__ == "__main__":
