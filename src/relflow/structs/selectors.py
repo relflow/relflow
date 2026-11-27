@@ -28,7 +28,7 @@ class NodePredicate(pydantic.BaseModel):
             return value
 
         if isinstance(value, NodeAttribute):
-            return cls(func=lambda node: has_model_attribute(node, value.name) and value.get(node) is True)
+            return cls(func=value.flag)
 
         if not callable(value):
             raise TypeError("node predicates must be where(...) expressions or callables")
@@ -105,6 +105,18 @@ class NodeAttribute(pydantic.BaseModel):
 
         return getattr(node, self.name, default)
 
+    def flag(self, node: Node) -> bool:
+        """Read the boolean attribute that bare ``where(...)`` and ``~where(...)`` select on."""
+        if not has_model_attribute(node, self.name):
+            return False
+        value = self.get(node)
+        if value is None or isinstance(value, bool):
+            return bool(value)
+        raise TypeError(
+            f"where({self.name!r}) selects boolean attributes, but node '{node.address}' has "
+            f"{type(value).__name__} {value!r}; compare it with ==, is_in(...), contains(...), or is_not_null()"
+        )
+
     def exists(self) -> NodePredicate:
         return NodePredicate(func=lambda node: has_model_attribute(node, self.name))
 
@@ -115,7 +127,7 @@ class NodeAttribute(pydantic.BaseModel):
         return NodePredicate.from_selector(self) | other
 
     def __invert__(self) -> NodePredicate:
-        return NodePredicate(func=lambda node: not bool(self.get(node, False)))
+        return NodePredicate(func=lambda node: not self.flag(node))
 
     def __bool__(self) -> bool:
         raise TypeError("Use ~where(...) for negated predicates; Python 'not where(...)' cannot build a predicate")

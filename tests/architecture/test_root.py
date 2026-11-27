@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pickle
 from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,7 +11,7 @@ import pytest
 import torch
 
 import relflow as rf
-from relflow.architecture import runtime
+from relflow.architecture import runtime, training
 from relflow.architecture.binding import bind
 from relflow.architecture.root import Model, MutationLockCallback, RollbackCheckpoint, RuntimePlacementCallback
 from relflow.data.iterables import encode
@@ -171,6 +172,49 @@ def test_rollback_checkpoint_restores_best_model_from_disk(tmp_path: Path) -> No
             assert restored == value
 
 
+def test_rollback_checkpoint_keeps_final_weights_without_a_monitored_checkpoint(tmp_path: Path) -> None:
+    model = Model(schema=configuration(), batch_size=2)
+    before = {key: value.clone() for key, value in model.state_dict().items() if isinstance(value, torch.Tensor)}
+
+    RollbackCheckpoint(dirpath=tmp_path).on_fit_end(trainer=SimpleNamespace(strategy=None), pl_module=model)
+
+    assert all(torch.equal(model.state_dict()[key], value) for key, value in before.items())
+
+
+def test_resumed_rollback_keeps_the_previous_best_score_in_a_new_directory(tmp_path: Path) -> None:
+    best = tmp_path / "first" / "best.ckpt"
+    best.parent.mkdir()
+    best.write_bytes(b"checkpoint")
+    previous = RollbackCheckpoint(dirpath=tmp_path / "first", monitor="loss/validate")
+    previous.best_model_path = str(best)
+    previous.best_model_score = torch.tensor(0.5)
+    previous.best_k_models = {str(best): torch.tensor(0.5)}
+
+    resumed = RollbackCheckpoint(dirpath=tmp_path / "second", monitor="loss/validate")
+    resumed.load_state_dict(previous.state_dict())
+
+    assert resumed.dirpath == str(tmp_path / "second")
+    assert resumed.best_model_path == str(best)
+    assert resumed.best_model_score == torch.tensor(0.5)
+
+
+def test_automatic_early_stopping_checks_after_validation() -> None:
+    [stop] = training.policies(
+        None,
+        early_stopping=True,
+        rollback=False,
+        monitor="loss/validate",
+        mode="min",
+        patience=3,
+        min_delta=0.0,
+        checkpoint_dir=None,
+        options={},
+    )
+
+    # A step budget can end an epoch before validation runs.
+    assert isinstance(stop, rf.EarlyStopping) and stop._check_on_train_epoch_end is False
+
+
 def test_rollback_checkpoint_requires_full_saved_checkpoint() -> None:
     with pytest.raises(ValueError, match="full checkpoints"):
         RollbackCheckpoint(save_weights_only=True)
@@ -309,7 +353,8 @@ def test_vocabulary_reservations_refresh_after_checkpoint_restore():
 
 
 @pytest.mark.integration
-def test_vocabulary_callback_freezes_model_vocabularies_on_fit_end():
+@pytest.mark.parametrize("stage", ["fit", "validate", "test", "predict", "exception"])
+def test_vocabulary_callback_freezes_model_vocabularies_after_every_loop(stage):
     model = Model(schema=configuration(), batch_size=2)
     address = Address("/", "label")
     vocab = model.nodes[address].embedder.vocab
@@ -318,10 +363,16 @@ def test_vocabulary_callback_freezes_model_vocabularies_on_fit_end():
 
     assert vocab.is_shared is True
 
-    VocabularySyncCallback().on_fit_end(trainer=None, pl_module=model)
+    # Any loader with workers shares the vocabulary, so every loop must return it.
+    callback = VocabularySyncCallback()
+    if stage == "exception":
+        callback.on_exception(trainer=None, pl_module=model, exception=RuntimeError("stopped"))
+    else:
+        callback.teardown(trainer=None, pl_module=model, stage=stage)
 
     assert vocab.is_shared is False
     assert isinstance(vocab.state.master, list)
+    pickle.dumps(model)
 
 
 def test_runtime_placement_callback_moves_module_to_root_device() -> None:

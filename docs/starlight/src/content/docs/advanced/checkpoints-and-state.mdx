@@ -149,7 +149,10 @@ the current final model in memory; it does not automatically replace it with
 The convenience fit policy can also create a `RollbackCheckpoint`. Its job is
 to restore selected model state at fit end, which is different from resuming
 the complete Trainer at that step. A training-only dataset needs an appropriate
-training monitor or disabled validation-dependent stopping and rollback.
+training monitor or disabled validation-dependent stopping and rollback. A fit
+resumed through `ckpt_path` keeps competing with the earlier best checkpoint
+while that file still exists. A step or time budget that ends before the first
+monitored validation keeps the final weights and logs a warning.
 
 ## Resume through the full checkpoint
 

@@ -230,8 +230,6 @@ def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch
     Infinite values stay valued; the embedder clamps them and the loss skips them.
     """
     values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
-    if pa.types.is_list(values.type) or pa.types.is_large_list(values.type) or pa.types.is_fixed_size_list(values.type):
-        raise ValueError(f"number field at '{address}' expects scalar Arrow values, got {values.type}")
     try:
         encoded = pc.cast(values, pa.float64(), safe=True)
     except pa.ArrowInvalid as error:
@@ -341,13 +339,23 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         return torch.sqrt(self.var).clamp_min(self.epsilon * (self.mean.abs() + 1.0))
 
     def _apply(self, fn, recurse=True):
-        # MPS cannot hold float64: keep the statistics in float32 there.
+        # Casts such as model.to(torch.bfloat16) move the statistics with the
+        # module but never narrow them: they follow ``count`` to its device in
+        # that device's widest float. MPS cannot convert to float64 itself, so a
+        # tensor leaving it moves before widening and one arriving narrows first.
+        statistics = {name: cast(torch.Tensor, self._buffers[name]) for name in ("mean", "var")}
+        self._buffers.update(dict.fromkeys(statistics))
         try:
-            fn(self.mean)
-        except TypeError:
-            self.mean = self.mean.to(dtype=torch.float32)
-            self.var = self.var.to(dtype=torch.float32)
-        return super()._apply(fn, recurse)
+            super()._apply(fn, recurse)
+        finally:
+            device = self.count.device
+            for name, value in statistics.items():
+                dtype = wide(device)
+                if value.device.type == "mps":
+                    self._buffers[name] = value.to(device=device).to(dtype=dtype)
+                else:
+                    self._buffers[name] = value.to(dtype=dtype).to(device=device)
+        return self
 
     @torch.no_grad()
     def update(self, values: torch.Tensor):
@@ -424,7 +432,8 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         if self.training and update:
             self.update(inputs[finite_mask])
 
-        normalized = (torch.atleast_1d(inputs) - self.mean) / self.scale
+        # Standardize in the statistics' float and return the caller's dtype.
+        normalized = ((torch.atleast_1d(inputs).to(self.mean.dtype) - self.mean) / self.scale).to(inputs.dtype)
         return torch.where(finite_mask, normalized.reshape_as(inputs), inputs)
 
 

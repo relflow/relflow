@@ -130,6 +130,10 @@ class Synchronize(Callback):
             if isinstance(resource, Distribution):
                 resource.state.freeze()
 
+    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        # Lightning skips callback teardown when a loop raises.
+        self.teardown(trainer, pl_module, stage="exception")
+
 
 quantile: Extension = Extension(
     name="quantile",

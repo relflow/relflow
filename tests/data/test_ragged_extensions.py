@@ -54,7 +54,7 @@ def test_extension_accepts_registered_arrow_terminal_families(family, datatype):
     ],
 )
 def test_extension_rejects_unregistered_arrow_terminal_families(family, datatype):
-    extension = Extension(extension_name(), types=family)
+    extension = Extension(extension_name(), types=family, lists=True)
     try:
         assert not extension.accepts(datatype)
         with pytest.raises(TypeError, match="does not accept Arrow type.*normalize it in a preprocessor"):
@@ -64,7 +64,7 @@ def test_extension_rejects_unregistered_arrow_terminal_families(family, datatype
 
 
 def test_extension_prepare_validates_and_preserves_one_whole_arrow_array():
-    extension = Extension(extension_name(), types=(int | float,))
+    extension = Extension(extension_name(), types=(int | float,), lists=True)
     values = pa.array([[1, 2], [3]], type=pa.large_list(pa.int64()))
     try:
         prepared = extension.prepare(values, address=Address("/value"))

@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 sets: Extension = Extension(
     name="set",
     types=(bool, int, float, str, bytes),
+    lists=True,
     callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
 )
 

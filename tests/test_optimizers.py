@@ -6,6 +6,7 @@ from io import BytesIO
 import pytest
 import torch
 
+import relflow as rf
 from relflow import adamw
 
 
@@ -67,6 +68,45 @@ def test_adamw_can_decay_bias_and_1d_parameters() -> None:
     assert len(optimizer.param_groups) == 1
     assert optimizer.param_groups[0]["weight_decay"] == 0.2
     assert identities(optimizer.param_groups[0]["params"]) == {id(parameter) for parameter in parameters.values()}
+
+
+def test_adamw_decay_bias_alone_decays_biases() -> None:
+    module = network()
+    parameters = dict(module.named_parameters())
+
+    decay_group, no_decay_group = adamw(learning_rate=1e-3, decay_bias=True)(module).param_groups
+
+    assert identities(decay_group["params"]) == {id(parameters["linear.weight"]), id(parameters["linear.bias"])}
+    assert identities(no_decay_group["params"]) == {id(parameters["norm.weight"]), id(parameters["norm.bias"])}
+
+
+def test_adamw_decays_only_the_projection_matrices_of_a_model() -> None:
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        normal=rf.Number,
+        merchant=rf.Category,
+        items=rf.Branch(length=2, sku=rf.Category),
+        label=rf.Category(mask=True),
+    )
+
+    decay_group, no_decay_group = adamw(learning_rate=1e-3, decay_bias=True, decay_1d=True, no_decay_name_fragments=())(
+        model
+    ).param_groups
+
+    names = {id(parameter): name for name, parameter in model.named_parameters()}
+    decayed = {names[id(parameter)] for parameter in decay_group["params"]}
+    kept = {names[id(parameter)] for parameter in no_decay_group["params"]}
+    matrices = {f"{path}.weight" for path, module in model.named_modules() if isinstance(module, torch.nn.Linear)}
+    assert matrices <= decayed
+    assert "nodes./normal.embedder.linear.weight" in decayed
+    assert {name.rsplit(".", 1)[1] for name in kept} >= {"head_scale", "queries", "mass_direction"}
+    assert {
+        "nodes./merchant.embedder.embeddings.content.weight",
+        "nodes./items/sku.embedder.embeddings.state.weight",
+    } <= kept
+    assert all(parameter.ndim > 1 for parameter in no_decay_group["params"])
 
 
 def test_adamw_skips_frozen_parameters() -> None:

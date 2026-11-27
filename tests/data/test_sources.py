@@ -236,6 +236,15 @@ def test_sidecars_are_ignored_but_unknown_files_are_not(tmp_path):
         list(rf.source(tmp_path)())
 
 
+def test_named_files_are_read_even_when_their_basename_looks_hidden(tmp_path):
+    pq.write_table(pa.table({"id": [1]}), tmp_path / "_train.parquet")
+    pq.write_table(pa.table({"id": [2]}), tmp_path / "b.parquet")
+    named = [tmp_path / "_train.parquet", tmp_path / "b.parquet"]
+    assert pa.Table.from_batches(list(rf.source(named)())).to_pydict() == {"id": [1, 2]}
+    assert list(rf.source(tmp_path / "_train.parquet")())[0]["id"].to_pylist() == [1]
+    assert list(rf.source(tmp_path)())[0]["id"].to_pylist() == [2]
+
+
 def test_mixed_formats_require_explicit_selection(tmp_path):
     table = pa.table({"id": [1]})
     pq.write_table(table, tmp_path / "train.parquet")
@@ -303,6 +312,23 @@ def test_hive_partition_columns_survive_scanning(tmp_path):
         pq.write_table(pa.table({"id": [year - 2023]}), folder / "train.parquet")
     source = rf.source(tmp_path, partitioning="hive")
     assert pa.Table.from_batches(list(source())).to_pydict() == {"id": [1, 2], "year": [2024, 2025]}
+
+
+@pytest.mark.parametrize("selection", ["directory", "glob", "files", "file"])
+def test_hive_keys_survive_a_selection_inside_one_partition(tmp_path, selection):
+    for year in (2024, 2025):
+        folder = tmp_path / f"year={year}"
+        folder.mkdir()
+        pq.write_table(pa.table({"id": [year - 2023]}), folder / "train.parquet")
+    inside = tmp_path / "year=2025"
+    location = {
+        "directory": inside,
+        "glob": str(inside / "*.parquet"),
+        "files": [inside / "train.parquet"],
+        "file": inside / "train.parquet",
+    }[selection]
+    source = rf.source(location, partitioning="hive")
+    assert pa.Table.from_batches(list(source())).to_pydict() == {"id": [2], "year": [2025]}
 
 
 def test_empty_file_keeps_declared_schema(tmp_path):

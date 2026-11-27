@@ -1,8 +1,10 @@
 """Schema and checkpoint contracts for Period."""
 
 import inspect
+import math
 from datetime import datetime
 
+import numpy as np
 import pyarrow as pa
 import pydantic
 import pytest
@@ -111,3 +113,15 @@ def test_period_checkpoint_preserves_parameters_and_predictions(tmp_path):
     assert any(".dateparts.day_of_week." in name for name in model.state_dict())
     for name, tensor in model.state_dict().items():
         torch.testing.assert_close(restored.state_dict()[name], tensor, rtol=0, atol=0)
+
+
+def test_week_of_year_counts_sunday_start_weeks_without_aliasing():
+    days = np.array(
+        ["2024-01-03", "2024-01-04", "2024-01-06", "2024-01-07", "2000-01-01", "2000-01-02", "2000-12-31"],
+        dtype="datetime64[D]",
+    )
+
+    sin, cos = DatePart.week_of_year(days)
+
+    weeks = [round(math.atan2(s, c) / (2 * math.pi) * 54) % 54 or 54 for s, c in zip(sin, cos, strict=True)]
+    assert weeks == [1, 1, 1, 2, 1, 2, 54]

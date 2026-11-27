@@ -400,6 +400,16 @@ def test_inline_adamw_retains_the_default_recipe(model, data, options):
     assert model.scheduler is None
 
 
+@pytest.mark.parametrize("precision", ["bf16-true", "16-true", "64-true"])
+def test_true_low_or_double_precision_fails_before_recasting_the_model(model, data, options, precision):
+    statistics = {name: buffer.dtype for name, buffer in model.named_buffers()}
+
+    with pytest.raises(ValueError, match=rf"precision='{precision}' recasts every parameter.*'bf16-mixed'"):
+        model.fit(data, **{**options, "precision": precision}, max_epochs=1, early_stopping=False, rollback=False)
+
+    assert {name: buffer.dtype for name, buffer in model.named_buffers()} == statistics
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("fused", [None, False])
 @pytest.mark.parametrize("fragments", [("attention",), ()])
@@ -428,11 +438,15 @@ def test_inline_adamw_options_control_the_live_optimizer(model, data, options, f
     assert optimizer.defaults["eps"] == 1e-6
     assert optimizer.defaults["fused"] is fused
     names = {id(parameter): name for name, parameter in model.named_parameters() if parameter.requires_grad}
+    modules = dict(model.named_modules())
     optimized = {id(parameter) for group in optimizer.param_groups for parameter in group["params"]}
     assert optimized == names.keys()
     for group in optimizer.param_groups:
         for parameter in group["params"]:
-            expected = 0.0 if any(fragment in names[id(parameter)].lower() for fragment in fragments) else 0.17
+            name = names[id(parameter)]
+            owner = modules[name.rpartition(".")[0]]
+            decayed = parameter.ndim <= 1 or isinstance(owner, torch.nn.Linear)
+            expected = 0.17 if decayed and not any(fragment in name.lower() for fragment in fragments) else 0.0
             assert group["weight_decay"] == expected
     assert optimizer.state
     assert all(state["step"] == 1 for state in optimizer.state.values())

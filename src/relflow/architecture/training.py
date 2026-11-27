@@ -197,7 +197,16 @@ def policies(
                 configured.append(policy)
         elif policy and not existing and not options.get("fast_dev_run"):
             if kind is EarlyStopping:
-                configured.append(EarlyStopping(monitor=monitor, mode=mode, patience=patience, min_delta=min_delta))
+                # Check after validation, not at a train-epoch end that a step budget can reach first.
+                configured.append(
+                    EarlyStopping(
+                        monitor=monitor,
+                        mode=mode,
+                        patience=patience,
+                        min_delta=min_delta,
+                        check_on_train_epoch_end=False,
+                    )
+                )
             else:
                 path = (
                     checkpoint_dir or Path(options.get("default_root_dir") or Path.cwd()) / "checkpoints" / uuid4().hex

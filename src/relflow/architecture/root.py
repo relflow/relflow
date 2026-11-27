@@ -575,6 +575,16 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
 
         return callbacks
 
+    def setup(self, stage: str) -> None:
+        # Runs before the strategy converts the module, so nothing is recast yet.
+        precision = self.trainer.precision
+        if precision.endswith("-true") and precision != "32-true":
+            raise ValueError(
+                f"precision={precision!r} recasts every parameter, buffer, and input to one dtype, but relflow "
+                "fields keep their own dtypes, such as Number's float64 statistics; use precision='bf16-mixed' "
+                "or '16-mixed' for reduced precision, or '32-true'"
+            )
+
     def on_fit_start(self) -> None:
         if not self.schema.objectives:
             raise RuntimeError(
@@ -747,9 +757,11 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
 
         Configure AdamW directly with ``learning_rate``, ``weight_decay``,
         ``betas``, ``eps``, and ``fused``. Defaults are 1e-3, 0.01,
-        (0.9, 0.95), 1e-8, and True. Biases, one-dimensional parameters,
-        and names containing "norm" receive no decay unless their policies
-        are overridden. Explicit ``fused=None`` lets Torch select its backend.
+        (0.9, 0.95), 1e-8, and True. Decay applies to linear and convolution
+        weight matrices. Biases and other one-dimensional parameters follow
+        ``decay_bias`` and ``decay_1d``, names containing "norm" are exempt,
+        and embedding tables, learned queries, and gains are never decayed.
+        Explicit ``fused=None`` lets Torch select its backend.
 
         These options and ``scheduler`` belong to this run. The optimizer is
         constructed from the current graph after device and checkpoint setup;

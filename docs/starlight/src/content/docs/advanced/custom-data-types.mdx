@@ -113,8 +113,11 @@ Nulls remain field states; they do not become a zero-degree bearing.
 
 `Extension.types` declares **canonical Arrow terminal families**, using their
 Python equivalents of the values passed to tensorization. `types=(int | float,)` permits a numeric family; it does
-not validate a bearing’s range or make an Arrow list a valid scalar bearing.
-The tensorizer owns those semantic checks.
+not validate a bearing’s range. The tensorizer owns that semantic check.
+An extension receives one scalar per record unless it declares `lists=True`,
+as built-in `Set` and `Vector` do. Without it, a list column such as
+`list<double>` is rejected before tensorization, with the field address and a
+suggestion to select one element with a query.
 
 Separate entries such as `(str, bytes)` declare incompatible families. A union
 such as `(int | float,)` permits compatible atoms within one family. Do not

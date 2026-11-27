@@ -241,8 +241,10 @@ model = rf.Model(
   and apply jitter there without creating another normalizer.
 - Tensorfield extensions declare canonical Arrow atom compatibility families with
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
-  with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of
-  `Request` and the shared ragged engine.
+  with `Extension(..., arrow={Type: matcher})`. Extensions receive one scalar
+  per record unless they declare `lists=True`, as `Set` and `Vector` do; the
+  shared boundary rejects list columns for the rest with the field address.
+  Keep datatype contracts out of `Request` and the shared ragged engine.
 - Register components by role, such as
   `@extension.register(rf.Component.Request)` or
   `extension.register(rf.Component.write, custom_writer)`. Python names are

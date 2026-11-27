@@ -1,3 +1,4 @@
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
@@ -172,6 +173,26 @@ def test_boolean_loss_tracks_batch_scores_for_training_and_stateful_evaluation_m
     for metric_name in expected_names:
         tracked = module.tracked[(ADDRESS, strata, metric_name, TensorKey.content)]
         assert isinstance(tracked, torch.Tensor if strata == Strata.train else TorchMetric)
+
+
+def test_boolean_training_metric_states_do_not_retain_the_autograd_graph():
+    schema = build_schema(mask=True)
+    module = TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
+    field = tensorfield(groups=[[[False, True]], [[True, False]]], schema=schema, strata=Strata.train)
+    payload = {
+        TensorKey.state: torch.zeros(*field.state.shape, len(Tokens), requires_grad=True),
+        TensorKey.content: torch.zeros(*field.content.shape, 1, requires_grad=True),
+    }
+    prediction = Prediction(address=ADDRESS, payload=TensorDict(payload, batch_size=field.batch_size))
+
+    loss(module, prediction, field, Strata.train).backward()
+
+    for _, metric in module.nodes[ADDRESS].decoder.content_metrics(Strata.train):
+        for name in metric._defaults:
+            states = getattr(metric, name)
+            for state in states if isinstance(states, list) else [states]:
+                assert state.grad_fn is None, name
+    deepcopy(module.nodes[ADDRESS].decoder)
 
 
 def test_boolean_training_without_valued_targets_does_not_repeat_previous_batch_scores():

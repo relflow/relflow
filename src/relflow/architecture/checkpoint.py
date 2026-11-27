@@ -30,6 +30,18 @@ class RollbackCheckpoint(ModelCheckpoint):
         if self.save_top_k == 0:
             raise ValueError("RollbackCheckpoint requires at least one saved checkpoint; set save_top_k != 0")
 
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Keep the previous best score when a resumed fit writes to a new directory.
+
+        Every fit generates its own default directory. Lightning restores the
+        selection state only for an unchanged directory, so a resumed fit would
+        otherwise rank its first validation above a better earlier checkpoint.
+        """
+        best = state_dict.get("best_model_path")
+        if best and self._fs.exists(best):
+            state_dict = {**state_dict, "dirpath": self.dirpath}
+        super().load_state_dict(state_dict)
+
     def on_fit_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule) -> None:
         from relflow.architecture.root import Model
 
@@ -39,7 +51,11 @@ class RollbackCheckpoint(ModelCheckpoint):
 
         best_model_path = self.best_model_path
         if not best_model_path:
-            raise RuntimeError("RollbackCheckpoint did not find a best checkpoint to restore")
+            # A step or time budget can end before the first monitored validation.
+            logger.bind(component="checkpoint", monitor=self.monitor).warning(
+                "rollback found no monitored checkpoint; keeping the final weights"
+            )
+            return
 
         strategy = getattr(trainer, "strategy", None)
         if strategy is not None:

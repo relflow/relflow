@@ -124,9 +124,13 @@ def month_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 
 @DatePart.week_of_year.register
 def week_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    max_value = 53
+    # Sunday-start weeks, as in day_of_week and week_of_month. The week holding
+    # January 1 is week 1, so a leap year starting on Saturday reaches week 54.
+    max_value = 54
     year_start = arr.astype("datetime64[Y]")
-    value = ((arr.astype("datetime64[W]") - year_start.astype("datetime64[W]")).astype(int) + 1).astype(int)
+    year_start_dow = (year_start.astype("datetime64[D]").astype(int) + 4) % 7
+    day_offset = (arr - year_start).astype("timedelta64[D]").astype(int)
+    value = ((day_offset + year_start_dow) // 7) + 1
     radians = 2 * np.pi * value / max_value
     return (np.sin(radians), np.cos(radians))
 

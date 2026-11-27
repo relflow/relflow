@@ -1,6 +1,7 @@
 from relflow.tensorfields.extensions import audio as audio
 from relflow.tensorfields.extensions import boolean as boolean
 from relflow.tensorfields.extensions import category as category
+from relflow.tensorfields.extensions import coordinates as coordinates
 from relflow.tensorfields.extensions import duration as duration
 from relflow.tensorfields.extensions import enum as enum
 from relflow.tensorfields.extensions import group as group
@@ -18,6 +19,7 @@ __all__ = [
     "audio",
     "boolean",
     "category",
+    "coordinates",
     "duration",
     "enum",
     "group",

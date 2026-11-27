@@ -39,7 +39,7 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-vector: Extension = Extension(name="vector", types=(int | float,), callbacks=(Metrics,))
+vector: Extension = Extension(name="vector", types=(int | float,), lists=True, callbacks=(Metrics,))
 
 
 class Objective(enum.StrEnum):

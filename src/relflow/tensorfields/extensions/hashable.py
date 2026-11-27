@@ -142,14 +142,6 @@ class TensorField(TensorFieldBase[torch.Tensor]):
 
         def encode(field: RaggedField) -> torch.Tensor:
             values = field.values
-            if (
-                pa.types.is_list(values.type)
-                or pa.types.is_large_list(values.type)
-                or pa.types.is_fixed_size_list(values.type)
-                or pa.types.is_struct(values.type)
-                or pa.types.is_map(values.type)
-            ):
-                raise ValueError(f"hash field at '{address}' expects scalar Arrow values, got {values.type}")
             if pa.types.is_dictionary(values.type):
                 # Arrow exposes this kernel dynamically; pyarrow-stubs omits it.
                 values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]

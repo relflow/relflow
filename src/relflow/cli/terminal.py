@@ -67,8 +67,10 @@ def model_tree(definition: dict[str, Any], parents: tuple[str, ...], report: dic
         label.append("  target", style="yellow")
     if address in report["representations"]:
         label.append("  embedding", style="green")
-    if definition.get("query") is not None:
-        label.append("  query=" + definition["query"])
+    query = definition.get("query")
+    if query is not None:
+        # Leaf queries are tuples of source paths, dumped as JSON lists.
+        label.append("  query=" + (query if isinstance(query, str) else ", ".join(query)))
     tree = Tree(label, guide_style="dim")
     if definition["type"] == "branch":
         length = definition["length"]

@@ -351,7 +351,8 @@ def loss(module: Model, prediction: Prediction, batch: TensorFieldBase, strata: 
         ).mean(),
     )
 
-    probabilities = logits.sigmoid()
+    # Metric states outlive the step; keep the autograd graph out of them.
+    probabilities = logits.detach().sigmoid()
     for metric_name, metric in metrics:
         if strata == Strata.train:
             metric.reset()

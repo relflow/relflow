@@ -373,6 +373,89 @@ def test_arrow_workers_shard_rows_before_ranks_divide_their_superbatches(monkeyp
     assert [batch["id"].to_pylist() for batch in batches] == [[4, 10], [16, 22]]
 
 
+def test_list_views_read_like_lists_even_when_their_views_are_out_of_order(monkeypatch: pytest.MonkeyPatch):
+    # Views address their values in any order and may skip some; Arrow's own cast rejects these.
+    tags = pa.ListViewArray.from_arrays(
+        pa.array([3, 0, 0], pa.int32()),
+        pa.array([1, 2, 0], pa.int32()),
+        pa.array(["a", "b", "unused", "c"], type=pa.string_view()),
+        mask=pa.array([False, False, True]),
+    )
+    item = pa.StructArray.from_arrays([pa.array([1.0, 2.0])], names=["qty"])
+    items = pa.LargeListViewArray.from_arrays(pa.array([1, 0, 0], pa.int64()), pa.array([1, 1, 0], pa.int64()), item)
+    viewed = pa.table({"tags": tags, "items": items, "label": [True, False, True]})
+    plain = pa.table(
+        {
+            "tags": pa.array([["c"], ["a", "b"], None]),
+            "items": pa.array([[{"qty": 2.0}], [{"qty": 1.0}], []], type=pa.large_list(item.type)),
+            "label": [True, False, True],
+        }
+    )
+    configured = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        tags=rf.Set,
+        items=rf.Branch(length=2, qty=rf.Number),
+        label=rf.Boolean(mask=True),
+    )
+
+    assert configured.predict(viewed).equals(configured.predict(plain))
+    module = rf.ArrowDataModule(model=configured, validate=viewed, shuffle=False)
+    batches = collect(module.val_dataloader().dataset, monkeypatch)
+    assert sum(batch.num_rows for batch in batches) == 3
+    assert all(batch.schema.field("items").type == pa.large_list(item.type) for batch in batches)
+
+
+def test_string_and_binary_views_read_like_their_large_layouts(monkeypatch: pytest.MonkeyPatch):
+    def table(text: pa.DataType, binary: pa.DataType) -> pa.Table:
+        item = pa.struct([pa.field("sku", text), pa.field("tag", binary)])
+        return pa.table(
+            {
+                "code": pa.array(["a", "b"], type=text),
+                "items": pa.array([[{"sku": "x", "tag": b"1"}], []], type=pa.list_(item)),
+                "label": [True, False],
+            }
+        )
+
+    configured = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        code=rf.Category,
+        items=rf.Branch(length=4, sku=rf.Category, tag=rf.Hash),
+        label=rf.Boolean(mask=True),
+    )
+    viewed = table(pa.string_view(), pa.binary_view())
+
+    assert configured.predict(viewed).equals(configured.predict(table(pa.string(), pa.binary())))
+    module = rf.ArrowDataModule(
+        model=configured,
+        validate=lambda: pa.RecordBatchReader.from_batches(viewed.schema, viewed.to_batches()),
+        shuffle=False,
+    )
+    batches = collect(module.val_dataloader().dataset, monkeypatch)
+    assert sum(batch.num_rows for batch in batches) == 2
+    assert all(batch.schema.field("code").type == pa.large_string() for batch in batches)
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_sharded_training_workers_shuffle_their_shares_independently(stream, monkeypatch: pytest.MonkeyPatch):
+    rows = pa.table({"id": list(range(32))})
+    source = (lambda: iter(rows.to_batches(max_chunksize=2))) if stream else rows
+    module = rf.ArrowDataModule(model=model(batch_size=4), train=source, num_workers=2, shuffle_rows=8)
+    dataset = module.train_dataloader().dataset
+    shuffled = []
+    for worker in range(2):
+        monkeypatch.setattr(dataset, "iteration", lambda worker=worker: (0, worker, 2))
+        shuffled.append([value for batch in collect(dataset, monkeypatch) for value in batch["id"].to_pylist()])
+
+    assert sorted(shuffled[0] + shuffled[1]) == list(range(32))
+    # One shared stream would make every worker-1 row its worker-0 neighbor plus one shard step.
+    offset = 1 if not stream else 2
+    assert [right - left for left, right in zip(*shuffled, strict=True)] != [offset] * 16
+
+
 def test_arrow_workers_preprocess_disjoint_shares_of_a_stream(monkeypatch: pytest.MonkeyPatch):
     seen: list[list[int]] = []
 

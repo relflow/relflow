@@ -367,22 +367,16 @@ def test_number_normalizer_ignores_nonfinite_values_when_updating():
 
 @pytest.mark.parametrize("device", ["cpu", pytest.param("cuda", marks=pytest.mark.integration)])
 @pytest.mark.parametrize("layout", ["flat", "transposed", "scalar", "empty"])
-@pytest.mark.parametrize(
-    ("dtype", "buffer_dtype"),
-    [
-        (torch.float32, torch.float32),
-        (torch.float64, torch.float32),
-        (torch.float16, torch.float16),
-        (torch.bfloat16, torch.bfloat16),
-    ],
-)
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64, torch.float16, torch.bfloat16])
 def test_number_normalizer_preserves_masked_values_and_input_gradients_without_updates(
-    device: str, layout: str, dtype: torch.dtype, buffer_dtype: torch.dtype
+    device: str, layout: str, dtype: torch.dtype
 ):
     if device == "cuda" and not torch.cuda.is_available():
         pytest.skip("CUDA is unavailable")
 
-    normalizer = GlobalOnlineNormalizer(epsilon=0.0).to(device=device, dtype=buffer_dtype).train()
+    # A model-wide cast moves the statistics but keeps them float64; outputs keep the input dtype.
+    normalizer = GlobalOnlineNormalizer(epsilon=0.0).to(device=device, dtype=dtype).train()
+    assert normalizer.mean.dtype == normalizer.var.dtype == torch.float64
     normalizer.mean.fill_(2.0)
     normalizer.var.fill_(9.0)
     inputs = torch.tensor([8.0, -3.0, float("nan"), float("inf"), float("-inf"), 5.0], device=device, dtype=dtype)

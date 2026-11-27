@@ -92,6 +92,19 @@ def test_enum_positional_labels_follow_string_folding():
         rf.Enum("Foo", "foo", cased=False)
 
 
+def test_enum_labels_fold_with_the_input_kernel():
+    # Python lowercases a final capital sigma to "ς"; Arrow, which folds inputs, gives "σ".
+    assert rf.Enum("ΟΔΟΣ", "other", cased=False).values == ("οδοσ", "other")
+    with pytest.raises(ValueError, match="collide"):
+        rf.Enum("ΟΔΟΣ", "οδοσ", cased=False)
+
+
+@pytest.mark.parametrize("options", [{"strip": True}, {"cased": False}])
+def test_folded_binary_enum_labels_round_trip_through_json(options):
+    request = rf.Enum(b"a", b"b", **options)
+    assert type(request).model_validate(request.model_dump(mode="json")).values == (b"a", b"b")
+
+
 @pytest.mark.parametrize(
     "values",
     [[], list(VALUES), set(VALUES), "pending", (), ("a", "a"), (None,), (1, "a"), (True, 1), (1, 2.0), ([1],)],

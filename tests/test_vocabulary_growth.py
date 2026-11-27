@@ -721,6 +721,24 @@ def test_category_admission_preserves_predictions_until_the_label_is_learned():
     assert head.bias[2].item() == -20.0
 
 
+def test_admitted_row_starts_differ_across_epochs_however_long_an_epoch_runs():
+    from types import SimpleNamespace
+
+    from relflow.tensorfields.shared.vocabulary import AdmittedRowsCallback
+
+    model = rf.Model(preset="small", d_model=8, group=rf.Category, y=rf.Number(mask=True))
+    model.encode(pa.table({"group": ["A", "B"], "y": [1.0, 2.0]}), strata="train")
+    weight = model.nodes["/group"].embedder.embeddings["content"].weight
+    starts = []
+    for epoch, batch in ((0, 65_536 + 3), (1, 3)):
+        with torch.no_grad():
+            weight.zero_()
+        AdmittedRowsCallback().on_train_batch_start(SimpleNamespace(current_epoch=epoch), model, None, batch)
+        starts.append(weight[:2].detach().clone())
+
+    assert (starts[0] != 0).all() and not torch.equal(*starts)
+
+
 @pytest.mark.integration
 def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and_deterministic():
     from types import SimpleNamespace

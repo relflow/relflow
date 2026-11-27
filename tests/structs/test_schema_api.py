@@ -365,6 +365,21 @@ def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, fai
     assert model.nodes is nodes
 
 
+def test_bare_where_and_its_negation_are_complements_or_reject_non_boolean_attributes():
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Number(mask=True), d_model=16)
+    params = model.schema
+    nodes = params.select(lambda node: True, include_root=False)
+
+    reconstructed = params.select(rf.where("reconstruct"), include_root=False)
+    others = params.select(~rf.where("reconstruct"), include_root=False)
+
+    assert reconstructed == [params.requests["/label"]]
+    assert sorted(map(str, (*reconstructed, *others))) == sorted(map(str, nodes))
+    for selector in (rf.where("mask"), ~rf.where("mask")):
+        with pytest.raises(TypeError, match=r"where\('mask'\) selects boolean attributes, but node '/.*' has tuple"):
+            params.select(selector, include_root=False)
+
+
 def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
     model = rf.Model(preset="small", amount=rf.Number, memo=rf.Number(active=False), d_model=16)
     params = model.schema
@@ -520,6 +535,14 @@ def test_model_reset_reinitializes_runtime_node_without_changing_schema():
     assert "/amount" in model.schema.requests
 
 
+def test_model_reset_keeps_replaced_nodes_in_evaluation_mode():
+    model = rf.Model(preset="small", amount=rf.Number, d_model=16).eval()
+
+    model.reset(rf.where("name") == "amount")
+
+    assert not any(module.training for module in model.modules())
+
+
 def test_model_override_temporarily_updates_schema_and_rebuilds_modules():
     model = rf.Model(preset="small", amount=rf.Number, d_model=16)
     before = model.nodes["/amount"]
@@ -539,6 +562,17 @@ def test_model_override_mask_restores_original_policy():
         assert request.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
 
     assert request.mask == (rf.Mask(rate=0.25),)
+
+
+def test_model_override_length_restores_unbounded_branch_overflow():
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, items=rf.Branch(sku=rf.Category), label=rf.Category(mask=True))
+    branch = model.schema.branches["/items"]
+
+    with model.override(rf.where("name") == "items", length=4):
+        assert (branch.length, branch.overflow) == (4, rf.Overflow.head)
+
+    assert (branch.length, branch.overflow) == (None, None)
+    model.schema.post_bind_validate()
 
 
 def test_model_mutations_are_blocked_inside_training_loop_lock():

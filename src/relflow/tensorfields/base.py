@@ -822,7 +822,9 @@ class Extension:
     of accepted canonical Arrow terminal families. Separate tuple entries are
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
-    overrides a standard matcher. ``requires`` maps importable module names to
+    overrides a standard matcher. ``lists`` admits list-valued records, such as a set of
+    labels or a vector; other extensions receive one scalar per record, and the
+    boundary rejects list columns for them. ``requires`` maps importable module names to
     their package requirements. ``queries`` declares accepted query counts as
     an integer, tuple, or Python slice; its default is one. ``callbacks`` lists the Lightning callback
     classes or factories every model using the extension attaches; every rank
@@ -837,6 +839,7 @@ class Extension:
         types: tuple[ValueTypeFamily, ...],
         queries: int | tuple[int, ...] | slice = 1,
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
+        lists: bool = False,
         requires: Mapping[str, str] | None = None,
         callbacks: Sequence[CallbackFactory] = (),
     ):
@@ -868,6 +871,9 @@ class Extension:
                 raise ValueError("Extension query slices require non-negative bounds and a positive step")
         else:
             raise TypeError("Extension queries must be a non-negative integer, tuple of counts, or slice")
+
+        if not isinstance(lists, bool):
+            raise TypeError(f"Extension lists must be a bool, got {type(lists).__name__}")
 
         if not isinstance(types, tuple):
             raise TypeError("Extension types must be a tuple of types or PEP 604 unions")
@@ -941,6 +947,7 @@ class Extension:
         self.name: str = name
         self.queries: int | tuple[int, ...] | slice = queries
         self.value_types: tuple[ValueTypeFamily, ...] = types
+        self.lists: bool = lists
         self.families: tuple[tuple[type[Any], ...], ...] = tuple(families)
         self.family_by_type: Mapping[type[Any], int] = MappingProxyType(type_to_family)
         self.matchers: Mapping[type[Any], ArrowMatcher] = MappingProxyType(
@@ -972,6 +979,7 @@ class Extension:
         types: tuple[ValueTypeFamily, ...] | None = None,
         queries: int | tuple[int, ...] | slice | None = None,
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
+        lists: bool | None = None,
         requires: Mapping[str, str] | None = None,
         callbacks: Sequence[CallbackFactory] = (),
     ) -> Self:
@@ -1012,6 +1020,7 @@ class Extension:
             types=value_types,
             queries=source.queries if queries is None else queries,
             arrow=matchers,
+            lists=source.lists if lists is None else lists,
             requires={**source.requires, **(requires or {})},
             callbacks=(*source.callback_factories, *callbacks),
         )
@@ -1204,6 +1213,20 @@ class Extension:
             return pa.ListArray.from_arrays(pc.cast(offsets, pa.int32()), child, type=datatype, mask=mask)
         return pc.cast(values, datatype, safe=True)
 
+    def require_scalar(self, datatype: pa.DataType, *, address: Address) -> None:
+        """Reject list-valued records unless this extension declared ``lists=True``."""
+
+        canonical = self.canonical(datatype)
+        if self.lists or not (
+            pa.types.is_list(canonical) or pa.types.is_large_list(canonical) or pa.types.is_fixed_size_list(canonical)
+        ):
+            return
+        raise TypeError(
+            f"extension '{self.name}' at address '{address}' expects one scalar value per record, "
+            f"got list type {datatype}; select one element with a query such as 'name[0]', "
+            f"or reshape the column in a preprocessor"
+        )
+
     def prepare(
         self,
         values: pa.Array | pa.ChunkedArray,
@@ -1216,6 +1239,7 @@ class Extension:
             raise TypeError(
                 f"extension '{self.name}' at address '{address}' requires an Arrow array, got {type(values).__name__}"
             )
+        self.require_scalar(values.type, address=address)
         if not self.accepts(values.type):
             expected = ", ".join(" | ".join(member.__name__ for member in members) for members in self.families)
             raise TypeError(

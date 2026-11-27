@@ -639,6 +639,8 @@ class Schema(Node):
         **values: Any,
     ) -> Generator[None, None, None]:
         nodes = self.select(*predicates, include_root=include_root)
+        # ``update`` re-derives a Branch's overflow whenever its length changes,
+        # so restoring the length alone can leave an invalid pair behind.
         snapshot = [
             (
                 node,
@@ -647,7 +649,7 @@ class Schema(Node):
                 name in getattr(node, "model_fields_set", set()),
             )
             for node in nodes
-            for name in values
+            for name in ([*values, "overflow"] if isinstance(node, Branch) and "length" in values else values)
             if has_model_attribute(node, name)
         ]
 

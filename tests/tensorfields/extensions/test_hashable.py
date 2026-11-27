@@ -197,7 +197,7 @@ def test_hashable_tensorfield_rejects_non_scalar_values():
         [[[5, 6], [7, 8]]],
     ]
 
-    with pytest.raises(ValueError, match="expects scalar Arrow values"):
+    with pytest.raises(TypeError, match="expects one scalar value per record"):
         tensorfield(
             values=values,
             schema=schema,

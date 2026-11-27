@@ -134,16 +134,17 @@ class Request(RequestBase):
         if not strip and cased:
             return data
 
-        def label(value: Any) -> Any:
-            if not isinstance(value, str):
-                return value
-            value = value.strip() if strip else value
-            return value if cased else value.lower()
-
-        folded = tuple(label(value) for value in data["values"])
-        if len(set(folded)) != len(folded):
+        # Arrow's Unicode folding differs from Python's (final sigma, dotted I),
+        # so labels use the same kernel as inputs. Other labels, including
+        # serialized bytes tags, pass through to check_values.
+        values = list(data["values"])
+        strings = [index for index, value in enumerate(values) if isinstance(value, str)]
+        folded = fold(pa.array([values[index] for index in strings], type=pa.large_string()), strip=strip, cased=cased)
+        for index, value in zip(strings, folded.to_pylist(), strict=True):
+            values[index] = value
+        if len(set(folded.to_pylist())) != len(strings):
             raise ValueError("Enum values collide after strip/cased folding; declare each folded label once")
-        return {**data, "values": folded}
+        return {**data, "values": tuple(values)}
 
     @pydantic.field_validator("values", mode="before")
     @classmethod
