@@ -99,9 +99,9 @@ export const reference = {
       title: 'Streaming prediction output',
       text: 'Write batch predictions to Parquet or Arrow IPC files instead of collecting the complete result in memory.',
     },
-    Mask: {
-      title: 'Masking policy',
-      text: 'Select which values are hidden, dropped, or reconstructed. A reconstruction objective learns selected values from the remaining context.',
+    reconstruct: {
+      title: 'Reconstruction selection',
+      text: 'Choose which observed values become pretraining answers. A rate samples answers, a query reads a Boolean selector, and a span groups consecutive branch rows.',
     },
     Jitter: {
       title: 'Training augmentation',
@@ -169,7 +169,7 @@ export const reference = {
   options: {
     target: {
       title: 'Prediction target',
-      text: 'Hide this field’s value from model inputs and enable its reconstruction objective. The field type defines what it can learn and decode. A target inside a branch belongs to each supplied record at that level.',
+      text: 'Hide and supervise this leaf or every active leaf below a child branch. Each supplied record keeps its position when its answers are predicted.',
     },
     length: (/** @type {{limit: string | number}} */ { limit }) => ({
       title: 'Collection limit',
@@ -287,9 +287,17 @@ export const reference = {
       title: 'Timestamp format',
       text: 'Parse timestamp strings using this explicit format. Period selects calendar parts; Duration computes elapsed time from timestamp endpoints.',
     },
-    reconstruct: {
-      title: 'Learn selected values',
-      text: 'Add a reconstruction objective at the positions selected by this masking policy. Evaluate this objective along with any supervised targets.',
+    task: {
+      title: 'Learning task',
+      text: 'Declare a task on a leaf or branch. rf.reconstruct selects observations to hide and use as answers.',
+    },
+    hide: {
+      title: 'Hide training inputs',
+      text: 'Hide selected values during training. A branch shares each row decision across children outside its ignore list.',
+    },
+    ablate: {
+      title: 'Training ablation',
+      text: 'Drop the input and its targets during training. A leaf samples per record. A child branch samples once per parent for the entire collection.',
     },
     batchSize: (/** @type {{size: string | number}} */ { size }) => ({
       title: 'Batch size',
@@ -371,7 +379,7 @@ export const reference = {
     },
     inferred: {
       title: 'Inference flag',
-      text: 'True means this field was selected for inference. It is a routing flag, not a confidence score; mask=True targets are inferred during prediction.',
+      text: 'True means this field was selected for inference. It is a routing flag, not a confidence score; predict=True targets are inferred during prediction.',
     },
     value: {
       title: 'Selected value',
@@ -397,7 +405,7 @@ export const reference = {
     }),
     schema: (/** @type {{field: string}} */ { field }) => ({
       title: 'Schema field',
-      text: `${field} declares a value or related collection. It reads the matching record member unless a query selects other source paths. A mask can hide the target value from model inputs. Matching names are highlighted across this example.`,
+      text: `${field} declares a value or related collection. It reads the matching record member unless a query selects other source paths. Use predict=True to make its answers supervised targets. Matching names are highlighted across this example.`,
     }),
     prediction: (/** @type {{field: string}} */ { field }) => ({
       title: 'Prediction field',

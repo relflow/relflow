@@ -26,7 +26,7 @@ class SupportTicket(rf.Model):
 
     message = rf.Text
     account_age_days = rf.Number
-    needs_escalation = rf.Boolean(mask=True)`,
+    needs_escalation = rf.Boolean(predict=True)`,
     inputs: {
       message: 'My account is locked and the reset email never arrives.',
       account_age_days: 240,
@@ -67,7 +67,7 @@ class Candidate(rf.Branch):
 
     description = rf.Text
     price = rf.Number
-    relevant = rf.Boolean(mask=True)
+    relevant = rf.Boolean(predict=True)
 
 
 class SearchReview(rf.Model):
@@ -120,8 +120,8 @@ class RepairRequest(rf.Model):
 
     description = rf.Text(max_length=256, store="./request-vectors")
     asset_age_years = rf.Number
-    labor_hours = rf.Number(mask=True)
-    urgent = rf.Boolean(mask=True)`,
+    labor_hours = rf.Number(predict=True)
+    urgent = rf.Boolean(predict=True)`,
     inputs: {
       description: 'The compressor stops after ten minutes and restarts after cooling.',
       asset_age_years: 6,

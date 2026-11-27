@@ -42,7 +42,7 @@ class Equipment(rf.Model):
     """One machine at its observation cutoff."""
 
     sensor_readings = Reading(length=168, overflow="tail")
-    failure = rf.Boolean(mask=True)
+    failure = rf.Boolean(predict=True)
 ```
 
 An index is declared like a field but is a different kind of node, a twig: it shapes its branch rather than contributing a value to it.

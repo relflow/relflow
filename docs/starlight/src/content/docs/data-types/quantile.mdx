@@ -50,7 +50,7 @@ source-unit MSE.
 
 ### Predictions
 
-`mask=True` makes a Quantile field a supervised target. Its rich result contains
+`predict=True` makes a Quantile field a supervised target. Its rich result contains
 `state`, a scalar `content` in the original units, and `inferred`. For a field named `duration_ms`, `predictions.duration_ms.content` is a duration in
 milliseconds. No percentile coordinate is exposed in that result. See
 [Runtime](/concepts/runtime/) for the full prediction-row contract.

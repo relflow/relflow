@@ -106,6 +106,7 @@ from policies import CONTROL
 from relflow.tensorfields.shared.cache import Payloads
 from reporting import experiment, report
 from transformers import WhisperConfig, WhisperFeatureExtractor, WhisperModel
+from visibility import TARGET
 
 FIXTURE = Path(__file__).with_suffix(".npz")
 SHA256 = "be958abd3b8f8572f4073e8e993c30a0cdea1d0e10c8986d0b74b858a3b0c5a6"
@@ -139,8 +140,8 @@ def cache_model(directory, width):
 
     class Inspection(rf.Model):
         recordings = Recording(length=2)
-        pitch = rf.Enum(*LABELS["pitch"], mask=True)
-        rhythm = rf.Enum(*LABELS["rhythm"], mask=True)
+        pitch = rf.Enum(*LABELS["pitch"], **TARGET)
+        rhythm = rf.Enum(*LABELS["rhythm"], **TARGET)
 
     model = Inspection(preset=CONTROL.name)
 

@@ -151,6 +151,7 @@ import lightning.pytorch as lit
 import numpy as np
 import relflow as rf
 from reporting import experiment, report
+from visibility import reconstruct
 
 BUDGET = 400
 LABELS = tuple(f"class-{index}" for index in range(8))
@@ -164,7 +165,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 class PredictionModel(rf.Model):
     x = rf.Number
-    code = rf.Category(mask=rf.Mask(query="hide", reconstruct=True))
+    code = rf.Category(**reconstruct("hide"))
 
 
 def build() -> rf.Model:

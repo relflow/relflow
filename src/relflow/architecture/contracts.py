@@ -508,7 +508,7 @@ def require_objective_contract(
 ) -> None:
     objective = address in module.schema.objectives
     if tensorfield.trainable.any() and not objective:
-        raise ForwardContractError(f"forward input '{address}' is trainable but is not a reconstruction objective")
+        raise ForwardContractError(f"trainable values in forward input '{address}' require a training objective")
     if tensorfield.inferred.any() and address not in module.schema.decodes:
         raise ForwardContractError(f"forward input '{address}' is inferred but is not a prediction decode")
 

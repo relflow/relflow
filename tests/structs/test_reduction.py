@@ -57,7 +57,7 @@ def test_schema_round_trip_preserves_reductions() -> None:
             items=rf.Branch(length=3, reduction=None, value=rf.Number),
         ),
         averages=rf.Branch(length=4, reduction=rf.Mean(), value=rf.Number),
-        target=rf.Number(mask=True),
+        target=rf.Number(predict=True),
         d_model=16,
         n_layers=1,
         n_heads=4,
@@ -103,7 +103,7 @@ def test_schema_computes_effective_structural_branch_outputs() -> None:
 def test_schema_branch_outputs_excludes_inactive_subtrees() -> None:
     schema = rf.Schema.from_tree(
         inactive=rf.Branch(length=3, reduction=None, value=rf.Number(active=False)),
-        target=rf.Number(mask=True),
+        target=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -126,7 +126,7 @@ def test_attention_reduction_head_geometry_validates_after_binding() -> None:
 def test_branch_output_width_cache_refreshes_after_schema_update() -> None:
     schema = rf.Schema.from_tree(
         items=rf.Branch(length=3, reduction=None, value=rf.Number),
-        target=rf.Number(mask=True),
+        target=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,

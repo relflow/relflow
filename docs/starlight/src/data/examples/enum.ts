@@ -32,7 +32,7 @@ class Ticket(rf.Model):
     account_tier = rf.Enum("free", "standard", "enterprise")
     topic = rf.Category
     hours_open = rf.Number
-    destination = rf.Enum("billing", "technical", "account", mask=True, topk=[3])`,
+    destination = rf.Enum("billing", "technical", "account", predict=True, topk=[3])`,
     inputs: { account_tier: 'enterprise', topic: 'api_timeout', hours_open: 6 },
     answers: { destination: 'technical' },
     output: {
@@ -89,7 +89,7 @@ class Task(rf.Branch):
     asset_family = rf.Category
     hours_since_report = rf.Number
     asset_available = rf.Boolean
-    priority = rf.Enum("low", "normal", "urgent", mask=True, topk=[3])
+    priority = rf.Enum("low", "normal", "urgent", predict=True, topk=[3])
 
 
 class WorkQueue(rf.Model):
@@ -166,7 +166,7 @@ class Shipment(rf.Model):
     weight_kg = rf.Number
     distance_km = rf.Number
     is_fragile = rf.Boolean
-    service_code = rf.Enum(*SERVICE_CODES, mask=True, topk=[3])`,
+    service_code = rf.Enum(*SERVICE_CODES, predict=True, topk=[3])`,
     inputs: { weight_kg: 2.4, distance_km: 680, is_fragile: true },
     answers: { service_code: 20 },
     output: {

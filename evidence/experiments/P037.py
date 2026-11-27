@@ -149,6 +149,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 PAIR_COUNT = 2
 
@@ -191,7 +192,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
         class TargetRecord(rf.Branch):
             entity_id = rf.Hash(n_hashes=4, n_bands=8)
-            value = rf.Number(mask=True, objective="mse")
+            value = rf.Number(**TARGET, objective="mse")
 
         class PredictionModel(rf.Model):
             source = SourceRecord(length=PAIR_COUNT, n_layers=2, reduction=reduction)

@@ -19,7 +19,7 @@ class Review(rf.Model):
     customer_tier = rf.Category
     priority = rf.Ordinal(
         values=("low", "normal", "high"),
-        mask=True,
+        predict=True,
     )`,
     dataset: {
       id: 'priority', label: 'Review priority',
@@ -57,7 +57,7 @@ class ScheduledTask(rf.Model):
     current_offset = rf.Ordinal
     remaining_hours = rf.Number
     available_hours = rf.Number
-    next_offset = rf.Ordinal(mask=True)`,
+    next_offset = rf.Ordinal(predict=True)`,
     dataset: {
       id: 'integer-ranks', label: 'Scheduled task',
       observation: 'One task being positioned in a schedule.',
@@ -93,8 +93,8 @@ class Component(rf.Branch):
 
     family = rf.Category
     wear_percent = rf.Number
-    grade = rf.Ordinal(values=(10, 20, 30), mask=True)
-    repair_hours = rf.Number(mask=True)
+    grade = rf.Ordinal(values=(10, 20, 30), predict=True)
+    repair_hours = rf.Number(predict=True)
 
 
 class Inspection(rf.Model):

@@ -17,7 +17,7 @@ def tensorfield(values, selected):
         d_model=8,
         n_heads=2,
         n_layers=1,
-        amount=rf.Number(mask=rf.Mask(query="selected", reconstruct=True)),
+        amount=rf.Number(task=rf.reconstruct(query="selected")),
     )
     selected = [selected] * len(values) if isinstance(selected, bool) else selected
     table = pa.table({"amount": values, "selected": selected})
@@ -139,7 +139,7 @@ def test_number_empty_and_all_null_values_still_use_float64_storage(values):
     [torch.nn.Module.half, torch.nn.Module.bfloat16, torch.nn.Module.float, lambda module: module.to(torch.bfloat16)],
 )
 def test_model_casts_keep_number_statistics_float64(cast):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Number(mask=True))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Number(predict=True))
     normalizers = [module for module in model.modules() if isinstance(module, GlobalOnlineNormalizer)]
     for normalizer in normalizers:
         # Neither float32 nor bfloat16 can hold this mean exactly.

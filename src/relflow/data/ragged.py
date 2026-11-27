@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cache
 from typing import TYPE_CHECKING, Any, cast
 
@@ -15,17 +15,30 @@ import pyarrow.compute as pc
 
 from relflow.data.arrow import variants
 from relflow.data.positions import place
-from relflow.data.query import Literal, Member, MissingFieldError, Query, compile, listed, member, origin, parts, query
+from relflow.data.query import (
+    Literal,
+    Member,
+    MissingFieldError,
+    Query,
+    compile,
+    gather,
+    listed,
+    member,
+    origin,
+    parts,
+    query,
+)
 from relflow.data.query import Projection as SourceProjection
 from relflow.logging.config import logger
 from relflow.structs.enums import Overflow, Strata, Tokens
-from relflow.structs.tree import Address, Leaf
+from relflow.structs.tree import Address, Leaf, selections
 from relflow.structs.twigs import Twig, indexed
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import Schema
     from relflow.structs.structure import Branch
-    from relflow.structs.tree import Mask
+    from relflow.structs.tasks import Selection
+    from relflow.structs.tree import Field
 
 
 @cache
@@ -144,6 +157,30 @@ class Layout:
     valid: np.ndarray
     collections: tuple[Collection, ...] = ()
 
+    def retaining(self, kept: np.ndarray) -> Layout:
+        """Project selected owners while preserving their dense slots and original neighbors."""
+        if kept.all():
+            return self
+        collections = []
+        offset = 0
+        for collection in self.collections:
+            valid = collection.valid
+            count = int(collection.counts.sum() if valid is None else valid.sum())
+            selection = kept[offset : offset + count]
+            offset += count
+            if selection.any():
+                if valid is not None:
+                    slots = valid.copy()
+                    slots[valid] = selection
+                    selection = slots
+                collections.append(replace(collection, valid=selection))
+        return replace(
+            self,
+            records=retain(self.records, kept),
+            placement=self.placement[kept],
+            collections=tuple(collections),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class RaggedField:
@@ -231,9 +268,10 @@ class RaggedField:
 class Decision:
     """One policy selection in its owner's fixed coordinate geometry."""
 
-    mask: Mask
+    rule: Selection
     selected: np.ndarray
     shape: tuple[int, ...]
+    fields: frozenset[Address] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +359,10 @@ class Sources:
         """Number of structurally retained owner records."""
         return len(self.placement)
 
+    def needs_targets(self, schema: Schema) -> bool:
+        """Build answer tensors for a fixed objective or a field selected for this batch."""
+        return self.address in schema.roles.fixed_targets or any(d.fields is not None for d in self.decisions)
+
     def single(self) -> Projection:
         """Route a single source, or an absent prediction target."""
         if self.vacant:
@@ -363,9 +405,9 @@ def referenced(branch: Branch) -> set[str]:
     """Return the record members that a branch, its masks, and its children read."""
 
     names = {head(compile(branch.query))} if branch.query is not None else set()
-    for mask in branch.mask:
-        if mask.query is not None:
-            names.add(head(compile(mask.query)))
+    for rule in selections(branch):
+        if rule.query is not None:
+            names.add(head(compile(rule.query)))
     if branch.query is not None:
         return names
     for child in branch.fields:
@@ -377,9 +419,9 @@ def referenced(branch: Branch) -> set[str]:
                 depth, path = origin(expression, address=str(child.address))
                 if not depth:
                     names.add(head(path))
-        for mask in () if isinstance(child, Twig) else child.mask:
-            if mask.query is not None and getattr(child, "type", None) != "branch":
-                names.add(head(compile(mask.query)))
+        for rule in () if isinstance(child, Twig) else selections(child):
+            if rule.query is not None and getattr(child, "type", None) != "branch":
+                names.add(head(compile(rule.query)))
     for child in branch.descendants:
         if not isinstance(child, Leaf):
             continue
@@ -432,6 +474,38 @@ def root(values: pa.Table, branch: Branch, *, size: int | None = None) -> Layout
     )
 
 
+def collection_source(
+    records: pa.Array | pa.ChunkedArray, expression: str, *, kept: np.ndarray | None, address: Address
+) -> SourceProjection[pa.Array | pa.ChunkedArray]:
+    """Read the child collection only for retained parents, preserving independent dictionaries."""
+    if kept is None or kept.all():
+        return query(records, expression, address=str(address))
+
+    chunks = records.chunks if isinstance(records, pa.ChunkedArray) else [records]
+    offset = 0
+    selected = []
+    for chunk in chunks:
+        indices = np.flatnonzero(kept[offset : offset + len(chunk)])
+        offset += len(chunk)
+        if len(indices):
+            selected.append(gather(chunk, expression, pa.array(indices, type=pa.int64()), address=str(address)))
+    if len(selected) == 1:
+        return selected[0]
+    return SourceProjection(
+        values=pa.chunked_array([item.values for item in selected]),
+        present=pa.chunked_array([item.present for item in selected]),
+    )
+
+
+def retention(layout: Layout, node: Field, *, strata: Strata, seed: int, epoch: int, ordinal: int) -> np.ndarray | None:
+    """Draw one training ablation decision per structurally present owner of this node."""
+    if strata != Strata.train or not node.ablate or not len(layout.placement):
+        return None
+    payload = f"relflow-ablate-v1:{seed}:{epoch}:{ordinal}:{node.address}".encode()
+    random = np.random.default_rng(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
+    return random.random(len(layout.placement)) >= node.ablate
+
+
 def descend(
     layout: Layout, branch: Branch, address: Address, *, strata: Strata, seed: int, epoch: int, ordinal: int
 ) -> Layout:
@@ -441,17 +515,22 @@ def descend(
     retained_lengths = np.zeros(parent_size, dtype=np.int64)
     collection_present = np.zeros(parent_size, dtype=bool)
     collection_valid = np.zeros(parent_size, dtype=bool)
+    owners = layout.placement
+    kept = retention(layout, branch, strata=strata, seed=seed, epoch=epoch, ordinal=ordinal)
+    if kept is not None:
+        owners = owners[kept]
+
     expression = branch.query or member(cast(str, branch.name))
     selected = None
-    if len(layout.records):
+    if len(owners):
         try:
-            selected = query(layout.records, expression, address=str(branch.address))
+            selected = collection_source(layout.records, expression, kept=kept, address=branch.address)
         except MissingFieldError:
             if strata != Strata.predict:
                 absent(branch.address, expression, layout.records.type)
     if selected is None or pa.types.is_null(selected.values.type):
         if selected is not None:
-            collection_present[layout.placement] = boolean(selected.present)
+            collection_present[owners] = boolean(selected.present)
         empty = pa.array([], type=pa.struct([]))
         return Layout(
             records=empty,
@@ -475,7 +554,7 @@ def descend(
     tail = branch.overflow == Overflow.tail or (branch.overflow == Overflow.random and not randomized)
     offset = 0
     for values in chunks:
-        parent_placement = layout.placement[offset : offset + len(values)]
+        parent_placement = owners[offset : offset + len(values)]
         available = present[offset : offset + len(values)]
         offset += len(values)
 
@@ -647,46 +726,83 @@ def pristine(
     )
 
 
-def active(mask: Mask, strata: Strata) -> bool:
+def active(rule: Selection, strata: Strata) -> bool:
     """Return whether one normalized policy applies in a stratum."""
 
     if strata == Strata.train:
         return True
-    if bool(mask.dropout):
+    if rule.action == "hide":
         return False
-    return strata != Strata.predict or mask.rate is None
+    return strata != Strata.predict or not rule.sampled
 
 
-def eligible(layout: Layout, mask: Mask, *, address: Address) -> np.ndarray:
+def sample_fields(
+    schema: Schema, *, seed: int, epoch: int, ordinal: int, strata: Strata
+) -> dict[tuple[Address, Selection], frozenset[Address]]:
+    """Draw once per declaration and batch, independently of row sampling and encoder visibility."""
+    chosen: dict[tuple[Address, Selection], frozenset[Address]] = {}
+    if strata == Strata.predict:
+        return chosen
+    for (owner, rule), pool in schema.field_pools.items():
+        limit = cast(int, rule.fields)
+        if limit >= len(pool):
+            targets = frozenset(pool)
+        else:
+            stream = json.dumps(
+                (
+                    "relflow-fields-v1",
+                    seed,
+                    strata.value,
+                    epoch if strata == Strata.train else 0,
+                    ordinal,
+                    owner,
+                    limit,
+                    rule.query,
+                    rule.rate,
+                    rule.span,
+                    rule.ignore,
+                ),
+                separators=(",", ":"),
+            ).encode()
+            rng = np.random.default_rng(int.from_bytes(hashlib.sha256(stream).digest()[:8], "big"))
+            targets = frozenset(pool[i] for i in rng.choice(len(pool), size=limit, replace=False))
+        chosen[owner, rule] = targets
+    return chosen
+
+
+def eligible(layout: Layout, rule: Selection, *, address: Address) -> np.ndarray:
     """Resolve one policy query against its owner's retained records."""
 
     if not len(layout.records):
         return np.empty(0, dtype=bool)
-    if mask.query is None:
+    if rule.query is None:
         return np.ones(len(layout.records), dtype=bool)
 
-    selected = query(layout.records, mask.query, address=str(address))
+    option = rule.action
+    selected = query(layout.records, rule.query, address=str(address))
     if len(selected.values) != len(layout.records):
         raise ValueError(
-            f"mask query {mask.query!r} at '{address}' returned {len(selected.values)} values for "
+            f"{option} query {rule.query!r} at '{address}' returned {len(selected.values)} values for "
             f"{len(layout.records)} owner records"
         )
     if selected.values.type != pa.bool_():
         raise TypeError(
-            f"mask query {mask.query!r} at '{address}' must return Boolean values, got {selected.values.type}"
+            f"{option} query {rule.query!r} at '{address}' must return Boolean values, got {selected.values.type}"
         )
     if selected.present.type != pa.bool_():
-        raise ValueError(f"mask query {mask.query!r} at '{address}' must return one scalar Boolean per owner record")
+        raise ValueError(
+            f"{option} query {rule.query!r} at '{address}' must return one scalar Boolean per owner record"
+        )
     structural = boolean(selected.present)
     if not structural.all():
         missing = int((~structural).sum())
         raise ValueError(
-            f"mask query {mask.query!r} at '{address}' is structurally absent for {missing} owner record(s); "
+            f"{option} query {rule.query!r} at '{address}' is structurally absent for {missing} owner record(s); "
             "fill missing selector values explicitly"
         )
     if selected.values.null_count:
         raise ValueError(
-            f"mask query {mask.query!r} at '{address}' contains {selected.values.null_count} null value(s); "
+            f"{option} query {rule.query!r} at '{address}' contains {selected.values.null_count} null value(s); "
             "fill null selector values explicitly"
         )
     return boolean(selected.values)
@@ -696,7 +812,7 @@ def scores(
     layout: Layout,
     *,
     address: Address,
-    mask: Mask,
+    rule: Selection,
     seed: int,
     epoch: int,
     ordinal: int,
@@ -709,9 +825,14 @@ def scores(
 
     effective_epoch = epoch if strata == Strata.train else 0
     selection = json.dumps(
-        (mask.query, float(mask.rate).hex() if mask.rate is not None else None),
+        (rule.query, float(rule.rate).hex() if rule.rate is not None else None),
         separators=(",", ":"),
     )
+    if rule.span is not None:
+        selection += f":span={rule.span}"
+    if rule.action == "hide":
+        # Input dropout and reconstruction draw independently even at the same rate.
+        selection += ":hide"
     payload = f"relflow-mask-v3:{seed}:{strata}:{effective_epoch}:{ordinal}:{address}:{selection}".encode()
     random = np.random.default_rng(int.from_bytes(hashlib.sha256(payload).digest()[:8], "big"))
     return random.integers(0, np.iinfo(np.uint64).max, len(layout.records), dtype=np.uint64)
@@ -719,7 +840,7 @@ def scores(
 
 def select(
     layout: Layout,
-    mask: Mask,
+    rule: Selection,
     *,
     address: Address,
     seed: int,
@@ -729,27 +850,28 @@ def select(
 ) -> np.ndarray:
     """Resolve one literal, query-backed, or uniformly sampled policy."""
 
-    chosen = eligible(layout, mask, address=address)
-    if mask.rate is not None:
-        rate = float(mask.rate)
-        if rate <= 0.0:
-            chosen = np.zeros_like(chosen)
-        elif rate < 1.0:
-            threshold = np.uint64(int(rate * np.iinfo(np.uint64).max))
-            chosen &= (
-                scores(
-                    layout,
-                    address=address,
-                    mask=mask,
-                    seed=seed,
-                    epoch=epoch,
-                    ordinal=ordinal,
-                    strata=strata,
-                )
-                <= threshold
-            )
-
+    chosen = eligible(layout, rule, address=address)
     dense = np.zeros(math.prod(layout.shape), dtype=bool)
+    if not len(chosen):
+        return dense
+    if rule.rate is not None and rule.rate < 1:
+        # Each row in a long eligible run has up to span candidate starts.
+        # P(at least one start) = 1 - (1 - start_probability) ** span.
+        span = rule.span or 1
+        probability = rule.rate if span == 1 else -math.expm1(math.log1p(-rule.rate) / span)
+        threshold = np.uint64(int(probability * np.iinfo(np.uint64).max))
+        draws = scores(layout, address=address, rule=rule, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
+        starts = chosen & (draws <= threshold)
+        if span == 1:
+            chosen = starts
+        else:
+            index = np.arange(len(chosen))
+            parents = layout.placement // layout.shape[-1]
+            new_run = np.r_[True, (parents[1:] != parents[:-1]) | (np.diff(layout.placement) != 1)]
+            # A missing observation or query-ineligible row ends the current run.
+            first = np.maximum.accumulate(np.where(~chosen, index + 1, np.where(new_run, index, 0)))
+            latest = np.maximum.accumulate(np.where(starts, index, -span))
+            chosen = (latest >= first) & (index - latest < span)
     dense[layout.placement] = chosen
     return dense
 
@@ -762,15 +884,16 @@ def resolve(
     epoch: int,
     ordinal: int,
     strata: Strata,
+    sampled: dict[tuple[Address, Selection], frozenset[Address]],
 ) -> tuple[Decision, ...]:
     """Resolve every active policy once in one node's owner geometry."""
 
     return tuple(
         Decision(
-            mask=mask,
+            rule=rule,
             selected=select(
                 layout,
-                mask,
+                rule,
                 address=node.address,
                 seed=seed,
                 epoch=epoch,
@@ -778,9 +901,12 @@ def resolve(
                 strata=strata,
             ),
             shape=layout.shape,
+            fields=sampled.get((node.address, rule)) if rule.fields is not None else None,
         )
-        for mask in node.mask
-        if active(mask, strata)
+        for rule in selections(node)
+        if active(rule, strata)
+        and (not rule.ignore or any(child.name not in rule.ignore for child in node.fields))
+        and (rule.fields is None or (node.address, rule) in sampled)
     )
 
 
@@ -788,7 +914,7 @@ def broadcast(decision: Decision, shape: tuple[int, ...]) -> np.ndarray:
     """Broadcast one ancestor decision through fixed descendant geometry."""
 
     if shape[: len(decision.shape)] != decision.shape:
-        raise ValueError(f"mask owner shape {decision.shape} is not a prefix of descendant shape {shape}")
+        raise ValueError(f"selection shape {decision.shape} is not a prefix of descendant shape {shape}")
     return np.repeat(decision.selected, math.prod(shape[len(decision.shape) :]))
 
 
@@ -803,7 +929,7 @@ def project(
     """Resolve a leaf's source queries and owner geometry."""
 
     allow_vacancy = strata == Strata.predict and any(
-        decision.mask.reconstruct and decision.mask.query is None and decision.mask.rate is None
+        decision.rule.action != "hide" and decision.rule.query is None and not decision.rule.sampled
         for decision in decisions
     )
     source_less = bool(
@@ -839,7 +965,7 @@ def project(
 def route(
     placement: np.ndarray, field: RaggedField, decisions: tuple[Decision, ...], *, strata: Strata, vacant: bool
 ) -> Projection:
-    """Apply mask decisions to a field's pristine values."""
+    """Route pristine values to visible inputs, training answers and predictions."""
     state = field.state.to_numpy(zero_copy_only=False)
     observed = state != Tokens.padded.value
     owner = np.zeros(len(state), dtype=bool)
@@ -850,9 +976,9 @@ def route(
 
     for decision in decisions:
         selected = broadcast(decision, field.shape) & owner
-        if decision.mask.reconstruct:
+        if decision.rule.action != "hide":
             requested |= selected
-        if decision.mask.skip:
+        if decision.rule.skips_input:
             skipped |= selected
         else:
             masked |= selected
@@ -901,6 +1027,7 @@ def coalesce(
         raise ValueError("coalesce ordinal must be a non-negative batch index")
 
     strata = Strata.normalize(strata)
+    sampled = sample_fields(schema, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
     addresses = tuple(schema.active_requests)
     descendants: dict[Address, list[Address]] = {}
     for address in addresses:
@@ -922,7 +1049,12 @@ def coalesce(
         index = indexed(branch)
         if index is not None:
             positions[branch.address] = place(layout, index)
+        owned = resolve(layout, branch, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata, sampled=sampled)
         for child in branch.fields:
+            # Twigs shape their branch's geometry above; they are never coalesced as fields.
+            if isinstance(child, Twig):
+                continue
+            scoped = (*inherited, *(decision for decision in owned if child.name not in decision.rule.ignore))
             if getattr(child, "type", None) == "branch":
                 child = cast("Branch", child)
                 active = descendants.get(child.address, [])
@@ -930,31 +1062,26 @@ def coalesce(
                     child_layout = descend(
                         layout, child, active[0], strata=strata, seed=seed, epoch=epoch, ordinal=ordinal
                     )
-                    decisions = resolve(
-                        child_layout,
-                        child,
-                        seed=seed,
-                        epoch=epoch,
-                        ordinal=ordinal,
-                        strata=strata,
-                    )
-                    visit(child, child_layout, (*inherited, *decisions), (*ancestors, layout))
+                    visit(child, child_layout, scoped, (*ancestors, layout))
             elif child.address in schema.active_requests:
+                kept = retention(layout, child, strata=strata, seed=seed, epoch=epoch, ordinal=ordinal)
+                owners = layout if kept is None else layout.retaining(kept)
                 decisions = resolve(
-                    layout,
+                    owners,
                     child,
                     seed=seed,
                     epoch=epoch,
                     ordinal=ordinal,
                     strata=strata,
+                    sampled=sampled,
                 )
+                inherited_fields = (d for d in scoped if d.fields is None or child.address in d.fields)
                 fields[child.address] = project(
-                    layout, child, (*inherited, *decisions), strata=strata, ancestors=ancestors
+                    owners, child, (*inherited_fields, *decisions), strata=strata, ancestors=ancestors
                 )
 
     layout = root(values, schema.fields)
-    decisions = resolve(layout, schema.fields, seed=seed, epoch=epoch, ordinal=ordinal, strata=strata)
-    visit(schema.fields, layout, decisions, ())
+    visit(schema.fields, layout, (), ())
 
     return Coalesced(fields=fields, layouts=layouts, positions=positions)
 

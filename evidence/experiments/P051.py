@@ -162,6 +162,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import reconstruct
 
 BUDGET = 400
 
@@ -173,14 +174,8 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 class Model(rf.Model):
-    x = rf.Number(
-        objective="mse",
-        mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query="hide_x", reconstruct=True)),
-    )
-    y = rf.Number(
-        objective="mse",
-        mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query="hide_y", reconstruct=True)),
-    )
+    x = rf.Number(objective="mse", **reconstruct(0.35, "hide_x"))
+    y = rf.Number(objective="mse", **reconstruct(0.35, "hide_y"))
 
 
 def build() -> rf.Model:

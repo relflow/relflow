@@ -40,7 +40,7 @@ def test_custom_registration_preserves_subclass_and_node_overrides():
         reduction=None,
         batch_size=3,
         events=rf.Branch(length=3, amount=rf.Number),
-        target=rf.Category(mask=True),
+        target=rf.Category(predict=True),
         profile=rf.Number,
         cls=rf.Number,
         fields={"preset": rf.Number},
@@ -66,7 +66,7 @@ def test_custom_policy_survives_checkpoint_without_registration_and_defaults_new
 
     selected = presets.register(profile())
     original = MerchantModel(
-        preset=selected.name, events=rf.Branch(length=2, amount=rf.Number), label=rf.Category(mask=True)
+        preset=selected.name, events=rf.Branch(length=2, amount=rf.Number), label=rf.Category(predict=True)
     )
     original.update(rf.where("address") == "/events", n_layers=2)
     pathname = original.save(tmp_path / "custom.ckpt")
@@ -125,7 +125,7 @@ def test_declared_name_field_is_independent_of_preset_selection():
     class NamedModel(rf.Model):
         name = rf.Category
         preset = rf.Number
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     model = NamedModel(preset="small", d_model=8)
     assert model.schema.fields.name is None

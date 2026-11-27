@@ -19,10 +19,10 @@ const lessons: Record<CaseId, { title: string; description: string; fields: stri
   },
   demand: {
     title: 'The same value type can be context or an answer',
-    description: 'Past units sold are observed numeric context. Future units sold are numeric targets. The representation remains Number while masking changes the field’s role.',
+    description: 'Past units sold are observed numeric context. Future units sold are numeric targets. The representation remains Number while predict=True declares a supervised target.',
     fields: ['history', 'horizon'],
     note: 'The historical branch reads known units. The horizon branch learns hidden units for supplied future weeks. Planned promotions can remain known Boolean inputs.',
-    takeaway: 'Type and role are separate decisions. Number represents the quantity; the target mask says which values must be learned rather than read as context.',
+    takeaway: 'Type and role are separate decisions. Number represents the quantity. Set predict=True to use it as an answer to learn.',
   },
   credit: {
     title: 'Keep category identities separate from financial magnitudes',

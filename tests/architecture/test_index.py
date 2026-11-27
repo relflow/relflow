@@ -33,7 +33,7 @@ def model(*, index: bool = True, **options) -> rf.Model:
         n_layers=1,
         n_heads=2,
         events=rf.Branch(length=6, **children, amount=rf.Number, **options),
-        score=rf.Number(mask=True),
+        score=rf.Number(predict=True),
     )
     return built.eval()
 
@@ -100,7 +100,7 @@ def test_unreduced_indexed_branch_decodes_every_record_by_slot_and_ignores_index
             reduction=None,
             at=rf.Index(granularity="hours"),
             amount=rf.Number,
-            doubled=rf.Number(mask=True),
+            doubled=rf.Number(predict=True),
         ),
         label=rf.Number,
     ).eval()

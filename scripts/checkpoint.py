@@ -115,14 +115,14 @@ def create(output: Path) -> None:
             embed=True,
             amount=rf.Number,
             merchant=rf.Category(p_unavailable=0),
-            risk=rf.Number(mask=True),
-            label=rf.Category(mask=True, p_unavailable=0, topk=[2]),
+            risk=rf.Number(predict=True),
+            label=rf.Category(predict=True, p_unavailable=0, topk=[2]),
             items=rf.Branch(
                 length=4,
                 embed=True,
                 sku=rf.Category(p_unavailable=0),
-                total=rf.Number(mask=True),
-                adjustments=rf.Branch(length=2, amount=rf.Number, estimate=rf.Number(mask=True)),
+                total=rf.Number(predict=True),
+                adjustments=rf.Branch(length=2, amount=rf.Number, estimate=rf.Number(predict=True)),
             ),
         )
     )

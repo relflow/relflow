@@ -11,7 +11,7 @@ const sample = `import relflow as rf
 class Delivery(rf.Model):
     """An order's delivery estimate."""
     amount = rf.Number
-    days = rf.Number(mask=True)`;
+    days = rf.Number(predict=True)`;
 const roles = Object.keys(palettes[0].light);
 const schemeStyles = (palette: (typeof palettes)[number]) =>
   ['light', 'dark']

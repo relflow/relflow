@@ -16,12 +16,12 @@ from relflow.tensorfields.extensions.set import loss
 ADDRESS = rf.Address("/tags")
 
 
-def model(*, mask=False, p_unavailable=0.0):
+def model(*, predict=False, task=None, p_unavailable=0.0):
     return rf.Model(
         preset="small",
         d_model=8,
         attention=None,
-        tags=rf.Set(mask=mask, p_unavailable=p_unavailable),
+        tags=rf.Set(predict=predict, task=task, p_unavailable=p_unavailable),
     )
 
 
@@ -51,7 +51,7 @@ def dense_embedding(module, field, values, parameters):
 def test_small_sets_do_not_allocate_per_vocabulary_member(objective):
     sizes = []
     for cardinality in (4, 4096):
-        module = model(mask=rf.Mask(dropout=False, reconstruct=True) if objective else False)
+        module = model(task=rf.reconstruct() if objective else None)
         module.encode(table([[f"label-{index}"] for index in range(cardinality)]), strata="train")
         field = module.encode(table([["label-0"], ["label-2", "label-3"], [], None]), strata="train")[ADDRESS]
         contents = [field.content]
@@ -109,7 +109,7 @@ def test_empty_member_axis_is_valid_and_preserves_null_state():
 def test_unavailable_augmentation_preserves_compact_pristine_targets():
     source = table([["a", "b", "a"], [], None])
     field = model(p_unavailable=1.0).encode(source, strata="train")[ADDRESS]
-    supervised = model(mask=True, p_unavailable=1.0).encode(source, strata="train")[ADDRESS]
+    supervised = model(predict=True, p_unavailable=1.0).encode(source, strata="train")[ADDRESS]
     answers = supervised.targets[rf.TensorKey.content]
     assert field.content["indices"].eq(-1).all()
     assert field.content["unavailable"].reshape(-1).tolist() == [2, 0, 0]
@@ -129,7 +129,7 @@ def test_nested_member_axis_survives_clone_device_transfer_and_coordinate_select
             length=3,
             tags=rf.Set(
                 p_unavailable=0.0,
-                mask=rf.Mask(dropout=False, reconstruct=True) if objective else False,
+                task=rf.reconstruct() if objective else None,
             ),
         ),
     )
@@ -186,7 +186,7 @@ def test_prefetched_member_ids_rebind_after_growth_without_mutating_workers(stra
 
 
 def test_compact_supervised_targets_match_dense_binary_loss_and_gradients():
-    module = model(mask=True)
+    module = model(predict=True)
     module.encode(table([["a", "b", "c"]]), strata="train")
     module.track = lambda names, value: value
     values = [["b", "a", "a"], ["a", "novel"], ["novel"], [], None]

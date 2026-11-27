@@ -165,6 +165,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 GROUPS = ("A", "B", "C")
 ITEMS_PER_GROUP = 2
@@ -266,7 +267,7 @@ class Item(rf.Branch):
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, reduction=None)
     selected_group = rf.Category(p_unavailable=0.0)
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P010", seed=3605)

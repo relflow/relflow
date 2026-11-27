@@ -146,6 +146,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 EFFECTS = {"left": -1.5, "right": 1.5, None: -3.0}
@@ -162,7 +163,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 class Model(rf.Model):
     x = rf.Number
     code = rf.Category(p_unavailable=0.3)
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

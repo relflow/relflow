@@ -14,7 +14,10 @@ represented and how its predictions are evaluated during training.
 
 ## Declaring targets
 
-Set `mask=True` on a leaf to make it a supervised prediction target.
+Set `predict=True` on a leaf to supervise that field, or on a child branch to
+supervise every active descendant leaf. The supplied collection determines
+the number and order of rows to predict. Empty records can stand in for rows
+whose answers are all unknown.
 
 ```python
 import relflow as rf
@@ -24,8 +27,8 @@ class Claim(rf.Branch):
     """One submitted claim and its settled outcomes."""
 
     amount = rf.Number
-    paid_amount = rf.Number(mask=True)
-    is_fraudulent = rf.Boolean(mask=True)
+    paid_amount = rf.Number(predict=True)
+    is_fraudulent = rf.Boolean(predict=True)
 
 
 class ClaimsModel(rf.Model):
@@ -40,9 +43,8 @@ In this model, `policy_type` and each claim’s `amount` provide context.
 learns a payout amount; the Boolean target learns the probability of fraud.
 Both draw on the context available within the model tree.
 
-The `mask=True` shorthand combines two choices: the leaf is excluded from
-input embedding, and its observed values supply a reconstruction objective.
-Its full declaration is `rf.Mask(skip=True, dropout=False, reconstruct=True)`.
+With `predict=True`, the encoder never reads that leaf. Its observed values
+supply the supervised objective, and its decoder writes the predicted answer.
 
 ## Learning from hidden answers
 
@@ -83,13 +85,13 @@ collection; these targets predict their values rather than creating new claims.
 ## Masking known inputs
 
 Masking can also hide values which would ordinarily be available as context.
-For example, `rf.Number(mask=0.1)` randomly hides input values during training.
+For example, `rf.Number(hide=0.1)` randomly hides input values during training.
 This input dropout encourages the model to work with incomplete context,
 without adding a reconstruction objective for that leaf. It is disabled during
 validation, testing, and prediction.
 
 To teach the model to reconstruct a sampled portion of an observed field, use
-an explicit policy such as `rf.Mask(rate=0.1, reconstruct=True)`. Here, selected
+`task=rf.reconstruct(rate=0.1)`. Here, selected
 values provide their own training answers. This is useful for learning from
 existing data before adding a supervised business target.
 

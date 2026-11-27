@@ -244,7 +244,7 @@ class SchemaEditor:
                 logger.bind(component="schema_mutation", action="override").info("overrode model schema")
                 yield
         finally:
-            ModelGraph.rebuild(self.module)
-            self.module.reset_contracts()
             if entered:
+                ModelGraph.rebuild(self.module)
+                self.module.reset_contracts()
                 logger.bind(component="schema_mutation", action="override_restore").info("restored model schema")

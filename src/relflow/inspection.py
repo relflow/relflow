@@ -88,6 +88,10 @@ class Artifact:
                 {"address": str(address), **node.model_dump(mode="json", exclude={"fields"})}
                 for address, node in sorted(nodes.items(), key=lambda item: str(item[0]))
             ],
+            "tasks": [
+                {"kind": binding.task.kind, "owners": list(binding.owners), "targets": list(binding.targets)}
+                for binding in self.schema.tasks
+            ],
             "objectives": list(map(str, self.schema.objectives)),
             "predictions": list(map(str, self.schema.decodes)),
             "representations": list(map(str, self.schema.embed)),

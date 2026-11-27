@@ -149,7 +149,9 @@ def test_warm_has_no_required_directory_and_counts_only_new_vectors(encoder):
 
 
 def test_empty_collection_and_hidden_targets_keep_geometry(encoder):
-    model = rf.Model(preset="small", events=rf.Branch(length=None, body=rf.Text(model=MODEL, max_length=4, mask=True)))
+    model = rf.Model(
+        preset="small", events=rf.Branch(length=None, body=rf.Text(model=MODEL, max_length=4, predict=True))
+    )
     source = pl.DataFrame({"events": [[{"body": "a"}, None, {"body": ""}], [], None]})
     batch = model.encode(source, strata="train")["/events/body"]
     embedder = model.nodes["/events/body"].embedder
@@ -190,7 +192,7 @@ def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
         attention=None,
         dropout=0.0,
         body=rf.Text(model=str(assets), max_length=8, resident=1, embed=True),
-        target=rf.Text(model=str(assets), max_length=8, mask=True),
+        target=rf.Text(model=str(assets), max_length=8, predict=True),
     ).to(device)
     reference = rf.Model(preset="small", body=rf.Text(model=str(assets), max_length=8, cache=False)).to(device)
     source = pl.DataFrame({"body": ["hello world", "other", None], "target": ["other", "hello", "world"]})

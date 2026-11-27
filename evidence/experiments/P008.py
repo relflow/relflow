@@ -151,6 +151,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 ITEMS = 8
 
@@ -218,7 +219,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, attention=None, reduction=rf.Mean())
-    covariance = rf.Number(mask=True, objective="mse")
+    covariance = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P008", seed=3513)

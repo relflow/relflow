@@ -22,14 +22,14 @@ def configured():
             embed=True,
             reduction=rf.Attention(n_outputs=4),
             amount=rf.Number,
-            approved=rf.Boolean(mask=True, embed=True),
+            approved=rf.Boolean(predict=True, embed=True),
             transactions=rf.Branch(
                 length=3,
                 embed=True,
                 reduction=rf.Attention(n_outputs=4),
                 amount=rf.Number,
-                disputed=rf.Boolean(mask=True, embed=True),
-                score=rf.Number(mask=True),
+                disputed=rf.Boolean(predict=True, embed=True),
+                score=rf.Number(predict=True),
             ),
         ),
     ).eval()
@@ -176,7 +176,7 @@ def test_third_party_rich_results_keep_nested_declared_types_and_metadata(tmp_pa
 
     try:
         model = rf.Model(
-            preset="small", d_model=8, events=rf.Branch(length=3, amount=rf.Number, note=Request(mask=True))
+            preset="small", d_model=8, events=rf.Branch(length=3, amount=rf.Number, note=Request(predict=True))
         )
         source = pa.Table.from_pylist([{"events": [None, {"amount": 1.0}]}])
         data = rf.ArrowDataModule(model=model, predict=source)
@@ -209,7 +209,7 @@ def test_custom_output_rejects_noncanonical_list_names_at_planning():
         return pa.struct([pa.field("candidates", pa.list_(pa.float32()))])
 
     try:
-        model = rf.Model(preset="small", d_model=8, note=Request(mask=True))
+        model = rf.Model(preset="small", d_model=8, note=Request(predict=True))
         with pytest.raises(ValueError, match="/note.*list children named 'element'.*'item'"):
             plan(model)
     finally:

@@ -24,7 +24,7 @@ def events(rows):
 
 
 def test_null_objects_count_as_slots_before_leaf_values_and_masks():
-    configured = schema(events=rf.Branch(left=rf.Number, right=rf.Number(mask=True)))
+    configured = schema(events=rf.Branch(left=rf.Number, right=rf.Number(predict=True)))
     source = events([[{"left": None, "right": None}, None, {"left": None, "right": 4.0}], [], None])
 
     resolved = coalesce(source, configured, Strata.train)
@@ -123,7 +123,7 @@ def test_untyped_null_or_absent_collections_do_not_require_descendant_atoms(miss
     configured = schema(
         events=rf.Branch(
             items=rf.Branch(value=rf.Number),
-            mask=rf.Mask(query="unavailable_selector", skip=True, reconstruct=True),
+            task=rf.reconstruct(query="unavailable_selector"),
         )
     )
     source = pa.table({"unused": [1, 2]}) if missing else pa.table({"events": [None, None]})

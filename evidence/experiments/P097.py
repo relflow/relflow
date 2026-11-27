@@ -136,6 +136,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -162,7 +163,7 @@ def records(*, rows: int, seed: int, count: int = 4, extrapolate: bool = False) 
 
 class Model(rf.Model):
     query = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 class ContextModel(Model):

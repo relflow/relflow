@@ -128,7 +128,7 @@ class ChurnModel(rf.Model):
     tenure_months = rf.Number
     monthly_usage = MonthlyUsage(length=12, overflow="tail")
     support_tickets = SupportTicket(length=32, overflow="tail")
-    churn_90d = rf.Boolean(mask=True)
+    churn_90d = rf.Boolean(predict=True)
 
 
 if __name__ == "__main__":
@@ -155,7 +155,7 @@ independently selects training defaults, including the optimizer, batch size,
 and training budget. The bundled `small` and `medium` presets are alternative
 recipes; you do not need to configure those settings individually to get started.
 
-`mask=True` makes `churn_90d` a supervised target: the historical answer trains
+`predict=True` makes `churn_90d` a supervised target: the historical answer trains
 the model without becoming an input. Validation and test records also include
 observed answers, hidden in the same way for evaluation. New prediction requests
 may omit the target. Each history is supplied oldest to newest;

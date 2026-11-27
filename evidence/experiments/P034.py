@@ -138,6 +138,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 ITEMS = 6
 
@@ -181,7 +182,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 class Item(rf.Branch):
     value = rf.Number
     peer_mean = rf.Number
-    deviation = rf.Number(mask=True, objective="mse", n_linear=2)
+    deviation = rf.Number(**TARGET, objective="mse", n_linear=2)
 
 
 class PredictionModel(rf.Model):

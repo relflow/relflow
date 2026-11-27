@@ -9,6 +9,7 @@ from anytree import NodeMixin
 from pydantic_core import CoreSchema
 
 from relflow.structs.enums import Overflow
+from relflow.structs.tasks import SUPERVISED, Probability, Selection, Task, TaskInput, selection
 
 if TYPE_CHECKING:
     from relflow.structs.structure import Branch
@@ -16,101 +17,11 @@ if TYPE_CHECKING:
 Rate: TypeAlias = Annotated[float, pydantic.Field(ge=0.0, lt=1.0)]
 
 
-class Mask(pydantic.BaseModel):
-    """Select coordinates to hide, drop, or reconstruct.
-
-    ``query`` reads an explicit Boolean selection from the input. ``rate``
-    samples coordinates during training. ``skip=True`` prevents embedding;
-    ``reconstruct=True`` makes selected coordinates supervised targets.
-    ``dropout`` defaults to the opposite of ``reconstruct``. These last two
-    effects cannot both be enabled.
-    """
-
-    model_config = pydantic.ConfigDict(frozen=True, extra="forbid")
-
-    query: str | None = None
-    rate: Annotated[float, pydantic.Field(ge=0.0, le=1.0)] | None = None
-    skip: bool = False
-    dropout: bool | None = None
-    reconstruct: bool = False
-
-    @pydantic.field_validator("rate", mode="before")
-    @classmethod
-    def check_rate(cls, value: Any) -> Any:
-        if isinstance(value, bool):
-            raise TypeError("Mask.rate must be a number, not a boolean")
-        return value
-
-    @pydantic.model_validator(mode="after")
-    def check_policy(self) -> Self:
-        dropout = not self.reconstruct if self.dropout is None else self.dropout
-        if dropout and self.reconstruct:
-            raise ValueError("Mask.dropout=True cannot be combined with reconstruct=True")
-
-        if self.query is not None:
-            from relflow.data.query import compile
-
-            compile(self.query)
-
-        object.__setattr__(self, "dropout", dropout)
-        return self
-
-    @classmethod
-    def normalize(cls, value: Any) -> tuple["Mask", ...]:
-        """Normalize one public node value to immutable canonical policies."""
-        if value is False:
-            return ()
-        if value is True:
-            return (cls(skip=True, dropout=False, reconstruct=True),)
-        if value is None:
-            raise TypeError("mask cannot be None; use False or an empty list or tuple")
-        if isinstance(value, cls):
-            policies = (value,)
-        elif isinstance(value, float):
-            policies = (cls(rate=value),)
-        elif isinstance(value, (list, tuple)):
-            if not all(isinstance(policy, cls) for policy in value):
-                raise TypeError("mask list and tuple entries must be Mask objects")
-            policies = tuple(value)
-        else:
-            raise TypeError("mask must be False, True, a float, a Mask, or a list or tuple of Mask objects")
-
-        normalized: list[Mask] = []
-        seen: set[Mask] = set()
-        for policy in policies:
-            if policy.rate == 0.0:
-                continue
-            if policy.rate == 1.0:
-                policy = policy.model_copy(update={"rate": None})
-            if policy in seen:
-                continue
-            seen.add(policy)
-            normalized.append(policy)
-        return tuple(normalized)
-
-    @classmethod
-    def restore(cls, value: Any) -> Any:
-        """Restore serialized policies while retaining the constructor input contract."""
-        if isinstance(value, Mapping):
-            return cls.model_validate(dict(value))
-        if isinstance(value, (list, tuple)):
-            return tuple(
-                cls.model_validate(dict(policy)) if isinstance(policy, Mapping) else policy for policy in value
-            )
-        return value
-
-
-MaskInput: TypeAlias = Mask | float | bool | list[Mask] | tuple[Mask, ...]
+HideInput: TypeAlias = float | str | tuple[float | str, ...]
 
 
 class FieldOptions(TypedDict, total=False):
-    """Shared constructor inputs; requests normalize ``mask`` to a tuple.
-
-    ``mask=True`` declares a supervised target that is never embedded. A float
-    adds training-only random masking. Use explicit ``Mask`` objects to select
-    coordinates or configure reconstruction. ``query`` is always explicit;
-    names alone never infer a structural query.
-    """
+    """Shared leaf options for input visibility, supervised prediction, and explicit tasks."""
 
     description: str | None
     embed: bool
@@ -123,7 +34,10 @@ class FieldOptions(TypedDict, total=False):
     pooling: Literal["query", "mean"]
     decoder_position: bool | None
     weight: float
-    mask: MaskInput
+    hide: HideInput
+    predict: bool
+    ablate: float
+    task: TaskInput
     n_linear: int
 
 
@@ -252,7 +166,74 @@ class Node(NodeMixin, pydantic.BaseModel):
         return None
 
 
-class Leaf(Node):
+def check_policy_options(values: Mapping[str, Any], *, branch: bool) -> None:
+    """Validate SDK argument forms before Pydantic restores persisted mappings and arrays."""
+    if isinstance(values.get("hide"), list):
+        raise TypeError("hide expects a float, a Boolean query string, or a tuple of those selectors")
+    if branch and isinstance(values.get("ignore"), list):
+        raise TypeError("ignore expects a direct child name or a tuple of names")
+    task = values.get("task")
+    if task is not None and not isinstance(task, Task):
+        if not isinstance(task, tuple) or not all(isinstance(item, Task) for item in task):
+            raise TypeError("task expects a task such as rf.reconstruct(...), a tuple of tasks, or None")
+
+
+class Field(Node):
+    """A schema node with input visibility and learning task declarations."""
+
+    hide: HideInput = ()
+    predict: pydantic.StrictBool = False
+    ablate: Probability = 0.0
+    task: TaskInput = None
+
+    def __init__(self, **data: Any) -> None:
+        check_policy_options(data, branch=not isinstance(self, Leaf))
+        super().__init__(**data)
+
+    @pydantic.field_validator("hide", mode="before")
+    @classmethod
+    def check_hide(cls, value: Any) -> HideInput:
+        from relflow.data.query import compile
+
+        sequence = isinstance(value, (tuple, list))
+        selectors = value if sequence else (value,)
+        for selector in selectors:
+            if isinstance(selector, bool):
+                raise TypeError(
+                    "hide expects a probability or Boolean query path. Use predict=True on a supervised leaf or child branch, or omit hide to disable input masking."
+                )
+            if isinstance(selector, str):
+                compile(selector)
+            elif not isinstance(selector, float):
+                raise TypeError(f"hide expects a float probability or a Boolean query path, got {selector!r}")
+            elif not 0.0 <= selector < 1.0:
+                raise ValueError(f"hide probability must be in [0, 1), got {selector!r}")
+        return tuple(selectors) if sequence else value
+
+    @property
+    def declared_tasks(self) -> tuple[Task, ...]:
+        explicit = () if self.task is None else self.task if isinstance(self.task, tuple) else (self.task,)
+        return (SUPERVISED, *explicit) if self.predict else explicit
+
+
+def selections(node: Field) -> tuple[Selection, ...]:
+    """Lower a node's declarations to the field actions needed by the data pipeline."""
+    from relflow.structs.structure import Branch
+
+    selectors = node.hide if isinstance(node.hide, tuple) else (node.hide,)
+    ignore = node.ignore if isinstance(node, Branch) else ()
+    rules = [
+        Selection("hide", query=value, ignore=ignore)
+        if isinstance(value, str)
+        else Selection("hide", rate=value, ignore=ignore)
+        for value in dict.fromkeys(selectors)
+        if value != 0.0
+    ]
+    rules.extend(rule for task in node.declared_tasks if (rule := selection(task)) is not None)
+    return tuple(rules)
+
+
+class Leaf(Field):
     """Base tensorfield request node.
 
     Concrete tensorfield constructors such as `Number` and `Category` inherit
@@ -275,8 +256,6 @@ class Leaf(Node):
     pooling: Literal["query", "mean"] = "query"
     decoder_position: pydantic.StrictBool | None = None
     weight: Annotated[float, pydantic.Field(gt=0.0, default=1.0)] = 1.0
-    # The before-validator normalizes this public Boolean default to a tuple.
-    mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
     n_linear: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
 
     def __init__(self, **data: Any) -> None:
@@ -284,10 +263,11 @@ class Leaf(Node):
             raise TypeError("tensorfield names come from the parent; use field_name=Tensorfield(...)")
         super().__init__(**data)
 
-    @pydantic.field_validator("mask", mode="before")
-    @classmethod
-    def check_mask(cls, value: Any) -> tuple[Mask, ...]:
-        return Mask.normalize(value)
+    @pydantic.model_validator(mode="after")
+    def check_task(self) -> Self:
+        for task in self.declared_tasks:
+            task.validate_placement(site="leaf", address=self.address or None)
+        return self
 
     @pydantic.field_validator("query", mode="before")
     @classmethod
@@ -296,8 +276,24 @@ class Leaf(Node):
 
     @property
     def embedded(self) -> bool:
-        """Whether this leaf produces an encoder parcel: active and never skipped by its mask."""
-        return self.active and not any(mask.skip for mask in self.mask)
+        """Whether any source row can contribute this leaf to encoder context."""
+        if not self.active:
+            return False
+        child_name = None
+        for node in reversed(self.path):
+            if isinstance(node, Field):
+                for task in node.declared_tasks:
+                    rule = selection(task)
+                    if (
+                        rule
+                        and rule.skips_input
+                        and not rule.sampled
+                        and rule.query is None
+                        and child_name not in rule.ignore
+                    ):
+                        return False
+                child_name = node.name
+        return True
 
     @pydantic.field_validator("type")
     @classmethod

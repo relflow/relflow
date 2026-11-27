@@ -13,7 +13,6 @@ from relflow.helpers.optimizers import adamw
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.vector import Decoder, Embedder, TensorField, loss, write
 from relflow.tensorfields.extensions.vector import output as output_type
@@ -28,7 +27,8 @@ def build_schema(
     *,
     n_dim: int = 3,
     objective: str = "l2",
-    mask: bool | Mask = False,
+    predict: bool = False,
+    task=None,
     jitter: Jitter | dict[str, object] | None = None,
 ) -> Schema:
     options = {} if jitter is None else {"jitter": jitter}
@@ -37,7 +37,10 @@ def build_schema(
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, embedding=rf.Vector(n_dim=n_dim, objective=objective, mask=mask, **options)),
+        items=rf.Branch(
+            length=2,
+            embedding=rf.Vector(n_dim=n_dim, objective=objective, predict=predict, task=task, **options),
+        ),
     )
 
 
@@ -179,7 +182,7 @@ def test_vector_jitter_runs_only_in_training_mode(monkeypatch: pytest.MonkeyPatc
 
 
 def test_vector_jitter_preserves_content_and_reconstruction_targets(monkeypatch: pytest.MonkeyPatch):
-    schema = build_schema(jitter=Jitter(add=0.5), mask=Mask(reconstruct=True))
+    schema = build_schema(jitter=Jitter(add=0.5), task=rf.reconstruct())
     field = tensorfield(values=values(), schema=schema, strata=Strata.train)
     embedder = Embedder(schema=schema, address=ADDRESS)
     content = field.content.clone()
@@ -220,7 +223,7 @@ class DummyModule:
 
 @pytest.mark.parametrize(("objective", "expected"), [("l1", 2.0), ("l2", 4.0)])
 def test_vector_loss_uses_selected_objective(objective: str, expected: float):
-    schema = build_schema(objective=objective, mask=Mask(reconstruct=True))
+    schema = build_schema(objective=objective, task=rf.reconstruct())
 
     field = tensorfield(
         values=values(),
@@ -249,7 +252,7 @@ def test_vector_loss_uses_selected_objective(objective: str, expected: float):
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_vector_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model(preset="small", d_model=8, target=rf.Vector(n_dim=2, mask=True))
+    model = rf.Model(preset="small", d_model=8, target=rf.Vector(n_dim=2, predict=True))
     decoder = model.nodes["/target"].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
@@ -324,11 +327,11 @@ def test_vector_retains_targets_for_reconstruction(owner: str, strata: Strata):
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        mask=Mask(reconstruct=True) if owner == "root" else False,
+        task=rf.reconstruct() if owner == "root" else None,
         items=rf.Branch(
             length=2,
-            mask=Mask(reconstruct=True) if owner == "branch" else False,
-            embedding=rf.Vector(n_dim=3, mask=Mask(reconstruct=True) if owner == "leaf" else False),
+            task=rf.reconstruct() if owner == "branch" else None,
+            embedding=rf.Vector(n_dim=3, task=rf.reconstruct() if owner == "leaf" else None),
         ),
     )
 
@@ -349,7 +352,7 @@ def test_vector_retains_targets_for_reconstruction(owner: str, strata: Strata):
 @pytest.mark.parametrize("reconstruct", [False, True])
 @pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
 def test_vector_target_policy_preserves_empty_nested_rows(reconstruct: bool, strata: Strata):
-    schema = build_schema(mask=Mask(reconstruct=True) if reconstruct else False)
+    schema = build_schema(task=rf.reconstruct() if reconstruct else None)
     rows = [[[]], values()[1]]
 
     field = tensorfield(values=rows, schema=schema, strata=strata)
@@ -374,7 +377,7 @@ def test_vector_unused_target_omission_preserves_training(monkeypatch: pytest.Mo
             dropout=0.0,
             batch_size=2,
             embedding=rf.Vector(n_dim=3),
-            label=rf.Number(mask=True),
+            label=rf.Number(predict=True),
         )
         monkeypatch.setattr(model, "log", lambda *args, **kwargs: None)
         source = arrow_table(
@@ -420,12 +423,12 @@ def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets(
     rows = pa.table({"vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [1.0, float("inf")], None])})
     expected = [Tokens.valued, Tokens.other, Tokens.other, Tokens.null]
 
-    inputs = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    inputs = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(predict=True))
     field = inputs.encode(rows, strata="predict")[rf.Address("vec")]
     assert field.state.reshape(-1).tolist() == expected
     assert torch.isfinite(field.content).all() and field.content.reshape(4, 2)[1].tolist() == [0.0, 0.0]
 
-    targets = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2, mask=True))
+    targets = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2, predict=True))
     field = targets.encode(rows, strata="train")[rf.Address("vec")]
     assert field.targets[TensorKey.state].reshape(-1).tolist() == expected
     assert torch.isfinite(field.targets[TensorKey.content]).all()
@@ -434,7 +437,7 @@ def test_vector_non_finite_elements_take_the_other_state_for_inputs_and_targets(
 
 @pytest.mark.integration
 def test_vector_training_survives_a_non_finite_element(tmp_path):
-    model = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, vec=rf.Vector(n_dim=2), label=rf.Boolean(predict=True))
     rows = pa.table(
         {
             "vec": pa.array([[1.0, 2.0], [float("nan"), 2.0], [3.0, float("-inf")], [0.5, 0.5]]),

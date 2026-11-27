@@ -59,7 +59,7 @@ recording = rf.Audio(model="./models/whisper-base-e37978b")
 
 ## How is this leaf trained?
 
-Downstream targets train a field-specific projection into the model's representation space while the pretrained audio encoder remains frozen. A reconstructing mask adds state classification and an L1 or L2 objective against the pristine audio vector. Jitter applies only to eligible training inputs.
+Downstream targets train a field-specific projection into the model's representation space while the pretrained audio encoder remains frozen. A reconstruction task adds state classification and an L1 or L2 objective against the pristine audio vector. Jitter applies only to eligible training inputs.
 
 ### Predictions
 
@@ -80,7 +80,7 @@ import relflow as rf
 
 class SupportCall(rf.Model):
     recording = rf.Audio(base="s3://calls/by-digest/", immutable=True, max_windows=6)
-    escalated = rf.Boolean(mask=True)
+    escalated = rf.Boolean(predict=True)
 
 model = SupportCall(preset="small")
 ```

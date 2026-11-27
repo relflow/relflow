@@ -135,6 +135,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 4096
@@ -158,7 +159,7 @@ def build(overflow: str) -> rf.Model:
 
     class Model(rf.Model):
         events = Event(length=CAPACITY, overflow=overflow, reduction=rf.Attention())
-        answer = rf.Number(mask=True, objective="mse")
+        answer = rf.Number(**TARGET, objective="mse")
 
     model = Model(preset=CONTROL.name)
     return model

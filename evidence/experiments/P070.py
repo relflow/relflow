@@ -173,6 +173,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 300
 LABELS = ("amber", "blue", "coral", "green")
@@ -191,7 +192,7 @@ def records(*, rows: int, seed: int, phase: str = "initial") -> Iterator[dict]:
 
 class Model(rf.Model):
     x = rf.Number
-    label = rf.Enum(values=LABELS, p_unavailable=0.0, topk=[4], mask=True)
+    label = rf.Enum(values=LABELS, p_unavailable=0.0, topk=[4], **TARGET)
 
 
 def build() -> rf.Model:

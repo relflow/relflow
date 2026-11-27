@@ -148,6 +148,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 TRAIN_ROWS = 3072
@@ -223,7 +224,7 @@ def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: 
 
 class Model(rf.Model):
     measurement = rf.Number
-    target = rf.Enum(values=LABELS, mask=True)
+    target = rf.Enum(values=LABELS, **TARGET)
 
 
 @experiment("P088", seed=8801)

@@ -150,6 +150,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 OPERATIONS = ("sum", "mean", "min", "max")
 
@@ -232,7 +233,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=8, n_layers=2, reduction=rf.Attention(n_layers=2))
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
     operation = rf.Category(p_unavailable=0.0)
 
 

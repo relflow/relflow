@@ -135,6 +135,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -178,7 +179,7 @@ class Observation(rf.Branch):
 class Model(rf.Model):
     observations = Observation(length=4, reduction=None)
     forecast_at = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

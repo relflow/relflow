@@ -14,7 +14,6 @@ from relflow.data.ragged import RaggedField, Sources, coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TENSORFIELDS, Context
 from relflow.tensorfields.extensions import text as text_extension
 from relflow.tensorfields.extensions.text import (
@@ -45,7 +44,8 @@ def build_schema(
     encoder_rms: bool = True,
     encoder_batch_size: int = 2,
     tokenizer_batch_size: int | None = None,
-    mask: bool | Mask = False,
+    predict: bool = False,
+    task=None,
     jitter: Jitter | dict[str, object] | None = None,
 ) -> Schema:
     options = {}
@@ -69,7 +69,8 @@ def build_schema(
                 encoder_pooling=encoder_pooling,
                 encoder_rms=encoder_rms,
                 objective=objective,
-                mask=mask,
+                predict=predict,
+                task=task,
                 **options,
             ),
         ),
@@ -413,7 +414,7 @@ def test_text_tokenizes_unique_strings_and_restores_sparse_coordinates(
         if objective
         else target
     )
-    schema = build_schema(max_length=max_length, tokenizer_batch_size=2, mask=objective)
+    schema = build_schema(max_length=max_length, tokenizer_batch_size=2, predict=objective)
     present = torch.from_numpy(states != Tokens.padded).reshape(target.shape)
     trainable = present.clone() if objective else torch.zeros_like(present)
     inferred = torch.zeros_like(present)
@@ -524,7 +525,7 @@ def test_text_forward_never_reads_reconstruction_targets(
 
     schema = build_schema(
         encoder_batch_size=2,
-        mask=Mask(reconstruct=True),
+        task=rf.reconstruct(),
     )
     field = tensorfield(
         values=values(),
@@ -724,7 +725,7 @@ def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.M
 
     schema = build_schema(
         jitter=Jitter(add=0.5),
-        mask=Mask(reconstruct=True),
+        task=rf.reconstruct(),
     )
     field = tensorfield(values=values(), schema=schema, strata=Strata.train)
     embedder = Embedder(schema=schema, address=ADDRESS)
@@ -764,7 +765,7 @@ def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.M
 def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch, objective: str, expected: float):
     patch_hf(monkeypatch)
 
-    schema = build_schema(objective=objective, mask=Mask(reconstruct=True))
+    schema = build_schema(objective=objective, task=rf.reconstruct())
     field = tensorfield(
         values=values(),
         schema=schema,
@@ -798,7 +799,7 @@ def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch
 def test_text_evaluation_metrics_accumulate_across_unequal_batches(monkeypatch: pytest.MonkeyPatch):
     patch_hf(monkeypatch)
 
-    schema = build_schema(mask=Mask(reconstruct=True))
+    schema = build_schema(task=rf.reconstruct())
     embedder = Embedder(schema=schema, address=ADDRESS)
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = DummyModule(schema, embedder, decoder)

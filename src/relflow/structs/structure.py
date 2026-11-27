@@ -11,12 +11,13 @@ import pydantic
 from relflow.structs import declaration
 from relflow.structs.enums import AttentionInput, AttentionMode, Overflow, OverflowInput
 from relflow.structs.reduction import Attention, ReductionConfig
-from relflow.structs.tree import Leaf, Mask, MaskInput, Node, Rate
+from relflow.structs.tasks import Names, TaskInput, selection
+from relflow.structs.tree import Field, HideInput, Leaf, Node, Rate, selections
 from relflow.structs.twigs import TWIGS, Twig
 from relflow.tensorfields import extensions as _extensions  # noqa: F401
 from relflow.tensorfields.base import TENSORFIELDS
 
-__all__ = ["Branch", "Mask", "RequestTypes", "OMITTED"]
+__all__ = ["Branch", "RequestTypes", "OMITTED"]
 
 RequestTypes: TypeAlias = Leaf
 
@@ -47,7 +48,7 @@ class BranchMeta(declaration.Declarations, type(Node)):
     """Collect branch children before Pydantic processes configuration fields."""
 
 
-class Branch(Node, metaclass=BranchMeta):
+class Branch(Field, metaclass=BranchMeta):
     """Repeated nested object group in a `relflow` schema.
 
     Parent keywords supply child names, such as ``amount=rf.Number``. Use a
@@ -71,7 +72,10 @@ class Branch(Node, metaclass=BranchMeta):
     of the reduction. ``cross=True`` mixes this branch's fields with a rank-eight
     multiplicative cross. ``ffnx`` multiplies this node's feed-forward hidden width
     and defaults to 8 independently of its parent.
-    ``mask`` accepts the same policies as a leaf and applies to its descendants.
+    ``hide`` hides selected rows across descendants, except direct children named by ``ignore``.
+    ``ablate`` samples an entire child collection per parent during training.
+    ``predict=True`` makes every active descendant leaf a supervised target.
+    ``task=rf.reconstruct(...)`` opts into beta self-supervised training on selected descendant values.
     Subclasses may declare children in their class bodies; constructing those
     subclasses configures the enclosing branch without replacing children.
     A bare branch subclass uses its default options, just like a bare leaf class.
@@ -87,8 +91,7 @@ class Branch(Node, metaclass=BranchMeta):
     overflow: Overflow | None = None
     n_layers: Annotated[int, pydantic.Field(gt=0, default=1)] = 1
     reduction: ReductionConfig | None = pydantic.Field(default_factory=Attention)
-    # The before-validator normalizes this public Boolean default to a tuple.
-    mask: tuple[Mask, ...] = cast(tuple[Mask, ...], pydantic.Field(default=False))
+    ignore: Names = ()
     fields: list[
         Branch | pydantic.SerializeAsAny[pydantic.InstanceOf[Leaf]] | pydantic.SerializeAsAny[pydantic.InstanceOf[Twig]]
     ] = pydantic.Field(default_factory=list)
@@ -110,7 +113,11 @@ class Branch(Node, metaclass=BranchMeta):
         ffnx: int = cast(int, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
-        mask: MaskInput = False,
+        hide: HideInput = (),
+        ignore: str | tuple[str, ...] = (),
+        ablate: float = 0.0,
+        predict: bool = False,
+        task: TaskInput = None,
         type: Literal["branch"] = "branch",
         **children: Branch | Leaf | Twig | builtins.type[Leaf] | builtins.type[Branch] | builtins.type[Twig],
     ) -> None:
@@ -131,17 +138,16 @@ class Branch(Node, metaclass=BranchMeta):
             ffnx=ffnx,
             reduction=reduction,
             dropout=dropout,
-            mask=mask,
+            hide=hide,
+            ignore=ignore,
+            ablate=ablate,
+            predict=predict,
+            task=task,
             type=type,
         )
         # Pydantic owns ordinary defaults; omitted options remain available for
         # a model preset to fill without replacing explicit defaults or None.
         super().__init__(**{name: value for name, value in data.items() if value is not OMITTED})
-
-    @pydantic.field_validator("mask", mode="before")
-    @classmethod
-    def check_mask(cls, value: Any) -> tuple[Mask, ...]:
-        return Mask.normalize(value)
 
     @pydantic.field_validator("fields", mode="before")
     @classmethod
@@ -204,11 +210,29 @@ class Branch(Node, metaclass=BranchMeta):
                 raise ValueError(f"duplicate field name: {field.name}")
             seen.add(field.name)
 
+        self.validate_exemptions()
         return self
+
+    def validate_exemptions(self) -> None:
+        names = {field.name for field in self.fields}
+        exemptions = set(self.ignore)
+        for task in self.declared_tasks:
+            if (rule := selection(task)) is not None:
+                exemptions.update(rule.ignore)
+        missing = sorted(exemptions - names)
+        if missing:
+            raise ValueError(
+                f"branch '{self.name or '/'}' ignore names unknown direct children {missing}; choose from {sorted(str(name) for name in names)}"
+            )
 
     def post_bind_validate(self) -> None:
         bounds(self)
-        if len(self.mask) == 0:
+        self.validate_exemptions()
+        if self.ablate and self.address == "/":
+            raise ValueError("ablate applies to a leaf or child branch; the model root is always present")
+        if self.predict and self.address == "/":
+            raise ValueError("predict=True requires a leaf or child branch; select the targets below the model root")
+        if not selections(self):
             return None
 
         active_leaves = [
@@ -217,6 +241,6 @@ class Branch(Node, metaclass=BranchMeta):
             if isinstance(descendant, Leaf) and getattr(descendant, "active", True)
         ]
         if not active_leaves:
-            raise ValueError(f"branch '{self.address}' has a mask but no active descendant leaves")
+            raise ValueError(f"branch '{self.address}' requires active descendant leaves for hide, predict, or task")
 
         return None

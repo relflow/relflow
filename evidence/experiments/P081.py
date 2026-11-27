@@ -225,6 +225,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import reconstruct
 
 BUDGET = 600
 BATCH_SIZE = 64
@@ -277,13 +278,13 @@ def condition(rows: list[dict], name: str, seed: int) -> list[dict]:
 
 
 def build() -> rf.Model:
-    mask = rf.Mask(rate=0.35, reconstruct=True)
+    pretrain = reconstruct(0.35)
 
     class Model(rf.Model):
-        channel = rf.Enum(values=CHANNELS, p_unavailable=0.0, mask=mask)
-        amount = rf.Number(mask=mask)
-        frequency = rf.Number(mask=mask)
-        nuisance = rf.Vector(n_dim=NUISANCE_DIM, mask=mask)
+        channel = rf.Enum(values=CHANNELS, p_unavailable=0.0, **pretrain)
+        amount = rf.Number(**pretrain)
+        frequency = rf.Number(**pretrain)
+        nuisance = rf.Vector(n_dim=NUISANCE_DIM, **pretrain)
 
     model = Model(preset=CONTROL.name, embed=True)
     return model

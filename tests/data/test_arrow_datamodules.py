@@ -397,7 +397,7 @@ def test_list_views_read_like_lists_even_when_their_views_are_out_of_order(monke
         n_heads=2,
         tags=rf.Set,
         items=rf.Branch(length=2, qty=rf.Number),
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
     )
 
     assert configured.predict(viewed).equals(configured.predict(plain))
@@ -424,7 +424,7 @@ def test_string_and_binary_views_read_like_their_large_layouts(monkeypatch: pyte
         n_heads=2,
         code=rf.Category,
         items=rf.Branch(length=4, sku=rf.Category, tag=rf.Hash),
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
     )
     viewed = table(pa.string_view(), pa.binary_view())
 
@@ -815,9 +815,7 @@ def test_rebatch_combines_chunks_once_per_fill():
 
 
 def test_rate_masks_differ_between_batches_and_replay_across_loaders():
-    configured = rf.Model(
-        preset="small", d_model=8, batch_size=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))
-    )
+    configured = rf.Model(preset="small", d_model=8, batch_size=8, amount=rf.Number(task=rf.reconstruct(rate=0.5)))
     table = pa.table({"amount": [float(value) for value in range(64)]})
 
     def patterns() -> list[list[bool]]:

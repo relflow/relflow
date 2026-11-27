@@ -164,6 +164,7 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 300
 TRAIN_ROWS = 2048
@@ -176,13 +177,13 @@ ARMS = ("duration", "number", "shuffled_gap", "shuffled_age")
 class DurationEvent(rf.Branch):
     age = rf.Duration(query=("../origin", "at"), granularity="hours")
     gap = rf.Duration(query="at", delta=True, granularity="hours")
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 class NumericEvent(rf.Branch):
     age = rf.Number(query="prepared_age")
     gap = rf.Number(query="prepared_gap")
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 class DurationModel(rf.Model):

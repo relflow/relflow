@@ -133,6 +133,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -181,7 +182,7 @@ class Day(rf.Branch):
 
 class Model(rf.Model):
     days = Day(length=None, overflow=None, reduction=rf.Attention())
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

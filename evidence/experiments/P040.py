@@ -153,6 +153,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 
 def records(*, pairs: int, seed: int) -> Iterator[dict]:
@@ -189,7 +190,7 @@ class Session(rf.Branch):
 
 class PredictionModel(rf.Model):
     sessions = Session(length=3, reduction=rf.Attention())
-    largest_session_total = rf.Number(mask=True, objective="mse")
+    largest_session_total = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P040", seed=2601)

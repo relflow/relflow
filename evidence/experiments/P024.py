@@ -146,6 +146,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import reconstruct
 
 PAIR_COUNT = 2
 
@@ -185,7 +186,7 @@ class MemoryRecord(rf.Branch):
     entity_id = rf.Hash(n_hashes=4, n_bands=8)
     role = rf.Category(p_unavailable=0.0)
     is_query = rf.Boolean
-    value = rf.Number(mask=rf.Mask(query="is_query", dropout=False, reconstruct=True), objective="mse")
+    value = rf.Number(**reconstruct("is_query"), objective="mse")
 
 
 class PredictionModel(rf.Model):

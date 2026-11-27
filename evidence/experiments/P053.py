@@ -127,7 +127,8 @@
 # `reading = z` and `backup = 2*z + 0.1`; the hidden target is `1.5*z - 0.2`.
 # The latent variable is never a separate input. Independent branch selectors
 # produce all four visibility patterns, independently of `z`. Leaf selectors
-# also hide each backup with probability 0.5. Train/validation/test use
+# also hide each backup with probability 0.5. A preprocessor leaves a null slot
+# for hidden views and clears only the backup record for hidden backups. Train/validation/test use
 # 4,096/512/2,048 independent records.
 #
 # ### Training and controls
@@ -180,6 +181,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 500
 
@@ -202,14 +204,22 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         }
 
 
+@rf.preprocess
+def redact(frame: pl.DataFrame) -> pl.DataFrame:
+    view = pl.element()
+    backup = pl.when(~view.struct.field("hide_backup")).then(pl.struct(value=view.struct.field("backup")))
+    visible = pl.when(~view.struct.field("hidden")).then(pl.struct(reading=view.struct.field("reading"), backup=backup))
+    return frame.with_columns(pl.col("views").list.eval(visible))
+
+
 class View(rf.Branch):
     reading = rf.Number
-    backup = rf.Number(mask=rf.Mask(query="hide_backup", skip=True, dropout=False))
+    backup = rf.Number(query="backup.value")
 
 
 class Model(rf.Model):
-    views = View(length=2, mask=rf.Mask(query="hidden", skip=True, dropout=False))
-    target = rf.Number(mask=True, objective="mse")
+    views = View(length=2)
+    target = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:
@@ -219,7 +229,7 @@ def build() -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), preprocess=redact))["predictions"].to_list()
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
@@ -228,6 +238,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
     data = rf.SyntheticDataModule(
+        preprocessor=redact,
         train=partial(records, rows=4096, seed=seed + 1),
         validate=partial(records, rows=512, seed=seed + 2),
         seed=seed,
@@ -300,7 +311,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     ]
     metrics["shuffled_nrmse"] = float(np.sqrt(np.mean((prediction(model, shuffled) - actual) ** 2))) / baseline
     checks["Shuffling available evidence removes accuracy"] = metrics["shuffled_nrmse"] > 0.85
-    fields = model.encode(pa.Table.from_pylist(test), strata="predict")
+    fields = model.encode(pa.Table.from_pylist(test), preprocess=redact, strata="predict")
     for name in ("reading", "backup"):
         expected = np.asarray(
             [

@@ -68,7 +68,7 @@ eligibility alone does not establish useful predictions for those classes.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | Positional labels | Required | Declare the nonempty, fixed vocabulary, or unpack it with `rf.Enum(*labels)`. |
-| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `predict` | `False` | Set `predict=True` to hide the field from inputs and learn it as a supervised target. |
 | `topk` | `None` | Request ranked candidates and top-k metrics, such as `topk=[2]`. Values must be integers greater than one. |
 | `strip` | `False` | Trim surrounding whitespace from declared and incoming string labels. |
 | `cased` | `True` | Set `cased=False` to lowercase declared and incoming string labels. |

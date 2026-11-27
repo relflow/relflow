@@ -286,7 +286,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
                 }
-                if address in schema.objectives
+                if sources.needs_targets(schema)
                 else {},
                 batch_size=input.shape,
             ),

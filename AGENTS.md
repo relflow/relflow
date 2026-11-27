@@ -42,7 +42,7 @@ model = rf.Model(
     n_heads=4,
     amount=rf.Number,
     merchant=rf.Category,
-    label=rf.Category(mask=True),
+    label=rf.Category(predict=True),
 )
 ```
 
@@ -58,7 +58,7 @@ model = rf.Model(
         sku=rf.Category,
         quantity=rf.Number,
     ),
-    returned=rf.Category(mask=True),
+    returned=rf.Category(predict=True),
 )
 ```
 
@@ -113,7 +113,7 @@ model = rf.Model(
   `rf.Branch(length=8, fields={"length": rf.Number})`.
   `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
 - Use bare tensorfield classes such as `rf.Category` when no options are needed;
-  call them only to configure fields, such as `rf.Category(mask=True)`.
+  call them only to configure fields, such as `rf.Category(predict=True)`.
 - Tensorfield options must be declared fields; pass them directly or unpack a
   mapping with `**options`. Use `description` for notes, and declare extension
   options on `RequestBase` subclasses. Undeclared options are rejected.
@@ -147,12 +147,24 @@ model = rf.Model(
   alongside leaf tensorfields, so cloning, device transfer, and row selection
   preserve lengths and structural holes. Do not infer geometry from leaf values
   or masks.
-- `mask=True` is shorthand for
-  `Mask(skip=True, dropout=False, reconstruct=True)`: the field is never
-  embedded and is decoded as a supervised reconstruction target.
-- Every node has one canonical `mask` tuple. A float is uniform train-only
-  masking; `Mask(query=...)` selects with an Arrow Boolean field; `skip=True`
-  prevents tensorization and embedding; `reconstruct=True` adds an objective.
+- `predict=True` on a leaf or child branch permanently hides and supervises
+  the leaf or all active descendant leaves. Prediction can omit answers.
+  Supply collection slots to request branch predictions in their original order.
+- `hide` accepts a float from zero inclusive to one exclusive, a Boolean
+  query path, or a tuple of these selectors. During training, any matching
+  selector hides the value. On a branch, all participating children share
+  each row decision. Use `ignore="name"` or a tuple to exempt direct children.
+- Use a preprocessor to redact unavailable context on every split. In an ordered
+  collection, replace hidden records with null slots to preserve later positions.
+- `ablate=0.2` drops a leaf per record or a child collection per parent with
+  20% probability during training. Dropped values supply neither inputs nor
+  targets. Leaf ablation preserves siblings and row positions.
+- `task=rf.reconstruct(rate=0.15)` hides selected observations and
+  uses them as answers. A query restricts eligible observations, and
+  `span` samples runs on an ordinary branch. A tuple of reconstruction
+  declarations selects an answer when any of its rules selects it. Validation repeats selections
+  given the same seed, input order and batching. `node.masks` exposes the
+  resolved policies for inspection.
 - `embed=True` emits an embedding in prediction output. It does not make the field a supervised target.
 - `ffnx` is a positive integer feed-forward multiplier, defaulting to `8` on
   each node. The model root, child branches, and tensorfield decoders configure

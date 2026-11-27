@@ -93,7 +93,8 @@
 #
 # The frozen `evidence-control-v1` policy supplies the
 # architecture defaults; the items branch keeps `reduction=None` to retain
-# its coordinate slots.
+# its coordinate slots. The preprocessor puts each value in visible context or
+# in a supervised answer slot according to the selector. Both retain the item position.
 #
 # Fit for 400 AdamW updates at learning rate 0.002. The primary gate is selected
 # coordinate nRMSE below 0.25, relative to the selected training-label mean.
@@ -139,6 +140,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 LENGTH = 4
 BUDGET = 400
@@ -159,9 +161,21 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         }
 
 
+@rf.preprocess
+def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+    """Keep observed values and requested answers in their original row slots."""
+    row = pl.element()
+    value = pl.struct(value=row.struct.field("value"))
+    context = pl.when(~row.struct.field("selected")).then(value)
+    answer = pl.when(row.struct.field("selected")).then(value)
+    slots = pl.struct(x=row.struct.field("x"), context=context, answers=pl.concat_list(answer))
+    return frame.with_columns(pl.col("items").list.eval(slots))
+
+
 class Item(rf.Branch):
     x = rf.Number
-    value = rf.Number(objective="mse", mask=rf.Mask(query="selected", skip=True, reconstruct=True))
+    value = rf.Number(query="context.value")
+    answers = rf.Branch(length=1, reduction=None, value=rf.Number(objective="mse", **TARGET))
 
 
 class Model(rf.Model):
@@ -175,15 +189,15 @@ def build() -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
-    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), preprocess=prepare))["predictions"].to_list()
     # Evaluation compares real coordinates against fixed-width selector matrices.
     # Public output has no cap padding; absent coordinates receive no score.
     content = np.zeros((len(rows), LENGTH), dtype=np.float64)
     inferred = np.zeros((len(rows), LENGTH), dtype=bool)
     for index, row in enumerate(output):
-        values = [item["value"] for item in row["items"]]
-        content[index, : len(values)] = [value["content"] for value in values]
-        inferred[index, : len(values)] = [value["inferred"] for value in values]
+        values = [item["answers"][0] for item in row["items"]]
+        content[index, : len(values)] = [value["value"]["content"] if value else 0.0 for value in values]
+        inferred[index, : len(values)] = [bool(value and value["value"]["inferred"]) for value in values]
     return content, inferred
 
 
@@ -192,6 +206,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
     data = rf.SyntheticDataModule(
+        preprocessor=prepare,
         train=partial(records, rows=2048, seed=seed + 1),
         validate=partial(records, rows=256, seed=seed + 2),
         seed=seed,
@@ -235,7 +250,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     broken, _ = prediction(model, corrupted)
     replaced, _ = prediction(model, poisoned)
     # Audit labels on an independent model, leaving fitted normalizers frozen.
-    field = build().encode(pa.Table.from_pylist(test), strata="train")["/items/value"]
+    fields = build().encode(pa.Table.from_pylist(test), preprocess=prepare, strata="train")
     measured = float(np.sqrt(np.mean((content[expected] - actual) ** 2)))
     metrics = {
         "steps": trainer.global_step,
@@ -252,10 +267,11 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         "Hidden values cannot affect predictions": metrics["hidden_value_drift"] < 1e-5,
         "Prediction flags match selectors including padding": bool(np.array_equal(inferred, expected)),
         "Training objectives match selectors including padding": bool(
-            np.array_equal(field.trainable.cpu().numpy().reshape(expected.shape), expected)
+            np.array_equal(fields["/items/answers/value"].trainable.cpu().numpy().reshape(expected.shape), expected)
         ),
         "Selected coordinates are absent from encoder input": not bool(
-            field.present.cpu().numpy().reshape(expected.shape)[expected].any()
+            fields["/items/value"].present.cpu().numpy().reshape(expected.shape)[expected].any()
+            or fields["/items/answers/value"].present.any()
         ),
     }
 

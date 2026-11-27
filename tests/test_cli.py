@@ -45,7 +45,7 @@ def inputs(tmp_path):
                 type: number
               label:
                 type: boolean
-                mask: true
+                predict: true
         """)
     )
     frame = pl.DataFrame(
@@ -98,7 +98,7 @@ def test_human_inspection_renders_leaf_queries(tmp_path, capsys):
             query: source.amount
           label:
             type: boolean
-            mask: true
+            predict: true
         """)
     )
 

@@ -19,11 +19,11 @@ FIELDS = (rf.Category, rf.Set, rf.Group)
 
 def build(kind):
     if kind == "group":
-        field = rf.Group(n_groups=3, mask=True)
+        field = rf.Group(n_groups=3, predict=True)
     else:
         field = {
-            "category": rf.Category(mask=True, topk=[2, 10000]),
-            "set": rf.Set(mask=True),
+            "category": rf.Category(predict=True, topk=[2, 10000]),
+            "set": rf.Set(predict=True),
         }[kind]
     return rf.Model(preset="small", d_model=8, x=rf.Number, label=field)
 

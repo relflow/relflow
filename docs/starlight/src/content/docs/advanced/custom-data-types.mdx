@@ -32,9 +32,10 @@ names do not select their roles.
 | Maintain learned field state | `observe`, `learn`, and `bind` separate observations, model-owned updates, and worker-local bindings. |
 | Own external resources | The embedder’s `context`, optional decoder `attach`, and extension `callbacks` coordinate field resources and their lifecycle. |
 
-An input-only type defines its request and provides tensorization and an embedder. It does not acquire a
-supervised decoder simply because its request accepts the common `mask` and
-`embed` options. relflow checks the requested capabilities when constructing or
+An input-only type defines its request and provides tensorization and an embedder.
+Its fields can use `hide` during training. A field with `predict=True` or a
+reconstruction `task` needs a registered decoder and loss.
+relflow checks the requested capabilities when constructing or
 mutating the graph. The [extension contract tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/architecture/test_extension_contract.py#L223)
 cover missing decoder/loss pairs and the separate leaf-embedding requirement.
 
@@ -67,7 +68,7 @@ def loss(model, prediction, batch, strata):
 model = rf.Model(
     preset="small",
     distance=Measurement,
-    cost=Measurement(mask=True, loss_scale=2),
+    cost=Measurement(predict=True, loss_scale=2),
 )
 ```
 
@@ -288,7 +289,7 @@ class RouteModel(rf.Model):
 
     direction = Bearing
     distance_km = rf.Number
-    delay_minutes = rf.Number(mask=True)
+    delay_minutes = rf.Number(predict=True)
 
 
 if __name__ == "__main__":
@@ -300,7 +301,7 @@ if __name__ == "__main__":
     model.fit(data, batch_size=128, max_epochs=20)
 ```
 
-The `bearing.py` implementation is input-only. Do not use `Bearing(mask=True)`
+The `bearing.py` implementation is input-only. Do not use `Bearing(predict=True)`
 or request a decoded leaf embedding with `Bearing(embed=True)`: the extension
 does not register the necessary decoder. A model containing it can still learn
 other targets and request a model-root embedding. Registering this type does

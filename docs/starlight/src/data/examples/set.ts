@@ -29,7 +29,7 @@ class Customer(rf.Model):
 
     region = rf.Category
     purchased_categories = rf.Set
-    next_interests = rf.Set(mask=True, threshold=0.5)`,
+    next_interests = rf.Set(predict=True, threshold=0.5)`,
     inputs: { region: 'north', purchased_categories: ['books', 'home'] },
     answers: { next_interests: ['home', 'sports'] },
     output: {
@@ -72,7 +72,7 @@ class SupportTicket(rf.Model):
 
     message = rf.Text
     account_tier = rf.Enum("free", "standard", "enterprise")
-    actions = rf.Set(mask=True, threshold=0.5)`,
+    actions = rf.Set(predict=True, threshold=0.5)`,
     inputs: {
       message: 'I was charged twice and cannot download my invoices.',
       account_tier: 'standard',
@@ -128,7 +128,7 @@ class Claim(rf.Branch):
     claimed_amount = rf.Number
     item_category = rf.Category
     incident_age_days = rf.Number
-    review_checks = rf.Set(mask=True, threshold=0.5)
+    review_checks = rf.Set(predict=True, threshold=0.5)
 
 
 class ClaimReview(rf.Model):

@@ -30,7 +30,7 @@ Ordinary local paths are checked against file identity, size, and timestamps. Mu
 
 ## How is this leaf trained?
 
-Downstream targets train a field-specific projection into the model's representation space. The vision encoder stays frozen. A reconstructing mask adds state classification and an L1 or L2 objective against the pristine vision vector. Jitter applies only to eligible training inputs.
+Downstream targets train a field-specific projection into the model's representation space. The vision encoder stays frozen. A reconstruction objective adds state classification and an L1 or L2 objective against the pristine vision vector. Jitter applies only to eligible training inputs.
 
 ### Predictions
 
@@ -51,7 +51,7 @@ import relflow as rf
 
 class Inspection(rf.Model):
     photo = rf.Image(base="s3://inspections/by-content/", immutable=True)
-    fault = rf.Category(mask=True)
+    fault = rf.Category(predict=True)
 
 model = Inspection(preset="small")
 ```

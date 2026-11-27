@@ -24,7 +24,7 @@ def test_profiles_resolve_each_scope_at_every_depth(
     schema = resolve(
         preset,
         value=rf.Number,
-        target=rf.Category(mask=True),
+        target=rf.Category(predict=True),
         items=rf.Branch(length=3, records=rf.Branch(length=5, value=rf.Number)),
     )
 
@@ -66,7 +66,7 @@ def test_explicit_defaults_and_none_remain_local_atomic_overrides(reduction):
             attention=None,
             dropout=None,
             reduction=reduction,
-            target=rf.Number(mask=True, n_heads=4, n_linear=1, dropout=None, decoder_position=None),
+            target=rf.Number(predict=True, n_heads=4, n_linear=1, dropout=None, decoder_position=None),
             implicit=rf.Number,
         ),
         implicit=rf.Branch(value=rf.Number),
@@ -88,7 +88,7 @@ def test_explicit_defaults_and_none_remain_local_atomic_overrides(reduction):
 
 
 def test_reused_nested_definitions_remain_unresolved_and_independent():
-    leaf = rf.Category(topk=[2], mask=True)
+    leaf = rf.Category(topk=[2], predict=True)
     definition = rf.Branch(length=3, child=rf.Branch(target=leaf))
     before = definition.model_dump()
     supplied = definition.model_fields_set.copy()
@@ -219,7 +219,7 @@ def test_preset_construction_and_growth_validate_each_bound_leaf_once(monkeypatc
             {"d_model": 24, "n_heads": 4, "items": rf.Branch(n_heads=10, value=rf.Number)},
             "/items",
         ),
-        ({"d_model": 24, "target": rf.Number(mask=True, n_heads=10)}, "/target"),
+        ({"d_model": 24, "target": rf.Number(predict=True, n_heads=10)}, "/target"),
         ({"reduction": rf.Attention(n_heads=6), "value": rf.Number}, "/"),
     ],
 )
@@ -239,7 +239,7 @@ def test_head_geometry_only_applies_to_actual_attention_modules():
         attention=None,
         reduction=rf.Mean(),
         input=rf.Number,
-        target=rf.Number(mask=True, pooling="mean"),
+        target=rf.Number(predict=True, pooling="mean"),
     )
     assert schema.d_model == 1
 
@@ -249,7 +249,7 @@ def test_head_geometry_only_applies_to_actual_attention_modules():
         n_heads=2,
         attention=None,
         reduction=rf.Attention(position=False),
-        target=rf.Number(mask=True, n_heads=2),
+        target=rf.Number(predict=True, n_heads=2),
     )
     assert scalar.d_model == 2
     with pytest.raises(ValueError, match="leaf '/items/target'.*at least 2 dimensions"):
@@ -258,5 +258,5 @@ def test_head_geometry_only_applies_to_actual_attention_modules():
             d_model=2,
             attention=None,
             reduction=rf.Mean(),
-            items=rf.Branch(length=2, attention=None, reduction=None, target=rf.Number(mask=True)),
+            items=rf.Branch(length=2, attention=None, reduction=None, target=rf.Number(predict=True)),
         )

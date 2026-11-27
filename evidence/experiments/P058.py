@@ -143,6 +143,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 PATTERNS = ((), ("red",), ("blue",), ("red", "blue"), None)
@@ -159,8 +160,8 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 class PredictionModel(rf.Model):
     tags = rf.Set(p_unavailable=0.0)
-    labels = rf.Set(p_unavailable=0.0, threshold=0.5, mask=True)
-    target = rf.Number(mask=True, objective="mse")
+    labels = rf.Set(p_unavailable=0.0, threshold=0.5, **TARGET)
+    target = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

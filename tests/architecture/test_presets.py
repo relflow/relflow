@@ -29,8 +29,8 @@ def test_factories_apply_presets_to_root_nested_branches_and_leaves(
             merchant=rf.Category,
             items=rf.Branch(length=2, quantity=rf.Number),
         ),
-        total=rf.Number(mask=True, objective="huber"),
-        label=rf.Category(mask=True, topk=[3]),
+        total=rf.Number(predict=True, objective="huber"),
+        label=rf.Category(predict=True, topk=[3]),
     )
 
     # Full default widths are covered without module allocation in test_preset_resolution.
@@ -162,7 +162,7 @@ def test_root_and_branch_overrides_do_not_change_other_scopes():
             n_heads=4,
             dropout=0.2,
             items=rf.Branch(value=rf.Number),
-            label=rf.Category(mask=True, pooling="mean", n_linear=2, decoder_position=False),
+            label=rf.Category(predict=True, pooling="mean", n_linear=2, decoder_position=False),
         ),
     )
 
@@ -186,7 +186,7 @@ def test_root_and_branch_overrides_do_not_change_other_scopes():
 
 
 def test_reusing_definitions_does_not_capture_another_presets_defaults():
-    value = rf.Number(objective="mse", mask=True)
+    value = rf.Number(objective="mse", predict=True)
     events = rf.Branch(length=3, records=rf.Branch(length=2, value=value))
     original = events.model_dump(mode="json")
     supplied = [(node, node.model_fields_set.copy()) for node in (events, *events.descendants, value)]
@@ -263,7 +263,7 @@ def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
         model = rf.Model(
             preset=name,
             d_model=32,
-            events=rf.Branch(value=Request(mask=True, family="bytes")),
+            events=rf.Branch(value=Request(predict=True, family="bytes")),
         )
 
         request = model.schema.requests["/events/value"]
@@ -272,14 +272,14 @@ def test_common_leaf_defaults_apply_to_late_registered_extensions(name):
         assert request.n_heads == 4
         assert request.dropout == 0.0
         assert request.pooling == "query"
-        assert request.mask == rf.Number(mask=True).mask
+        assert request.predict is True
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
 
 def test_small_predicts_nested_targets_without_padding_and_separate_root_embedding():
     model = rf.Model(
-        preset="small", embed=True, events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(mask=True))
+        preset="small", embed=True, events=rf.Branch(length=2, value=rf.Number, answer=rf.Number(predict=True))
     )
     inputs = pa.Table.from_pylist([{"events": [{"value": 1.0}]}, {"events": [{"value": 2.0}, {"value": 3.0}]}])
 

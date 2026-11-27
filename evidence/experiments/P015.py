@@ -149,6 +149,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 ITEMS = 6
 
@@ -192,7 +193,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, reduction=rf.Attention(n_layers=2))
-    weighted_sum = rf.Number(mask=True, objective="mse")
+    weighted_sum = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P015", seed=3300)

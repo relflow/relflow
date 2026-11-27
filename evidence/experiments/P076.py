@@ -165,6 +165,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 500
 GROUPS = ("amber", "birch", "cove", "dune")
@@ -191,7 +192,7 @@ def records(*, rows: int, seed: int, shuffled: bool = False, tail: bool = False)
 class Model(rf.Model):
     group = rf.Enum(values=GROUPS, p_unavailable=0.0)
     x = rf.Number
-    y = rf.Number(mask=True, objective="mse")
+    y = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

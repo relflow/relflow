@@ -20,7 +20,7 @@ LABELS = ("a", "b", "c", "d", "e", "a")
 
 
 def build(kind):
-    options = {"p_unavailable": 0, "mask": rf.Mask(reconstruct=True)}
+    options = {"p_unavailable": 0, "task": rf.reconstruct()}
     if kind == "group":
         field = rf.Group(n_groups=3, **options)
     else:

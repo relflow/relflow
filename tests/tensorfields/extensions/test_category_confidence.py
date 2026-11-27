@@ -17,7 +17,7 @@ def model():
         preset="small",
         d_model=8,
         x=rf.Number,
-        label=rf.Category(topk=[2], mask=True),
+        label=rf.Category(topk=[2], predict=True),
     )
     result.encode(pa.table({"x": [0.0, 0.0], "label": ["a", "b"]}), strata="train")
     result.track = lambda names, value: value
@@ -45,7 +45,7 @@ def test_unavailable_simulation_preserves_reconstruction_targets():
         preset="small",
         d_model=8,
         entity=rf.Category(p_unavailable=1.0),
-        label=rf.Category(p_unavailable=1.0, mask=True),
+        label=rf.Category(p_unavailable=1.0, predict=True),
     )
     encoded = module.encode(pa.table({"label": ["a", "b", None], "entity": ["a", "b", None]}), strata="train")
     field = encoded["/label"]
@@ -86,7 +86,7 @@ def test_all_unknown_content_is_zero_for_backward_but_undefined_for_evaluation()
 
 
 def test_single_populated_label_probability_is_conditional_not_learned_competence():
-    module = rf.Model(preset="small", d_model=8, x=rf.Number, label=rf.Category(mask=True))
+    module = rf.Model(preset="small", d_model=8, x=rf.Number, label=rf.Category(predict=True))
     module.encode(pa.table({"x": [0.0], "label": ["only-label"]}), strata="train")
     result = pa.table(module.predict(pa.table({"x": [10.0]})))["predictions"].to_pylist()[0]["label"]["content"]
     assert result["value"] == "only-label"
@@ -166,7 +166,7 @@ def test_lightning_validation_counts_include_an_objective_empty_rank():
         d_model=8,
         batch_size=2,
         x=rf.Number,
-        label=rf.Category(mask=rf.Mask(query="selected", reconstruct=True)),
+        label=rf.Category(task=rf.reconstruct(query="selected")),
     )
     module.encode(pa.table({"x": [0.0, 1.0], "label": ["a", "b"], "selected": [True, True]}), strata="train")
     source = pa.table(

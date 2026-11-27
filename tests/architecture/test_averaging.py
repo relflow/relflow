@@ -269,7 +269,7 @@ def test_relflow_growth_and_rollback_export_the_selected_averaged_model(tmp_path
         batch_size=2,
         category=rf.Category(p_unavailable=0),
         amount=rf.Number,
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
     )
     table = pa.table({"category": list("abcdefgh"), "amount": list(range(8)), "answer": list(range(8))})
     data = rf.ArrowDataModule(model=model, train=table, validate=table, shuffle=False, num_workers=0)
@@ -333,7 +333,7 @@ def test_relflow_full_resume_restores_live_rows_before_admitting_new_categories(
             batch_size=2,
             category=rf.Category(p_unavailable=0),
             amount=rf.Number,
-            answer=rf.Number(mask=True),
+            answer=rf.Number(predict=True),
         )
 
     def data(model, labels):

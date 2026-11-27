@@ -3,6 +3,7 @@ import pickle
 import re
 
 import pytest
+from beartype.roar import BeartypeCallHintParamViolation
 
 import relflow as rf
 from relflow.architecture.graph import ModelGraph
@@ -10,7 +11,7 @@ from relflow.structs.enums import TensorKey
 
 
 def test_schema_pickle_does_not_retain_selection_closures():
-    model = rf.Model(id=rf.Category(mask=True), d_model=8, n_layers=1, n_heads=2)
+    model = rf.Model(id=rf.Category(predict=True), d_model=8, n_layers=1, n_heads=2)
     wanted = {"id"}
     selected = model.select(rf.predicate(lambda node: node.name in wanted) & (rf.where("type") == "category"))
     roles = model.schema.roles
@@ -27,7 +28,7 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     model = rf.Model(
         job_code=rf.Category(query='source["job code"]', description="Job code from OpenML"),
         amount=rf.Number(),
-        label=rf.Category(mask=True, embed=False, topk=[2, 3]),
+        label=rf.Category(predict=True, embed=False, topk=[2, 3]),
         d_model=32,
         n_layers=2,
         n_heads=4,
@@ -54,10 +55,11 @@ def test_model_constructor_supports_direct_binding_and_opt_in_queries():
     assert amount.embed is False
 
     label = params.requests["/label"]
-    assert label.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    assert label.predict is True
     assert label.embed is False
     assert label.topk == [2, 3]
-    assert params.reconstruct == ["/label"]
+    assert params.objectives == ["/label"]
+    assert params.reconstruct == []
 
 
 def test_model_constructor_rejects_duplicate_sources():
@@ -91,13 +93,13 @@ def test_model_constructor_accepts_branch_nodes_with_optional_leaf_queries():
     assert "capacity" not in merchant.model_dump()
 
 
-def test_branch_mask_shorthand_normalizes_and_exports_public_api():
-    policy = rf.Mask(query="recent", rate=0.5)
-    branch = rf.Branch(amount=rf.Number(), length=4, mask=policy)
+def test_branch_reconstruct_accepts_rate_and_query():
+    policy = rf.reconstruct(query="recent", rate=0.5)
+    branch = rf.Branch(amount=rf.Number(), length=4, task=policy)
     model = rf.Model(transactions=branch, d_model=16, n_layers=1, n_heads=4)
 
     bound = model.schema.branches["/transactions"]
-    assert bound.mask == (policy,)
+    assert bound.task == policy
 
 
 def test_branch_mask_validation_rejects_invalid_bound_configs():
@@ -114,16 +116,16 @@ def test_branch_mask_validation_rejects_invalid_bound_configs():
             }
         )
 
-    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+    with pytest.raises(TypeError, match="task expects a task"):
         rf.Model(
-            transactions=rf.Branch(amount=rf.Number(), length=2, mask=rf.Mask.model_validate({"offset": 2})),
+            transactions=rf.Branch(amount=rf.Number(), length=2, task={"offset": 2}),
             d_model=16,
             n_layers=1,
             n_heads=4,
         )
 
-    with pytest.raises(TypeError, match="entries must be Mask"):
-        rf.Model(transactions=rf.Branch(amount=rf.Number(), length=2, mask=[0.5]), d_model=16, n_layers=1, n_heads=4)
+    with pytest.raises((TypeError, ValueError), match="probability"):
+        rf.Model(transactions=rf.Branch(amount=rf.Number(), length=2, hide=(True,)), d_model=16, n_layers=1, n_heads=4)
 
 
 def test_model_constructor_accepts_root_branch_options():
@@ -197,7 +199,7 @@ def test_schema_rejects_embedding_a_branch_without_active_output() -> None:
     with pytest.raises(ValueError, match="embed=True but no active descendant output"):
         rf.Model(
             empty=rf.Branch(embed=True, value=rf.Number(active=False)),
-            target=rf.Number(mask=True),
+            target=rf.Number(predict=True),
             d_model=8,
             n_layers=1,
             n_heads=2,
@@ -209,15 +211,15 @@ def test_model_constructor_rejects_root_length_argument():
         rf.Model(amount=rf.Number(), d_model=16, n_layers=2, n_heads=4, length=3)
 
 
-def test_model_constructor_accepts_root_mask():
-    model = rf.Model(amount=rf.Number(), d_model=16, n_layers=2, n_heads=4, mask=True)
+def test_model_constructor_accepts_root_pretraining():
+    model = rf.Model(amount=rf.Number(), d_model=16, n_layers=2, n_heads=4, task=rf.reconstruct())
 
-    assert model.schema.fields.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    assert model.schema.fields.task == rf.reconstruct()
     assert model.schema.reconstruct == ["/amount"]
 
 
 def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
-    model = rf.Model(preset="small", amount=rf.Number, label=rf.Category(mask=True, embed=False), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Category(predict=True, embed=False), d_model=16)
     params = model.schema
 
     numeric = rf.where("type") == "number"
@@ -229,19 +231,20 @@ def test_model_select_returns_nodes_and_update_refreshes_cached_role_views():
     model.update(rf.where("name") == "amount", description="Transaction amount")
     assert model.select(rf.where("description") == "Transaction amount") == [params.requests["/amount"]]
 
-    reconstruct = rf.where("reconstruct")
-    assert model.select(reconstruct, include_root=False) == [params.requests["/label"]]
+    supervised = rf.where("predict")
+    assert model.select(rf.where("reconstruct"), include_root=False) == []
+    assert model.select(supervised, include_root=False) == [params.requests["/label"]]
 
-    model.update(rf.where("name") == "amount", mask=True)
-    assert params.requests["/amount"].mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
-    assert model.select(reconstruct, include_root=False) == [
+    model.update(rf.where("name") == "amount", predict=True)
+    assert params.requests["/amount"].predict is True
+    assert model.select(supervised, include_root=False) == [
         params.requests["/amount"],
         params.requests["/label"],
     ]
 
-    model.update(rf.where("name") == "amount", mask=False)
-    assert params.requests["/amount"].mask == ()
-    assert model.select(reconstruct, include_root=False) == [params.requests["/label"]]
+    model.update(rf.where("name") == "amount", predict=False)
+    assert params.requests["/amount"].predict is False
+    assert model.select(supervised, include_root=False) == [params.requests["/label"]]
 
 
 def test_schema_predicate_constructors_back_public_dsl():
@@ -303,15 +306,15 @@ def test_where_predicates_use_current_field_and_comparison_values():
 def test_fixed_roles_reuse_an_immutable_projection_without_exposing_mutable_lists():
     model = rf.Model(
         preset="small",
-        items=rf.Branch(length=2, value=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))),
-        label=rf.Boolean(mask=True),
+        items=rf.Branch(length=2, value=rf.Number(task=rf.reconstruct(rate=0.5))),
+        label=rf.Boolean(predict=True),
         embed=True,
         d_model=8,
     )
     schema = model.schema
     projection = schema.roles
     expected = {
-        "reconstruct": ["/items/value", "/label"],
+        "reconstruct": ["/items/value"],
         "objectives": ["/items/value", "/label"],
         "decodes": ["/label"],
         "embed": ["/"],
@@ -324,13 +327,13 @@ def test_fixed_roles_reuse_an_immutable_projection_without_exposing_mutable_list
         assert schema.roles is projection
 
     selected = rf.where("address") == "/items"
-    model.update(selected, mask=True, embed=True)
+    model.update(selected, task=rf.reconstruct(), embed=True)
     changed = schema.roles
     assert changed is not projection
     assert schema.decodes == ["/items/value", "/label"]
     assert schema.embed == ["/", "/items"]
 
-    with model.override(selected, mask=False, embed=False):
+    with model.override(selected, task=None, embed=False):
         assert schema.roles is not changed
         assert schema.decodes == ["/label"]
         assert schema.embed == ["/"]
@@ -342,9 +345,49 @@ def test_fixed_roles_reuse_an_immutable_projection_without_exposing_mutable_list
     assert schema.roles == changed
 
 
+def test_reconstruction_queries_keep_tree_order_and_refresh_after_edits_and_rollback():
+    schema = rf.Schema.from_tree(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        history=rf.Branch(
+            length=4,
+            task=rf.reconstruct(ignore="answer"),
+            z=rf.Number,
+            answer=rf.Number(predict=True),
+            a=rf.Number(task=rf.reconstruct(rate=0.5)),
+        ),
+        unused=rf.Number(active=False, task=rf.reconstruct()),
+    )
+    history = rf.where("address") == "/history"
+    target = rf.where("reconstruct")
+    active_target = target & rf.where("active")
+
+    def check(*addresses):
+        expected = [schema.requests[address] for address in addresses]
+        assert schema.reconstruct == list(addresses)
+        assert schema.select(target) == expected
+        assert schema.select(active_target, include_root=False) == expected
+
+    check("/history/z", "/history/a")
+    schema.select(target).clear()
+    with schema.override(history, task=None):
+        check("/history/a")
+        with pytest.raises(ValueError, match="task conflict"):
+            schema.update(rf.where("name") == "a", predict=True)
+        check("/history/a")
+    check("/history/z", "/history/a")
+    schema.extend(history, new=rf.Number)
+    check("/history/z", "/history/a", "/history/new")
+    schema.delete(rf.where("name") == "z")
+    check("/history/a", "/history/new")
+    schema.update(rf.where("name") == "unused", active=True)
+    check("/history/a", "/history/new", "/unused")
+
+
 @pytest.mark.parametrize("failure", ["validation", "rebuild"])
 def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, failure):
-    model = rf.Model(preset="small", amount=rf.Number, label=rf.Boolean(mask=True), d_model=8)
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Boolean(predict=True), d_model=8)
     roles = model.schema.roles
     nodes = model.nodes
 
@@ -357,7 +400,7 @@ def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, fai
     error = ValueError if failure == "validation" else RuntimeError
     message = "n_heads" if failure == "validation" else "rebuild failed"
     with pytest.raises(error, match=message):
-        model.update(rf.where("name") == "amount", mask=True, embed=True, **options)
+        model.update(rf.where("name") == "amount", predict=True, embed=True, **options)
 
     assert model.schema.roles == roles
     assert model.schema.forward_for("train") == ["/label"]
@@ -366,17 +409,17 @@ def test_failed_mutation_restores_fixed_roles_and_runtime_graph(monkeypatch, fai
 
 
 def test_bare_where_and_its_negation_are_complements_or_reject_non_boolean_attributes():
-    model = rf.Model(preset="small", amount=rf.Number, label=rf.Number(mask=True), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, label=rf.Number(predict=True), d_model=16)
     params = model.schema
     nodes = params.select(lambda node: True, include_root=False)
 
-    reconstructed = params.select(rf.where("reconstruct"), include_root=False)
-    others = params.select(~rf.where("reconstruct"), include_root=False)
+    predicted = params.select(rf.where("predict"), include_root=False)
+    others = params.select(~rf.where("predict"), include_root=False)
 
-    assert reconstructed == [params.requests["/label"]]
-    assert sorted(map(str, (*reconstructed, *others))) == sorted(map(str, nodes))
-    for selector in (rf.where("mask"), ~rf.where("mask")):
-        with pytest.raises(TypeError, match=r"where\('mask'\) selects boolean attributes, but node '/.*' has tuple"):
+    assert predicted == [params.requests["/label"]]
+    assert sorted(map(str, (*predicted, *others))) == sorted(map(str, nodes))
+    for selector in (rf.where("type"), ~rf.where("type")):
+        with pytest.raises(TypeError, match=r"where\('type'\) selects boolean attributes, but node '/.*' has str"):
             params.select(selector, include_root=False)
 
 
@@ -391,8 +434,8 @@ def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
     assert active == [params.requests["/amount"]]
     assert inactive == [params.requests["/memo"]]
 
-    model.update(rf.where("name") == "memo", mask=True)
-    assert params.requests["/memo"].mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    model.update(rf.where("name") == "memo", predict=True)
+    assert params.requests["/memo"].predict is True
     assert params.select(rf.where("reconstruct"), include_root=False) == []
 
     with pytest.raises(TypeError, match="Python 'not where"):
@@ -400,7 +443,7 @@ def test_schema_select_returns_nodes_and_accepts_boolean_predicates():
 
 
 def test_model_update_can_deactivate_and_reactivate_leaf_nodes():
-    model = rf.Model(preset="small", amount=rf.Number, memo=rf.Number(active=False, mask=0.5, embed=True), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number, memo=rf.Number(active=False, hide=0.5, embed=True), d_model=16)
     params = model.schema
 
     assert "/memo" in params.requests
@@ -555,17 +598,19 @@ def test_model_override_temporarily_updates_schema_and_rebuilds_modules():
 
 
 def test_model_override_mask_restores_original_policy():
-    model = rf.Model(preset="small", amount=rf.Number(mask=0.25), d_model=16)
+    model = rf.Model(preset="small", amount=rf.Number(hide=0.25), d_model=16)
     request = model.schema.requests["/amount"]
 
-    with model.override(rf.where("name") == "amount", mask=True):
-        assert request.mask == (rf.Mask(skip=True, dropout=False, reconstruct=True),)
+    with model.override(rf.where("name") == "amount", predict=True):
+        assert request.predict is True
 
-    assert request.mask == (rf.Mask(rate=0.25),)
+    assert request.hide == 0.25
 
 
 def test_model_override_length_restores_unbounded_branch_overflow():
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, items=rf.Branch(sku=rf.Category), label=rf.Category(mask=True))
+    model = rf.Model(
+        d_model=8, n_layers=1, n_heads=2, items=rf.Branch(sku=rf.Category), label=rf.Category(predict=True)
+    )
     branch = model.schema.branches["/items"]
 
     with model.override(rf.where("name") == "items", length=4):
@@ -588,3 +633,30 @@ def test_model_mutations_are_blocked_inside_training_loop_lock():
 
     model.update(rf.where("name") == "amount", weight=2.0)
     assert model.schema.requests["/amount"].weight == 2.0
+
+
+def test_python_mask_collections_require_tuples_and_failed_edits_preserve_schema():
+    with pytest.raises((TypeError, ValueError)):
+        rf.Number(hide=["hidden", 0.3])
+    with pytest.raises((TypeError, ValueError)):
+        rf.Branch(value=rf.Number, hide=["hidden", 0.3])
+    with pytest.raises(BeartypeCallHintParamViolation):
+        rf.Model(preset="small", value=rf.Number, hide=["hidden", 0.3])
+    model = rf.Model(preset="small", value=rf.Number(hide=("hidden", 0.3)))
+    before = model.schema.model_dump(mode="json")
+    with pytest.raises((TypeError, ValueError)):
+        model.update(rf.where("name") == "value", hide=["other"])
+    assert model.schema.model_dump(mode="json") == before
+    assert rf.Schema.model_validate(before).requests["/value"].hide == ("hidden", 0.3)
+
+
+def test_singleton_root_rejects_reconstruction_spans():
+    with pytest.raises((TypeError, ValueError)):
+        rf.Model(preset="small", task=rf.reconstruct(rate=0.5, span=2), value=rf.Number)
+
+
+@pytest.mark.parametrize("override", [{"task": rf.reconstruct()}, {"ignore": "value"}])
+def test_resolved_schema_rejects_root_policy_overrides(override):
+    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, value=rf.Number)
+    with pytest.raises(TypeError, match="schema cannot be combined"):
+        rf.Model(schema=schema, **override)

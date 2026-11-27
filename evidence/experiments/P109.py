@@ -143,6 +143,7 @@ import numpy as np
 import polars as pl
 import relflow as rf
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 4800
 
@@ -201,7 +202,7 @@ def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
 class Model(rf.Model):
     merchant_id = rf.Group(n_groups=5, p_unavailable=0.0)
     context = rf.Number
-    label = rf.Category(mask=True, p_unavailable=0.0)
+    label = rf.Category(**TARGET, p_unavailable=0.0)
 
 
 @experiment("P109", seed=10901)

@@ -78,8 +78,10 @@ def test_latent_labels_are_out_of_band_and_split_streams_are_fresh(name):
         for address in model.schema.requests
     )
     for address in model.schema.objectives:
-        masks = model.schema.requests[address].mask
-        assert any(mask.reconstruct and not mask.skip and mask.rate > 0 for mask in masks)
+        request = model.schema.requests[address]
+        assert request.embedded and address not in model.schema.decodes
+        (rule,) = request.task if hasattr(request, "task") else request.mask
+        assert rule.rate > 0
 
 
 def test_independently_permuted_views_keep_all_marginals_but_break_their_label_alignment():

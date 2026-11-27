@@ -344,7 +344,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         content = encode(input)
         targets = TensorDict(
             {TensorKey.state: torch.from_numpy(target.dense.copy()), TensorKey.content: encode(target)}
-            if address in schema.objectives
+            if sources.needs_targets(schema)
             else {},
             batch_size=input.shape,
         )

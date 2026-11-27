@@ -62,8 +62,8 @@ def test_enum_requires_values_and_preserves_declared_order():
 
 @pytest.mark.parametrize("labels", [(False, True), (7, -4), (2.5, -7.25), ("z", "a"), (b"\xff", b"\x00"), ("only",)])
 def test_enum_positional_labels_preserve_types_options_and_keyword_schema(labels):
-    positional = rf.Enum(*labels, mask=True, embed=True, topk=[2], p_unavailable=0.2)
-    keyword = rf.Enum(values=labels, mask=True, embed=True, topk=[2], p_unavailable=0.2)
+    positional = rf.Enum(*labels, predict=True, embed=True, topk=[2], p_unavailable=0.2)
+    keyword = rf.Enum(values=labels, predict=True, embed=True, topk=[2], p_unavailable=0.2)
 
     assert positional.model_dump() == keyword.model_dump()
     assert positional.values == labels
@@ -178,7 +178,7 @@ def test_enum_rejects_values_from_a_different_scalar_family(labels, column):
 @pytest.mark.parametrize("strata", [rf.Strata.train, rf.Strata.validate, rf.Strata.test, rf.Strata.predict])
 @pytest.mark.parametrize("masked", [False, True])
 def test_enum_rejects_undeclared_pristine_values_even_when_masked(strata, masked):
-    configured = model(mask=masked)
+    configured = model(predict=masked)
     with pytest.raises(ValueError, match="status"):
         configured.encode(records("pending", "unknown"), strata=strata)
     assert rf.Enum.vocabulary(configured, ADDRESS) == VALUES
@@ -191,11 +191,11 @@ def test_enum_repeated_masked_targets_preserve_nulls_padding_and_counts(owner):
     configured = rf.Model(
         preset="small",
         d_model=8,
-        mask=owner == "root",
+        task=rf.reconstruct() if owner == "root" else None,
         items=rf.Branch(
             length=3,
-            mask=owner == "branch",
-            status=rf.Enum(values=VALUES, mask=owner == "leaf", p_unavailable=0.0),
+            task=rf.reconstruct() if owner == "branch" else None,
+            status=rf.Enum(values=VALUES, predict=owner == "leaf", p_unavailable=0.0),
         ),
     )
     source = pa.Table.from_pylist(
@@ -206,7 +206,8 @@ def test_enum_repeated_masked_targets_preserve_nulls_padding_and_counts(owner):
     )
     field = configured.encode(source, strata=rf.Strata.train)[address]
     assert field.state.shape == (2, 1, 3)
-    assert not field.present.any()
+    assert not field.present[0].any()
+    assert field.present[1].tolist() == [[owner != "leaf"] * 3]
     assert field.targets.batch_size == field.state.shape
     assert field.targets[TensorKey.state][0].eq(Tokens.padded).all()
     assert field.targets[TensorKey.state][1].flatten().tolist() == [Tokens.valued, Tokens.null, Tokens.valued]
@@ -215,7 +216,7 @@ def test_enum_repeated_masked_targets_preserve_nulls_padding_and_counts(owner):
 
 
 def test_enum_unavailable_input_augmentation_keeps_targets_and_counts():
-    configured = model(p_unavailable=1.0, mask=rf.Mask(query="selected", reconstruct=True))
+    configured = model(p_unavailable=1.0, task=rf.reconstruct(query="selected"))
     source = records("pending", "rejected", None).append_column("selected", pa.array([False, True, False]))
     field = configured.encode(source, strata=rf.Strata.train)[ADDRESS]
     assert field.content.flatten()[0].item() == -1
@@ -232,7 +233,7 @@ def test_enum_unavailable_input_augmentation_keeps_targets_and_counts():
 
 
 def test_enum_output_includes_declared_unobserved_classes_and_caps_topk():
-    configured = model(mask=True, topk=[8, 2, 8])
+    configured = model(predict=True, topk=[8, 2, 8])
     field = configured.encode(records("pending", "pending"), strata=rf.Strata.train)[ADDRESS]
     logits = torch.tensor([[[0.0, 1.0, 3.0]], [[0.0, 1.0, 3.0]]])
     predicted = prediction(field, logits)
@@ -248,7 +249,7 @@ def test_enum_output_includes_declared_unobserved_classes_and_caps_topk():
 
 
 def test_enum_loss_supervises_declared_labels_and_excludes_null_content(monkeypatch):
-    configured = model(mask=True, topk=[2])
+    configured = model(predict=True, topk=[2])
     field = configured.encode(records("complete", None), strata=rf.Strata.train)[ADDRESS]
     logits = torch.tensor([[[1.0, 2.0, 0.0]], [[20.0, -40.0, 10.0]]], requires_grad=True)
     predicted = prediction(field, logits)
@@ -269,7 +270,7 @@ def test_enum_loss_supervises_declared_labels_and_excludes_null_content(monkeypa
 
 
 def test_enum_all_null_targets_have_finite_state_loss_and_zero_content_gradient(monkeypatch):
-    configured = model(mask=True)
+    configured = model(predict=True)
     field = configured.encode(records(None, None), strata=rf.Strata.train)[ADDRESS]
     logits = torch.zeros((*field.state.shape, len(VALUES)), requires_grad=True)
     predicted = prediction(field, logits)
@@ -283,7 +284,7 @@ def test_enum_all_null_targets_have_finite_state_loss_and_zero_content_gradient(
 
 
 def test_enum_empty_prediction_and_single_class_are_well_defined():
-    configured = model(("only",), mask=True, topk=[2])
+    configured = model(("only",), predict=True, topk=[2])
     empty = configured.predict(records())
     assert empty.height == 0
     assert empty["predictions"].struct.field("status").struct.field("content").struct.field("value").dtype == pl.String
@@ -303,7 +304,7 @@ def test_enum_empty_prediction_and_single_class_are_well_defined():
 
 @pytest.mark.parametrize("positional", [False, True])
 def test_enum_checkpoint_and_unchanged_rebuild_preserve_weights_and_counts(tmp_path: Path, positional):
-    configured = model(mask=True, positional=positional)
+    configured = model(predict=True, positional=positional)
     configured.encode(records("pending", "rejected"), strata=rf.Strata.train)
     node = configured.nodes[ADDRESS]
     assert node.embedder.embeddings[TensorKey.content.name].num_embeddings == len(VALUES)
@@ -328,7 +329,7 @@ def test_enum_checkpoint_and_unchanged_rebuild_preserve_weights_and_counts(tmp_p
 
 @pytest.mark.parametrize("labels", [VALUES[::-1], ("pending", "complete", "other"), ("complete",)])
 def test_enum_changing_declaration_resets_class_rows_and_exposure(labels):
-    configured = model(mask=True)
+    configured = model(predict=True)
     configured.encode(records("pending", "rejected"), strata=rf.Strata.train)
     with torch.no_grad():
         configured.nodes[ADDRESS].embedder.embeddings[TensorKey.content.name].weight.fill_(100.0)
@@ -345,7 +346,7 @@ def test_enum_changing_declaration_resets_class_rows_and_exposure(labels):
 
 
 def test_enum_rejects_stale_prefetched_class_ids_after_reordering():
-    configured = model(mask=True)
+    configured = model(predict=True)
     pending = encode(
         records("pending", "rejected"), configured.schema, rf.Strata.train, configured.interprocess_encoding_context
     )
@@ -356,8 +357,8 @@ def test_enum_rejects_stale_prefetched_class_ids_after_reordering():
 
 
 def test_enum_rejects_checkpoint_weights_for_different_class_meanings():
-    source = model(mask=True)
-    destination = model(VALUES[::-1], mask=True)
+    source = model(predict=True)
+    destination = model(VALUES[::-1], predict=True)
     with pytest.raises((RuntimeError, ValueError), match="[Ee]num|values|vocabulary|declar"):
         destination.load_state_dict(source.state_dict())
 
@@ -381,7 +382,7 @@ def test_enum_lightning_training_preserves_fixed_classes_and_training_counts():
         d_model=8,
         batch_size=64,
         amount=rf.Number,
-        status=rf.Enum(values=VALUES, mask=True, topk=[2]),
+        status=rf.Enum(values=VALUES, predict=True, topk=[2]),
     )
     amounts = torch.linspace(0.0, 1.0, 64).numpy()
     train = pa.table({"amount": amounts, "status": ["pending"] * 32 + ["complete"] * 32})
@@ -464,13 +465,13 @@ def test_enum_strip_and_cased_fold_declared_values_and_inputs():
         preset="small",
         d_model=8,
         kind=rf.Enum(values=("Foo", "Bar"), strip=True, cased=False),
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
     )
     field = model.encode(pa.table({"kind": pa.array([" FOO ", "bar", "Bar "])}), strata="predict")[rf.Address("kind")]
     assert field.content.reshape(-1).tolist() == [0, 1, 1]
 
     with pytest.raises(ValueError, match="collide after strip/cased folding"):
         rf.Enum(values=("Foo", "foo"), cased=False)
-    exact = rf.Model(preset="small", d_model=8, kind=rf.Enum(values=("Foo", "Bar")), label=rf.Boolean(mask=True))
+    exact = rf.Model(preset="small", d_model=8, kind=rf.Enum(values=("Foo", "Bar")), label=rf.Boolean(predict=True))
     with pytest.raises(ValueError, match="undeclared value"):
         exact.encode(pa.table({"kind": pa.array(["foo"])}), strata="predict")

@@ -97,10 +97,13 @@ class NodeAttribute(pydantic.BaseModel):
         if self.name == "descendants":
             return tuple(str(child.address) for child in getattr(node, "descendants", ()))
         if self.name == "reconstruct":
+            from relflow.structs.experiment import Schema
+
+            root = node.root
             return (
                 isinstance(node, Leaf)
-                and node.active
-                and any(policy.reconstruct for owner in node.path for policy in getattr(owner, "mask", ()))
+                and isinstance(root, Schema)
+                and node.address in root.roles.reconstruction_targets
             )
 
         return getattr(node, self.name, default)

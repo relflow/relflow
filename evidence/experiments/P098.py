@@ -150,6 +150,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -185,8 +186,8 @@ class Source(rf.Branch):
 class Model(rf.Model):
     source = Source(length=8, overflow="error", reduction=None, n_layers=2)
     query_key = rf.Hash(n_hashes=4, n_bands=8)
-    found = rf.Boolean(mask=True)
-    answer = rf.Number(mask=True, objective="mse")
+    found = rf.Boolean(**TARGET)
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

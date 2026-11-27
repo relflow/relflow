@@ -375,7 +375,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
 
 
 def test_predict_reconstruction_values_are_prepared_when_present():
-    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Hash(mask=True))
+    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Hash(predict=True))
     source = table([{"value": 1.0, "label": {"not": "hashable"}}])
 
     with pytest.raises(TypeError, match="extension 'hash'.*does not accept Arrow type struct"):
@@ -504,7 +504,7 @@ def test_root_combines_only_the_columns_the_schema_reads():
         n_layers=1,
         n_heads=2,
         d_model=8,
-        amount=rf.Number(mask=rf.Mask(query="eligible", reconstruct=True)),
+        amount=rf.Number(task=rf.reconstruct(query="eligible")),
         events=rf.Branch(value=rf.Number),
     )
     events = pa.array([[{"value": 1.0}], [], None], type=pa.list_(pa.struct([pa.field("value", pa.float64())])))
@@ -536,9 +536,7 @@ def test_root_combines_only_the_columns_the_schema_reads():
 
 
 def test_rate_masks_vary_by_batch_ordinal_and_reproduce():
-    schema = rf.Schema.from_tree(
-        n_layers=1, n_heads=2, d_model=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))
-    )
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, amount=rf.Number(task=rf.reconstruct(rate=0.5)))
     table = pa.table({"amount": [float(value) for value in range(16)]})
 
     patterns = [

@@ -41,7 +41,7 @@ class Account(rf.Model):
 
     owner_id = rf.Hash
     events = Event(length=64, overflow="tail")
-    needs_review = rf.Boolean(mask=True)`,
+    needs_review = rf.Boolean(predict=True)`,
     inputs: {
       owner_id: 'person-17',
       events: [
@@ -99,7 +99,7 @@ class Candidate(rf.Branch):
 
     product_id = rf.Hash
     price = rf.Number
-    purchased = rf.Boolean(mask=True)
+    purchased = rf.Boolean(predict=True)
 
 
 class ProductReview(rf.Model):
@@ -167,7 +167,7 @@ class Availability(rf.Model):
 
     requested_part = rf.Hash
     stock = Stock(length=32, overflow="error")
-    available_units = rf.Number(mask=True)`,
+    available_units = rf.Number(predict=True)`,
     inputs: {
       requested_part: 'part-17',
       stock: [

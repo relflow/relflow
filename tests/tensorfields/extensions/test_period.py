@@ -17,18 +17,18 @@ from relflow.tensorfields.extensions.period import DatePart
 
 def test_period_selects_ordered_parts_with_keyword_options():
     parts = ("HourOfDay", DatePart.day_of_week, "month-of-year")
-    request = rf.Period(*parts, pattern="%Y-%m-%d", jitter={"add": 0.1}, mask=True)
+    request = rf.Period(*parts, pattern="%Y-%m-%d", jitter={"add": 0.1}, predict=True)
     assert request.dateparts == [DatePart.hour_of_day, DatePart.day_of_week, DatePart.month_of_year]
     assert request.pattern == "%Y-%m-%d"
     assert request.jitter == rf.Jitter(add=0.1)
-    assert request.mask == (rf.Mask(skip=True, reconstruct=True),)
+    assert request.predict is True
     assert rf.Period(dateparts=parts).dateparts == request.dateparts
 
 
 def test_period_signature_accepts_parts_and_keeps_options_keyword_only():
     signature = inspect.signature(rf.Period)
     assert signature.parameters["parts"].kind is inspect.Parameter.VAR_POSITIONAL
-    for name in ("dateparts", "pattern", "jitter", "mask"):
+    for name in ("dateparts", "pattern", "jitter", "predict"):
         assert signature.parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
     assert "name" not in signature.parameters
     signature.bind("day_of_week", pattern="%Y-%m-%d")
@@ -101,8 +101,8 @@ def test_period_checkpoint_preserves_parameters_and_predictions(tmp_path):
     model = rf.Model(
         preset="small",
         d_model=8,
-        created=rf.Period("day_of_week", "hour_of_day", mask=True, embed=True),
-        label=rf.Boolean(mask=True),
+        created=rf.Period("day_of_week", "hour_of_day", predict=True, embed=True),
+        label=rf.Boolean(predict=True),
     )
     inputs = pa.table({"created": [datetime(2026, 1, 1, 14), None]})
     expected = pa.table(model.predict(inputs))

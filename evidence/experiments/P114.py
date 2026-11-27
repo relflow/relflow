@@ -165,6 +165,7 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 300
 TRAIN_ROWS = 4096
@@ -177,22 +178,22 @@ ARMS = ("ordinal_labels", "ordinal_ranks", "number", "category", "shuffled")
 
 class LabelModel(rf.Model):
     level = rf.Ordinal(values=LABELS)
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 class RankModel(rf.Model):
     level = rf.Ordinal
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 class NumericModel(rf.Model):
     level = rf.Number
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 class CategoryModel(rf.Model):
     level = rf.Category
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 def records(*, rows: int, seed: int, condition: str) -> Iterator[dict]:

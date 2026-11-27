@@ -20,7 +20,7 @@ def observations(events):
 
 def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_path):
     model = rf.Model(
-        preset="small", d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True, embed=True))
+        preset="small", d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(predict=True, embed=True))
     ).eval()
     values = [[], None, [None, {"amount": 2.0, "label": True}], [{"amount": float(i)} for i in range(5)]]
     batches = []
@@ -56,7 +56,7 @@ def test_variable_targets_keep_types_offsets_and_stream_across_batch_widths(tmp_
 @pytest.mark.parametrize("length", [1, 4])
 def test_explicit_limits_keep_observed_output_lengths(length):
     model = rf.Model(
-        preset="small", d_model=8, events=rf.Branch(length=length, amount=rf.Number, label=rf.Boolean(mask=True))
+        preset="small", d_model=8, events=rf.Branch(length=length, amount=rf.Number, label=rf.Boolean(predict=True))
     ).eval()
     source = observations([[{"amount": 2.0}]])
 
@@ -75,7 +75,7 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
             embed=True,
             reduction=None,
             amount=rf.Number,
-            items=rf.Branch(reduction=None, embed=True, amount=rf.Number, label=rf.Boolean(mask=True)),
+            items=rf.Branch(reduction=None, embed=True, amount=rf.Number, label=rf.Boolean(predict=True)),
         ),
     ).eval()
     source = pa.Table.from_pylist(
@@ -110,7 +110,9 @@ def test_nested_variable_axes_and_pass_through_embeddings_preserve_structural_sl
 
 def test_checkpoint_keeps_symbolic_geometry_and_predictions(tmp_path):
     torch.manual_seed(103)
-    model = rf.Model(preset="small", d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(mask=True))).eval()
+    model = rf.Model(
+        preset="small", d_model=8, events=rf.Branch(amount=rf.Number, label=rf.Boolean(predict=True))
+    ).eval()
     source = observations([[{"amount": float(i)} for i in range(4)]])
     expected = pa.table(model.predict(source)).to_pylist()[0]["predictions"]["events"]
     checkpoint = tmp_path / "model.pt"
@@ -144,7 +146,7 @@ def test_unbounded_warning_names_active_paths_once_per_generation(monkeypatch):
     model = rf.Model(
         preset="small",
         d_model=8,
-        events=rf.Branch(items=rf.Branch(amount=rf.Number), answer=rf.Number(mask=True)),
+        events=rf.Branch(items=rf.Branch(amount=rf.Number), answer=rf.Number(predict=True)),
         inactive=rf.Branch(amount=rf.Number(active=False)),
     )
     assert len(warnings) == 1
@@ -166,7 +168,7 @@ def test_third_party_tensorfields_follow_automatic_axes_without_shared_special_c
     extension, Request = build_extension()
     try:
         model = rf.Model(
-            preset="small", d_model=8, events=rf.Branch(value=Request, label=Request(mask=True, embed=True))
+            preset="small", d_model=8, events=rf.Branch(value=Request, label=Request(predict=True, embed=True))
         ).eval()
         source = pa.Table.from_pylist(
             [{"events": []}, {"events": [{"value": "one", "label": "yes"}]}, {"events": [{"value": "two"}] * 5}],

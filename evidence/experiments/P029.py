@@ -147,6 +147,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 MIN_LENGTH = 2
 MAX_LENGTH = 5
@@ -184,7 +185,7 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
 class PredictionModel(rf.Model):
     left_id = rf.Hash(n_hashes=4, n_bands=8)
     right_id = rf.Hash(n_hashes=4, n_bands=8)
-    equal = rf.Boolean(mask=True)
+    equal = rf.Boolean(**TARGET)
 
 
 @experiment("P029", seed=3701)

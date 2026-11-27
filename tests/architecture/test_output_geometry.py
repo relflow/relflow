@@ -43,7 +43,7 @@ def project(source: pa.Table, configured: Schema, address: str) -> Projection:
 @pytest.mark.parametrize("length", [None, 8])
 def test_missing_empty_null_items_and_missing_targets_keep_distinct_geometry(length):
     configured = Schema.from_tree(
-        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(length=length, value=rf.Number(mask=True))
+        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(length=length, value=rf.Number(predict=True))
     )
     source = pa.table({"events": pa.array([None, [], [None], [{"value": None}]], type=pa.list_(EVENT))})
     projected = project(source, configured, "/events/value")
@@ -60,7 +60,7 @@ def test_missing_empty_null_items_and_missing_targets_keep_distinct_geometry(len
 
 def test_bounded_empty_output_does_not_depend_on_neighbor_batch_width():
     configured = Schema.from_tree(
-        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(length=3, value=rf.Number(mask=True))
+        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(length=3, value=rf.Number(predict=True))
     )
     empty = pa.table({"events": pa.array([[]], type=pa.list_(EVENT))})
     mixed = pa.table({"events": pa.array([[], [{"value": 1.0}]], type=pa.list_(EVENT))})
@@ -81,7 +81,7 @@ def test_nested_null_structure_and_local_parent_ordinals(length):
         d_model=8,
         n_layers=1,
         n_heads=2,
-        parents=rf.Branch(length=length, children=rf.Branch(length=length, value=rf.Number(mask=True))),
+        parents=rf.Branch(length=length, children=rf.Branch(length=length, value=rf.Number(predict=True))),
     )
     parent = pa.struct([("children", pa.list_(EVENT))])
     source = pa.table(
@@ -113,7 +113,7 @@ def test_nested_null_structure_and_local_parent_ordinals(length):
 @pytest.mark.parametrize("length", [None, 3])
 def test_zero_width_axes_preserve_typed_collections(length):
     configured = Schema.from_tree(
-        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(length=length, value=rf.Number(mask=True))
+        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(length=length, value=rf.Number(predict=True))
     )
     source = pa.table({"events": pa.array([[], None], type=pa.list_(EVENT))})
     projected = project(source, configured, "/events/value")
@@ -128,7 +128,7 @@ def test_zero_width_axes_preserve_typed_collections(length):
 
 def test_zero_rows_keep_every_nested_axis():
     configured = Schema.from_tree(
-        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(items=rf.Branch(value=rf.Number(mask=True)))
+        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(items=rf.Branch(value=rf.Number(predict=True)))
     )
     event = pa.struct([("items", pa.list_(EVENT))])
     source = pa.table({"events": pa.array([], type=pa.list_(event))})

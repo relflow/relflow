@@ -109,7 +109,7 @@ class Numeric(RequestBase):
     source units. ``alpha=None`` uses cumulative statistics; a value in
     ``(0, 1)`` uses exponential updates. ``n_bands`` and ``offset`` bound
     Fourier exponents. ``jitter=rf.Jitter(...)`` perturbs training inputs once
-    in source units while retaining pristine targets. ``mask=True`` makes the
+    in source units while retaining pristine targets. ``predict=True`` makes the
     scalar a supervised, unembedded target.
     """
 
@@ -276,7 +276,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         present, trainable, inferred = masks(projection)
         content, state = encode(input, address=address)
         targets = TensorDict({}, batch_size=input.shape)
-        if address in schema.objectives:
+        if sources.needs_targets(schema):
             target_content, target_state = encode(target, address=address)
             targets = TensorDict(
                 {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
@@ -655,18 +655,16 @@ def loss(
     trainable: torch.Tensor = batch.trainable.reshape(N)
     state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
-    loss: torch.Tensor = module.track(
+    indices = trainable.nonzero(as_tuple=True)[0]
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
+    loss = module.track(
         (address, strata, Metric.loss, TensorKey.state),
-        value=(
-            torch.nn.functional.cross_entropy(
-                input=cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1),
-                target=state_targets,
-                weight=embedder.counter.weight,
-                reduction="none",
-            )
-            .masked_select(trainable)
-            .mean()
-        ),
+        value=torch.nn.functional.cross_entropy(
+            logits.index_select(0, indices),
+            state_targets.index_select(0, indices),
+            weight=embedder.counter.weight,
+            reduction="none",
+        ).mean(),
     )
 
     target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)

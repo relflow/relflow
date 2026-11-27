@@ -32,6 +32,11 @@ The reporter hashes shared runtime Python files without importing them; sibling
 `Pxxx.py` experiments never enter another study's provenance. Static discovery
 and documentation builds must not import `policies.py`.
 
+Use `**TARGET` and `**reconstruct(...)` from
+`experiments/visibility.py` for declarations that span the mask API change.
+Keep query names and rates in each proof. The shared file owns only the
+keyword translation and participates in each role’s recorded runtime inputs.
+
 From the repository root, `make check` validates static docs and evidence tooling.
 Runtime tests under evidence/tests/runtime are explicit and require a separately
 supplied RelFlow wheel; use `uv run --project docs --with /path/to/matching-relflow.whl`

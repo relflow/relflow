@@ -24,7 +24,7 @@ from tests.tensorfields.helpers import tensorize
 ADDRESS = "/items/group"
 
 
-def build_schema(*, n_groups: int = 4, p_unavailable: float = 0.0, mask: bool | rf.Mask = False) -> Schema:
+def build_schema(*, n_groups: int = 4, p_unavailable: float = 0.0, predict: bool = False, task=None) -> Schema:
     return rf.Schema.from_tree(
         d_model=16,
         n_layers=1,
@@ -32,7 +32,7 @@ def build_schema(*, n_groups: int = 4, p_unavailable: float = 0.0, mask: bool | 
         dropout=0.1,
         items=rf.Branch(
             length=2,
-            group=rf.Group(n_groups=n_groups, p_unavailable=p_unavailable, mask=mask),
+            group=rf.Group(n_groups=n_groups, p_unavailable=p_unavailable, predict=predict, task=task),
         ),
     )
 
@@ -220,7 +220,7 @@ def test_group_assignments_learn_from_downstream_supervision():
             d_model=8,
             batch_size=4,
             value=rf.Group(n_groups=3, p_unavailable=0.0),
-            target=rf.Number(mask=True),
+            target=rf.Number(predict=True),
         )
         model.track = lambda names, value, **kwargs: value
         inputs = model.encode(pa.table({"value": ["a", "b", "a", "b"], "target": [1.0, 2.0, 3.0, 4.0]}), strata="train")
@@ -338,7 +338,7 @@ def test_group_bind_grows_vectors_and_preserves_assignments_and_sentinel():
 
 
 def test_group_float_nan_labels_take_the_other_state(tmp_path):
-    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=2, mask=True), signal=rf.Number)
+    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=2, predict=True), signal=rf.Number)
     rows = pa.table({"label": [1.0, 2.0, float("nan"), 0.0], "signal": [1.0, 2.0, 3.0, 4.0]})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
@@ -524,7 +524,7 @@ def test_group_write_uses_the_prediction_device(device):
 
 @pytest.mark.parametrize("known", [False, True], ids=["empty-vocabulary", "known-labels"])
 def test_group_predict_writes_group_probabilities_without_vocabulary_labels(known):
-    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=4, mask=True), signal=rf.Number)
+    model = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=4, predict=True), signal=rf.Number)
     if known:
         rf.Group.assign(model, "/label", "A", 0)
         rf.Group.assign(model, "/label", "B", 2)
@@ -730,7 +730,7 @@ def test_group_state_loss_logs_zero_without_accuracy(monkeypatch: pytest.MonkeyP
     model = rf.Model(
         preset="small",
         d_model=8,
-        label=rf.Group(n_groups=4, mask=rf.Mask(query="selected", dropout=False, reconstruct=True)),
+        label=rf.Group(n_groups=4, task=rf.reconstruct(query="selected")),
     )
     field = model.encode(pa.table({"label": ["a", "b"], "selected": [False, False]}), strata="train")["/label"]
     assert not field.trainable.any()

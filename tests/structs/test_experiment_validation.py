@@ -35,7 +35,7 @@ def test_schema_rejects_undeclared_options():
 
 def test_schema_derives_effective_reconstruct_roles_from_masks():
     payload = schema_payload()
-    payload["fields"]["fields"][0]["mask"] = {"reconstruct": True, "dropout": False}
+    payload["fields"]["fields"][0]["task"] = {"kind": "reconstruct"}
 
     schema = Schema.model_validate(payload)
 
@@ -57,11 +57,7 @@ def test_schema_derives_embed_from_node_attribute():
 
 def test_schema_excludes_dynamic_reconstruct_from_prediction_decodes():
     payload = schema_payload()
-    payload["fields"]["fields"][0]["fields"][0]["mask"] = {
-        "rate": 0.5,
-        "reconstruct": True,
-        "dropout": False,
-    }
+    payload["fields"]["fields"][0]["fields"][0]["task"] = {"kind": "reconstruct", "rate": 0.5}
 
     schema = Schema.model_validate(payload)
 
@@ -71,17 +67,17 @@ def test_schema_excludes_dynamic_reconstruct_from_prediction_decodes():
     assert schema.forward_for("predict") == []
 
 
-def test_schema_mask_round_trip_preserves_skip_policy():
+def test_schema_round_trip_preserves_root_reconstruction():
     payload = schema_payload()
-    payload["fields"]["mask"] = {"skip": True, "reconstruct": True, "dropout": False}
+    payload["fields"]["task"] = {"kind": "reconstruct"}
     schema = Schema.model_validate(payload)
 
     restored = Schema.model_validate(schema.model_dump(mode="python", round_trip=True))
 
-    assert restored.fields.mask == schema.fields.mask
+    assert restored.fields.task == schema.fields.task
     assert restored.reconstruct == ["/items/identifier"]
 
     restored_json = Schema.model_validate_json(schema.model_dump_json())
 
-    assert restored_json.fields.mask == schema.fields.mask
+    assert restored_json.fields.task == schema.fields.task
     assert restored_json.reconstruct == ["/items/identifier"]

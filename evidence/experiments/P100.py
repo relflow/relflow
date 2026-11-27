@@ -152,6 +152,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 TRAIN_ROWS = 4096
@@ -176,14 +177,14 @@ def records(*, rows: int, seed: int, domain: str, novel: bool, arm: str) -> Iter
 def build(domain: str, arm: str) -> rf.Model:
     if arm == "ordinal":
         target = (
-            rf.Ordinal(values=LABELS, mask=True, objective="mse")
+            rf.Ordinal(values=LABELS, **TARGET, objective="mse")
             if domain == "labels"
-            else rf.Ordinal(mask=True, objective="mse")
+            else rf.Ordinal(**TARGET, objective="mse")
         )
     elif arm == "number":
-        target = rf.Number(mask=True, objective="mse")
+        target = rf.Number(**TARGET, objective="mse")
     else:
-        target = rf.Category(mask=True)
+        target = rf.Category(**TARGET)
 
     class Model(rf.Model):
         signal = rf.Number

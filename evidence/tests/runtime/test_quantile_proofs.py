@@ -37,7 +37,8 @@ def test_quantile_proof_schema_keeps_the_only_target_hidden(name):
     target = model.schema.requests[rf.Address("cost")]
     assert target.type == "quantile"
     assert target.objective == "mse"
-    assert all(mask.skip and mask.reconstruct for mask in target.mask)
+    assert target.address in model.schema.objectives and target.address in model.schema.decodes
+    assert not target.embedded
     assert set(model.schema.requests) == {rf.Address("amount"), rf.Address("cost")}
 
 

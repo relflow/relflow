@@ -105,6 +105,7 @@ from reporting import experiment, report
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from transformers import BertConfig, BertModel, PreTrainedTokenizerFast
+from visibility import TARGET
 
 BUDGET = 100
 FIXTURE = Path(__file__).with_suffix(".npz")
@@ -132,8 +133,8 @@ def cache_model(directory, notes, width):
     class Model(rf.Model):
         note = rf.Text(model=str(directory), max_length=2, store=str(directory / "notes"))
         tile = rf.Image(model=str(directory), immutable=True, base=str(directory), store=str(directory / "tiles"))
-        topic = rf.Boolean(mask=True)
-        pattern = rf.Boolean(mask=True)
+        topic = rf.Boolean(**TARGET)
+        pattern = rf.Boolean(**TARGET)
 
     model = Model(preset=CONTROL.name)
 

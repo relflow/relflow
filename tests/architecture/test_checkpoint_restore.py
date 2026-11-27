@@ -23,7 +23,7 @@ def model() -> rf.Model:
             reduction=rf.Attention(n_layers=2),
             value=rf.Number,
         ),
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
     )
 
 

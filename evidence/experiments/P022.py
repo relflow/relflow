@@ -150,6 +150,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 LENGTH = 3
 
@@ -187,7 +188,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=LENGTH, overflow="error", n_layers=2, n_heads=4, reduction=rf.Attention())
-    answer = rf.Number(mask=True)
+    answer = rf.Number(**TARGET)
 
 
 @experiment("P022", seed=23)

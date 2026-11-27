@@ -4,7 +4,7 @@ from collections.abc import Mapping
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any
 
-from relflow.structs.tree import Node
+from relflow.structs.tree import Field, Node
 
 if TYPE_CHECKING:
     from relflow.structs.experiment import TreeFieldInput
@@ -41,6 +41,20 @@ class Declarations(type):
         return super().__new__(mcls, name, bases, namespace, **kwargs)
 
 
+def check_root_policies(children: Mapping[str, object]) -> None:
+    """Keep predict and ablate available as child names at the model root."""
+    for name in ("predict", "ablate"):
+        if name not in children:
+            continue
+        value = children[name]
+        if isinstance(value, Field) or isinstance(value, type) and issubclass(value, Field):
+            continue
+        raise TypeError(
+            f"Set {name} on a leaf or child branch. A child named {name!r} needs a field definition, "
+            f"got {type(value).__name__}."
+        )
+
+
 def fields(
     cls: type,
     definitions: Mapping[str, "TreeFieldInput"] | None,
@@ -51,6 +65,7 @@ def fields(
     if not declared:
         return definitions
     if definitions is not None or children:
+        check_root_policies(children)
         supplied = sorted(set(children) | ({"fields"} if definitions is not None else set()))
         raise TypeError(
             f"{cls.__name__} declares its children in the class body; constructor arguments configure the node. "

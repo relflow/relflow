@@ -47,7 +47,7 @@ objective. The decoder reconstructs exactly `n_dim` coordinates.
 
 ### Predictions
 
-A Vector can be an input or a supervised target. With `mask=True`, supply known
+A Vector can be an input or a supervised target. With `predict=True`, supply known
 target vectors during training and omit them from prediction requests. Its
 rich result contains `state`, a `content` array of exactly `n_dim` coordinates,
 and `inferred`. For a field named `next_position_m`, `predictions.next_position_m.content`

@@ -21,7 +21,7 @@ const pythonRules = [
     note,
   })),
   {
-    pattern: /\bmask\s*=\s*True\b/g,
+    pattern: /\bpredict\s*=\s*True\b/g,
     note: reference.options.target,
   },
   {
@@ -174,8 +174,19 @@ const pythonRules = [
     note: reference.options.pattern,
   },
   {
-    pattern: /\breconstruct\s*=\s*True\b/g,
-    note: reference.options.reconstruct,
+    pattern: /\btask(?=\s*=)/g,
+    accept: (_match, context, offset) => Boolean(context.callAt(offset)),
+    note: reference.options.task,
+  },
+  {
+    pattern: /\bhide(?=\s*=)/g,
+    accept: (_match, context, offset) => Boolean(context.callAt(offset)),
+    note: reference.options.hide,
+  },
+  {
+    pattern: /\bablate(?=\s*=)/g,
+    accept: (_match, context, offset) => Boolean(context.callAt(offset)),
+    note: reference.options.ablate,
   },
   {
     pattern: /\b([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)(\.(?:fit|predict|save|load))(?=\s*\()/g,

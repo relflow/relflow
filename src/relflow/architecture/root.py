@@ -59,7 +59,8 @@ from relflow.structs.experiment import (
 from relflow.structs.packages import Prediction
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.structure import OMITTED
-from relflow.structs.tree import Address, MaskInput, Node, Rate
+from relflow.structs.tasks import TaskInput
+from relflow.structs.tree import Address, HideInput, Node, Rate
 from relflow.tensorfields.base import TENSORFIELDS, Extension
 
 OptimizerConfig = torch.optim.Optimizer | Callable[["Model"], torch.optim.Optimizer]
@@ -126,7 +127,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
 
         model = rf.Model(
             segment=rf.Category(),
-            label=rf.Category(mask=True),
+            label=rf.Category(predict=True),
             d_model=16,
             n_layers=1,
             n_heads=4,
@@ -154,7 +155,9 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         cross: bool = cast(bool, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
-        mask: MaskInput = False,
+        hide: HideInput = (),
+        task: TaskInput = None,
+        ignore: str | tuple[str, ...] = (),
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
@@ -179,7 +182,9 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         cross: bool = False,
         reduction: ReductionConfig | None = _DEFAULT_REDUCTION,
         dropout: Rate | None = None,
-        mask: MaskInput = False,
+        hide: HideInput = (),
+        task: TaskInput = None,
+        ignore: str | tuple[str, ...] = (),
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         jacobian: bool = False,
@@ -217,7 +222,9 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         cross: bool = cast(bool, OMITTED),
         reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
         dropout: Rate | None = cast(Rate | None, OMITTED),
-        mask: MaskInput = False,
+        hide: HideInput = (),
+        task: TaskInput = None,
+        ignore: str | tuple[str, ...] = (),
         optimizer: OptimizerConfig | None = None,
         scheduler: Any = None,  # Lightning validates custom schedulers at fit time.
         jacobian: bool = False,
@@ -235,7 +242,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         nodes describe repeated objects; the anonymous root is a singleton
         at ``/``, with child addresses such as ``/amount`` and ``/items/sku``.
 
-        ``mask=True`` makes a field a supervised target. ``embed=True`` emits
+        ``predict=True`` makes a field a supervised target. ``embed=True`` emits
         its embedding during prediction. ``attention`` selects the root
         encoder mode; ``None`` disables its coordinate and sequence attention.
         ``cross=True`` selects a rank-eight multiplicative field cross at the root.
@@ -266,7 +273,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
                 raise TypeError("schema cannot be combined with a root ffnx override")
             if cross is not OMITTED:
                 raise TypeError("schema cannot be combined with a root cross override")
-            if fields is not None or field_kwargs or mask is not False:
+            if fields is not None or field_kwargs or hide != () or task is not None or ignore != ():
                 raise TypeError("schema cannot be combined with tree fields")
             if any(value is not OMITTED for value in (d_model, n_layers, n_heads)):
                 raise TypeError("schema cannot be combined with d_model, n_layers, or n_heads")
@@ -300,7 +307,9 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
                     cross=cross,
                     reduction=reduction,
                     dropout=dropout,
-                    mask=mask,
+                    hide=hide,
+                    task=task,
+                    ignore=ignore,
                 ).items()
                 if value is not OMITTED
             }
@@ -588,8 +597,8 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
     def on_fit_start(self) -> None:
         if not self.schema.objectives:
             raise RuntimeError(
-                "model has no reconstruction objectives; configure at least one active node "
-                "with mask=True or Mask(reconstruct=True) before fitting"
+                "model has no training objectives. Use predict=True on an active leaf or child branch "
+                "for supervision, or task=rf.reconstruct(...) for beta self-supervised training."
             )
         if self.jacobian:
             from relflow.architecture.jacobian import validate
@@ -706,6 +715,7 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         *,
         preset: str | None = None,
         batch_size: int | None = None,
+        accumulate_grad_batches: int | None = None,
         optimizer: OptimizerConfig | None = None,
         scheduler: SchedulerConfig | None = None,
         learning_rate: float | None = None,
@@ -741,6 +751,8 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         Lightning batch limits can shorten a loop; no automatic limits apply.
         ``batch_size`` sets the current per-device size for model-owned data
         loaders, including validation. Omission retains the current size.
+        ``accumulate_grad_batches`` averages this many microbatch gradients per
+        optimizer update. With Jacobian descent, objectives are combined within each microbatch.
 
         Early stopping and rollback accept booleans or configured callbacks.
         Their default monitor requires a validation split. Train-only fitting
@@ -769,6 +781,10 @@ class Model(lit.LightningModule, metaclass=declaration.Declarations):
         An explicit optimizer configuration cannot be combined with AdamW
         options. Model-level configurations remain defaults for advanced use.
         """
+        if accumulate_grad_batches is not None:
+            if type(accumulate_grad_batches) is not int or accumulate_grad_batches < 1:
+                raise ValueError(f"accumulate_grad_batches must be a positive integer, got {accumulate_grad_batches!r}")
+            trainer_options["accumulate_grad_batches"] = accumulate_grad_batches
         selected = optimizer if optimizer is not None else self.optimizer
         recipe = None if preset is None else presets.get(preset).fit
         if preset is not None and recipe is None:

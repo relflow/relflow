@@ -85,7 +85,7 @@ aligned result per supplied retained record.
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `values` | `None` | Declare an ordered tuple of labels, or leave unset for open integer ranks. Pass this option by keyword. |
-| `mask` | `False` | Set `mask=True` to hide the field from inputs and learn it as a supervised target. |
+| `predict` | `False` | Set `predict=True` to hide the field from inputs and learn it as a supervised target. |
 | `objective` | `"mae"` | Choose `"mae"`, `"mse"`, or `"huber"` for numeric rank reconstruction. |
 | `alpha` | `None` | Use cumulative rank-normalization statistics, or a value in `(0, 1)` for exponential training updates. |
 | `jitter` | `rf.Jitter()` | Apply training-only noise to rank inputs while preserving targets. |

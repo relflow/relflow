@@ -143,6 +143,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 ITEMS = 6
 
@@ -206,7 +207,7 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
 
 class Item(rf.Branch):
     value = rf.Number
-    deviation = rf.Number(mask=True, objective="mse", n_linear=2)
+    deviation = rf.Number(**TARGET, objective="mse", n_linear=2)
 
 
 class PredictionModel(rf.Model):

@@ -22,7 +22,7 @@ def test_batch_salt_follows_seed_epoch_and_ordinal():
 
 def test_training_batches_repeat_exactly_whatever_the_process_rng_did():
     model = rf.Model(
-        preset="small", key=rf.Hash, amount=rf.Number, label=rf.Boolean(mask=True), d_model=8, batch_size=2
+        preset="small", key=rf.Hash, amount=rf.Number, label=rf.Boolean(predict=True), d_model=8, batch_size=2
     )
     table = pa.table({"key": ["a", "b", "a", "d"], "amount": [1.0, 2.0, 3.0, 4.0], "label": [True, False, True, False]})
 

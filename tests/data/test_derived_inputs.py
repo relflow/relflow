@@ -67,7 +67,7 @@ def test_two_sources_derive_before_numeric_observation_and_target_masking(arithm
     model = rf.Model(
         preset="small",
         d_model=8,
-        total=Request(query=("left", "right"), mask=rf.Mask(rate=1.0, reconstruct=True, dropout=False)),
+        total=Request(query=("left", "right"), task=rf.reconstruct(rate=1.0)),
     )
     encoded = model.encode(pa.table({"left": [2.0, 7.0], "right": [3.0, 11.0]}), strata="train")["/total"]
 
@@ -84,7 +84,7 @@ def test_source_resolution_keeps_observations_before_masking():
         d_model=8,
         n_layers=1,
         n_heads=2,
-        value=rf.Number(mask=rf.Mask(rate=1.0, reconstruct=True, dropout=False)),
+        value=rf.Number(task=rf.reconstruct(rate=1.0)),
     )
     sources = coalesce(pa.table({"value": [2.0, 7.0]}), schema, rf.Strata.train).fields["/value"]
     original = rf.Context(salt=23)
@@ -106,7 +106,7 @@ def test_transformed_values_are_observed_before_tensorization(monkeypatch):
         elapsed=rf.Duration(
             query=("start", "end"),
             granularity="seconds",
-            mask=rf.Mask(rate=1.0, reconstruct=True, dropout=False),
+            task=rf.reconstruct(rate=1.0),
         ),
     )
     source = pa.table(
@@ -239,7 +239,7 @@ def test_ancestor_scope_cannot_escape_selected_model_root():
     with pytest.raises(ValueError):
         rf.Branch(length=2, query="../events", value=rf.Number)
     with pytest.raises(ValueError):
-        rf.Mask(query="../selected")
+        rf.Number(hide="../selected")
 
 
 def test_selected_root_is_the_upper_bound_for_ancestor_queries(arithmetic):
@@ -531,7 +531,7 @@ def test_full_reconstruction_derived_targets_predict_without_required_source_col
         preset="small",
         d_model=8,
         context=rf.Number,
-        total=Request(query=("left", "future"), mask=True),
+        total=Request(query=("left", "future"), predict=True),
     ).eval()
     inputs = pa.table(source)
     encoded = model.encode(inputs, strata="predict")["/total"]
@@ -549,7 +549,7 @@ def test_target_vacancy_preserves_derived_target_poison_invariance(arithmetic):
         preset="small",
         d_model=8,
         context=rf.Number,
-        total=Request(query=("left", "future"), mask=True),
+        total=Request(query=("left", "future"), predict=True),
     ).eval()
     source = pa.table({"context": [1.0, 2.0], "left": [3.0, 4.0]})
     missing = model.predict(source)
@@ -567,7 +567,7 @@ def test_inherited_full_reconstruction_keeps_branch_geometry_without_derived_tar
         events=rf.Branch(
             length=2,
             overflow="tail",
-            mask=True,
+            task=rf.reconstruct(),
             total=Request(query=("left", "future")),
         ),
     ).eval()
@@ -595,25 +595,25 @@ def test_inherited_full_reconstruction_keeps_branch_geometry_without_derived_tar
 @pytest.mark.parametrize("strata", ["train", "validate", "test"])
 def test_missing_derived_target_sources_remain_strict_outside_prediction(arithmetic, strata):
     _, Request = arithmetic
-    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), mask=True))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), predict=True))
     with pytest.raises(MissingFieldError, match="future"):
         model.encode(pa.table({"left": [3.0]}), strata=strata)
 
 
 @pytest.mark.parametrize(
     "mask",
-    [False, rf.Mask(query="selected", reconstruct=True), rf.Mask(rate=0.5, reconstruct=True)],
+    [None, rf.reconstruct(query="selected"), rf.reconstruct(rate=0.5)],
 )
 def test_missing_input_or_conditional_derived_sources_do_not_become_vacant(arithmetic, mask):
     _, Request = arithmetic
-    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), mask=mask))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), task=mask))
     with pytest.raises(MissingFieldError, match="future"):
         model.encode(pa.table({"left": [3.0], "selected": [True]}), strata="predict")
 
 
 def test_target_vacancy_does_not_hide_derived_type_errors(arithmetic):
     _, Request = arithmetic
-    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), mask=True))
+    model = rf.Model(preset="small", d_model=8, total=Request(query=("left", "future"), predict=True))
     with pytest.raises(pa.ArrowException):
         model.encode(pa.table({"left": [3.0], "future": ["not numeric"]}), strata="predict")
 
@@ -623,7 +623,7 @@ def test_canonical_full_rate_reconstruction_retains_masked_input_tokens_without_
     model = rf.Model(
         preset="small",
         d_model=8,
-        total=Request(query=("left", "future"), mask=rf.Mask(rate=1.0, reconstruct=True)),
+        total=Request(query=("left", "future"), task=rf.reconstruct(rate=1.0)),
     )
     field = model.encode(pa.table({"context": [1.0, 2.0]}), strata="predict")["/total"]
 
@@ -633,7 +633,7 @@ def test_canonical_full_rate_reconstruction_retains_masked_input_tokens_without_
 
 
 def test_explicit_number_target_query_can_be_missing_during_prediction():
-    model = rf.Model(preset="small", d_model=8, total=rf.Number(query="future", mask=True))
+    model = rf.Model(preset="small", d_model=8, total=rf.Number(query="future", predict=True))
     field = model.encode(pa.table({"left": [3.0]}), strata="predict")["/total"]
     assert field.inferred.all()
     assert not field.present.any()

@@ -18,7 +18,7 @@ def configuration(*, attention: str | None = "mha", pooling: str = "query") -> r
         n_heads=4,
         attention=attention,
         dropout=0.0,
-        items=rf.Branch(length=2, category=rf.Category(mask=True, pooling=pooling)),
+        items=rf.Branch(length=2, category=rf.Category(predict=True, pooling=pooling)),
     )
 
 
@@ -334,7 +334,7 @@ def test_decoder_receives_canonical_heritage_and_separate_sibling_context():
             value=rf.Number,
         ),
         selector=rf.Number,
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -387,7 +387,7 @@ def test_decoder_sibling_context_descends_only_through_unreduced_branches():
     preserved = rf.Model(
         items=rf.Branch(length=3, reduction=None, value=rf.Number),
         selector=rf.Number,
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -395,7 +395,7 @@ def test_decoder_sibling_context_descends_only_through_unreduced_branches():
     compressed = rf.Model(
         items=rf.Branch(length=3, reduction=rf.Mean(), value=rf.Number),
         selector=rf.Number,
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -414,7 +414,7 @@ def test_decoder_sibling_context_descends_only_through_unreduced_branches():
 def test_decoder_does_not_build_query_projection_for_only_unaligned_context() -> None:
     model = rf.Model(
         items=rf.Branch(length=3, reduction=None, value=rf.Number),
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -427,8 +427,8 @@ def test_decoder_does_not_build_query_projection_for_only_unaligned_context() ->
 
 def test_all_absent_heritage_retains_masked_sibling_context_in_autograd() -> None:
     model = rf.Model(
-        hidden=rf.Number(mask=True),
-        answer=rf.Number(mask=True),
+        hidden=rf.Number(predict=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -457,14 +457,14 @@ def test_all_absent_heritage_retains_masked_sibling_context_in_autograd() -> Non
 def test_scalar_decoder_position_defaults_off_and_can_be_enabled() -> None:
     automatic = rf.Model(
         value=rf.Number,
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
     )
     ordered = rf.Model(
         value=rf.Number,
-        answer=rf.Number(mask=True, decoder_position=True),
+        answer=rf.Number(predict=True, decoder_position=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -482,7 +482,7 @@ def test_repeated_target_uses_coordinate_conditioned_queries():
             length=3,
             reduction=None,
             entity_id=rf.Hash(n_hashes=2),
-            value=rf.Number(mask=True),
+            value=rf.Number(predict=True),
         ),
         d_model=8,
         n_layers=1,
@@ -500,7 +500,7 @@ def test_decoder_ignores_inactive_sibling_branches() -> None:
     model = rf.Model(
         inactive=rf.Branch(length=3, reduction=None, value=rf.Number(active=False)),
         visible=rf.Number,
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,

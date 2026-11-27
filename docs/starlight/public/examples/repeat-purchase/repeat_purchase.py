@@ -28,7 +28,7 @@ class Order(rf.Branch):
 class Customer(rf.Model):
     days_since_signup = rf.Number
     orders = Order(length=32, overflow="tail")
-    returns_in_30d = rf.Boolean(mask=True)
+    returns_in_30d = rf.Boolean(predict=True)
 
 
 def schema(*, labeled: bool) -> pa.Schema:

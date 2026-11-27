@@ -4,11 +4,13 @@ import importlib
 import sys
 from pathlib import Path
 
+import pyarrow as pa
 import pytest
 import relflow as rf
 import torch
 from pydantic import ValidationError
 from relflow.presets.base import resolve
+from visibility import TARGET, reconstruct
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
@@ -23,6 +25,35 @@ def historical():
         branch=rf.presets.BranchDefaults(n_layers=1, n_heads=2, reduction=rf.Attention()),
         leaf=rf.presets.LeafDefaults(n_heads=2),
     )
+
+
+@pytest.mark.parametrize("split", ["train", "validate", "test", "predict"])
+def test_visibility_declarations_preserve_selection_on_each_split(split):
+    model = rf.Model(
+        preset="small",
+        d_model=8,
+        label=rf.Number(**TARGET),
+        imputed=rf.Number(**reconstruct("held")),
+        sampled=rf.Number(**reconstruct(0.35)),
+        union=rf.Number(**reconstruct(0.35, "held")),
+    )
+    values = list(range(128))
+    held = torch.tensor([i % 2 == 0 for i in values])
+    source = pa.table({**{name: values for name in ("imputed", "sampled", "union", "label")}, "held": held.tolist()})
+    batch = model.encode(source, strata=split, seed=93)
+    selection = "inferred" if split == "predict" else "trainable"
+    assert not batch["/label"].present.any() and getattr(batch["/label"], selection).all()
+    assert batch["/imputed"].present.all()
+    assert torch.equal(batch["/imputed"].state.flatten() == rf.Tokens.masked, held)
+    assert torch.equal(getattr(batch["/imputed"], selection).flatten(), held)
+    selected = getattr(batch["/union"], selection).flatten()
+    sampled = getattr(batch["/sampled"], selection).flatten()
+    assert selected[held].all()
+    if split == "predict":
+        assert not sampled.any() and torch.equal(selected, held)
+    else:
+        assert 0 < sampled.sum() < len(values)
+        assert 0 < selected[~held].sum() < (~held).sum()
 
 
 def test_internal_registration_is_unique_and_leaves_public_policies_unchanged():
@@ -53,7 +84,7 @@ def test_class_policy_matches_historical_schema_seeded_weights_and_mutation_defa
 
     class Model(rf.Model):
         items = Item(length=4, overflow="tail")
-        label = rf.Boolean(mask=True)
+        label = rf.Boolean(**TARGET)
 
     previous = historical()
     torch.manual_seed(901)
@@ -61,7 +92,7 @@ def test_class_policy_matches_historical_schema_seeded_weights_and_mutation_defa
         schema=resolve(
             previous,
             items=rf.Branch(length=4, overflow="tail", amount=rf.Number, merchant=rf.Category),
-            label=rf.Boolean(mask=True),
+            label=rf.Boolean(**TARGET),
         )
     )
     old.preset = previous
@@ -72,7 +103,7 @@ def test_class_policy_matches_historical_schema_seeded_weights_and_mutation_defa
 
     for model in (old, current):
         torch.manual_seed(902)
-        model.extend(rf.where("address") == "/items", risk=rf.Number(mask=True))
+        model.extend(rf.where("address") == "/items", risk=rf.Number(**TARGET))
     assert current.schema.model_dump() == old.schema.model_dump()
     torch.testing.assert_close(current.state_dict(), old.state_dict(), rtol=0, atol=0)
     assert current.schema.requests["/items/risk"].n_heads == 2
@@ -83,7 +114,7 @@ def test_repeated_class_construction_owns_independent_state():
 
     class Model(rf.Model):
         merchant = rf.Category(topk=[2])
-        label = rf.Boolean(mask=True)
+        label = rf.Boolean(**TARGET)
 
     first = Model(preset=CONTROL.name)
     second = Model(preset=CONTROL.name)

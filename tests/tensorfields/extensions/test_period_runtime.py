@@ -30,7 +30,7 @@ def test_period_request_hydrates_jitter_from_a_mapping():
 
 
 def test_period_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.MonkeyPatch):
-    model = rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], mask=True), d_model=8)
+    model = rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], predict=True), d_model=8)
     rows = pa.table({"created": pa.array([datetime(2024, 1, 1), None, datetime(2024, 1, 4)])})
     field = model.encode(rows, strata=Strata.train)[ADDRESS]
     target = field.targets[TensorKey.content]["day_of_week"].reshape(3, 2)
@@ -58,7 +58,7 @@ def test_period_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_period_evaluation_angles_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], mask=True), d_model=8)
+    model = rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], predict=True), d_model=8)
     decoder = model.nodes[ADDRESS].decoder
     with torch.no_grad():
         # A constant readout on the unit circle: day 0 of the Sunday-based week.
@@ -142,7 +142,7 @@ def test_period_jitters_unit_circle_inputs_without_mutating_targets(monkeypatch:
         created=rf.Period(
             dateparts=["day_of_week"],
             jitter=configured,
-            mask=rf.Mask(query="supervise", reconstruct=True),
+            task=rf.reconstruct(query="supervise"),
         ),
         d_model=8,
     )
@@ -212,7 +212,7 @@ def test_period_reads_zone_aware_timestamps_in_their_own_zone(zone: str, utc: li
         preset="small",
         d_model=8,
         when=rf.Period(dateparts=["day_of_week", "hour_of_day"]),
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
     )
     aware = model.encode(pa.table({"when": instants}), strata="predict")
     naive = model.encode(pa.table({"when": local}), strata="predict")

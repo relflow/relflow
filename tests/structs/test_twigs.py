@@ -19,7 +19,7 @@ def test_bare_and_configured_index_bind_like_leaves_without_runtime_modules():
         n_heads=2,
         events=events(),
         visits=rf.Branch(when=rf.Index(query="started", granularity="hours"), amount=rf.Number),
-        label=rf.Category(mask=True),
+        label=rf.Category(predict=True),
     )
 
     twigs = model.schema.twigs
@@ -33,7 +33,14 @@ def test_bare_and_configured_index_bind_like_leaves_without_runtime_modules():
 
 
 def test_index_owns_only_its_source_and_granularity():
-    for option in ({"n_heads": 2}, {"embed": True}, {"mask": True}, {"dropout": 0.1}, {"granularity": "months"}):
+    for option in (
+        {"n_heads": 2},
+        {"embed": True},
+        {"predict": True},
+        {"hide": 0.5},
+        {"dropout": 0.1},
+        {"granularity": "months"},
+    ):
         with pytest.raises(ValueError):
             rf.Index(**option)
     with pytest.raises(TypeError, match="twig names come from the parent"):

@@ -129,7 +129,7 @@ def test_random_windows_align_nested_records_queries_masks_and_geometry():
             length=3,
             overflow="random",
             value=rf.Number,
-            target=rf.Number(mask=rf.Mask(query="selected", reconstruct=True)),
+            target=rf.Number(task=rf.reconstruct(query="selected")),
             children=rf.Branch(length=2, overflow="random", parent=rf.Number, value=rf.Number),
         ),
     )
@@ -206,7 +206,7 @@ def test_random_overflow_prediction_keeps_tail_null_slots_and_local_parent_ordin
     model = rf.Model(
         preset="small",
         d_model=8,
-        events=rf.Branch(length=3, overflow="random", amount=rf.Number, label=rf.Boolean(mask=True, embed=True)),
+        events=rf.Branch(length=3, overflow="random", amount=rf.Number, label=rf.Boolean(predict=True, embed=True)),
     ).eval()
     source = pa.Table.from_pylist(
         [

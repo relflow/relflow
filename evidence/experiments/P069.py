@@ -164,6 +164,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 300
 ROUTES = ("arch", "bay", "cove", "dune", "elm", "ford", "glen", "hill")
@@ -186,7 +187,7 @@ def records(*, rows: int, seed: int, shuffled: bool = False) -> Iterator[dict]:
 class Model(rf.Model):
     route = rf.Enum(values=ROUTES, p_unavailable=0.0)
     channel = rf.Enum(values=CHANNELS, p_unavailable=0.0)
-    label = rf.Enum(values=LABELS, p_unavailable=0.0, topk=[4], mask=True)
+    label = rf.Enum(values=LABELS, p_unavailable=0.0, topk=[4], **TARGET)
 
 
 def build() -> rf.Model:

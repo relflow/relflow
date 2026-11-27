@@ -1,7 +1,8 @@
 import pydantic
 import pytest
 
-from relflow.structs.tree import Address, Leaf, Mask, Node
+import relflow as rf
+from relflow.structs.tree import Address, Leaf, Node, selections
 
 
 class AddressPayload(pydantic.BaseModel):
@@ -86,62 +87,29 @@ def test_leaf_defaults_to_not_embedded():
     assert leaf.embed is False
 
 
-def test_leaf_mask_defaults_to_an_empty_tuple():
+def test_leaf_hide_defaults_to_an_empty_tuple():
     leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4})
-
-    assert Leaf.model_fields["mask"].default is False
-    assert leaf.mask == ()
-
-
-@pytest.mark.parametrize("value", [False, [], ()])
-def test_leaf_empty_mask_forms_normalize(value):
-    assert Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "mask": value}).mask == ()
+    assert leaf.hide == ()
+    assert leaf.predict is False
+    assert leaf.task is None
 
 
-def test_leaf_mask_singletons_normalize():
-    assert Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "mask": 0.25}).mask == (
-        Mask(rate=0.25),
-    )
-    assert Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "mask": True}).mask == (
-        Mask(skip=True, dropout=False, reconstruct=True),
-    )
+@pytest.mark.parametrize("value", [False, True, None, 1, 1.0, -0.1, float("nan"), float("inf"), "[", ("flag", True)])
+def test_leaf_hide_rejects_invalid_selection(value):
+    with pytest.raises((TypeError, ValueError)):
+        Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "hide": value})
 
 
-def test_leaf_mask_collection_is_copied_normalized_and_deduplicated():
-    values = [Mask(rate=0.0), Mask(rate=1.0), Mask(), Mask(query="selected")]
-    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "mask": values})
-
-    values.clear()
-
-    assert leaf.mask == (Mask(), Mask(query="selected"))
+@pytest.mark.parametrize("value", [None, 0, 1, "true", (True,)])
+def test_prediction_requires_a_boolean(value):
+    with pytest.raises((TypeError, ValueError)):
+        Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "predict": value})
 
 
-def test_leaf_mask_rejects_none_and_non_mask_collection_entries():
-    with pytest.raises(TypeError, match="mask cannot be None"):
-        Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "mask": None})
-
-    with pytest.raises(TypeError, match="entries must be Mask"):
-        Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "mask": [True]})
-
-
-def test_mask_normalizes_dropout_and_rejects_invalid_combinations():
-    assert Mask().dropout is True
-    assert Mask(reconstruct=True).dropout is False
-
-    with pytest.raises(ValueError, match="dropout=True"):
-        Mask(dropout=True, reconstruct=True)
-
-    assert Mask(skip=True, rate=0.5) == Mask(skip=True, rate=0.5, dropout=True)
-
-
-def test_mask_is_frozen_and_rejects_unknown_fields():
-    policy = Mask()
-
-    with pytest.raises(pydantic.ValidationError, match="Instance is frozen"):
-        policy.skip = True
-
-    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
-        Mask.model_validate({"unknown": True})
+def test_leaf_serializes_hide_selectors():
+    leaf = Leaf.model_validate({"name": "leaf", "type": "number", "n_heads": 4, "hide": (0.25, "flag")})
+    assert leaf.hide == (0.25, "flag")
+    assert Leaf.model_validate_json(leaf.model_dump_json()).hide == leaf.hide
 
 
 def test_node_rejects_extra_fields():
@@ -157,3 +125,26 @@ def test_node_description_trims_and_accepts_optional_metadata():
 def test_node_description_empty_string_becomes_none():
     node = Node.model_validate({"name": "ok_name", "type": "node", "description": "   ", "n_heads": 4})
     assert node.description is None
+
+
+def test_duplicate_and_zero_hide_rules_compile_to_one_selection():
+    selectors = [0.0, "redacted", "redacted", 0.4, 0.4]
+    leaf = Leaf.model_validate({"type": "number", "hide": selectors})
+    selectors.clear()
+    assert leaf.hide == (0.0, "redacted", "redacted", 0.4, 0.4)
+    assert [(rule.query, rule.rate) for rule in selections(leaf)] == [("redacted", None), (None, 0.4)]
+
+
+def test_reconstruction_is_immutable_and_rejects_unknown_options():
+    policy = rf.reconstruct(rate=0.25)
+    with pytest.raises(ValueError, match="frozen"):
+        policy.rate = 0.75
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        rf.Reconstruction.model_validate({"rate": 0.25, "dropout": True})
+
+
+def test_hide_rejects_mapping_selectors_and_mask_is_not_a_schema_option():
+    with pytest.raises(TypeError, match="hide expects a float probability or a Boolean query path"):
+        Leaf.model_validate({"type": "number", "hide": [{"skip": True, "reconstruct": True}]})
+    with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+        Leaf.model_validate({"type": "number", "mask": 0.2})

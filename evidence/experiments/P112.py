@@ -133,6 +133,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
+from visibility import TARGET, reconstruct
 
 BUDGET = 2400
 ENTITIES = 32
@@ -163,9 +164,9 @@ def records(
 
 
 class Model(rf.Model):
-    entity = rf.Group(n_groups=8, mask=rf.Mask(rate=0.1, reconstruct=True), p_unavailable=0.0)
+    entity = rf.Group(n_groups=8, **reconstruct(0.1), p_unavailable=0.0)
     x = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 class CategoryModel(Model):
@@ -175,7 +176,7 @@ class CategoryModel(Model):
 class OracleModel(rf.Model):
     group = rf.Enum(values=tuple(f"group-{i}" for i in range(GROUPS)))
     x = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 def build(kind: str) -> rf.Model:

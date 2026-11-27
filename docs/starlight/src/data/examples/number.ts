@@ -15,7 +15,7 @@ class Delivery(rf.Model):
 
     order_total = rf.Number
     item_count = rf.Number
-    delivery_days = rf.Number(mask=True)`,
+    delivery_days = rf.Number(predict=True)`,
     dataset: {
       id: 'delivery', label: 'Delivery order',
       observation: 'One order when it is placed.',
@@ -51,7 +51,7 @@ class Item(rf.Branch):
     product = rf.Category
     on_hand = rf.Number
     sold_last_7d = rf.Number
-    replenish_units = rf.Number(mask=True)
+    replenish_units = rf.Number(predict=True)
 
 
 class Inventory(rf.Model):
@@ -117,8 +117,8 @@ class ServiceJob(rf.Model):
     job_type = rf.Enum("installation", "repair", "inspection")
     asset_age_years = rf.Number
     planned_units = rf.Number
-    technician_hours = rf.Number(mask=True)
-    parts_cost_usd = rf.Number(mask=True)`,
+    technician_hours = rf.Number(predict=True)
+    parts_cost_usd = rf.Number(predict=True)`,
     dataset: {
       id: 'service', label: 'Service job',
       observation: 'One service job at planning time.',

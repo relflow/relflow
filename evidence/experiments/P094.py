@@ -138,6 +138,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4608
@@ -181,7 +182,7 @@ class Model(rf.Model):
     selected_group = rf.Enum(values=GROUPS, p_unavailable=0.0)
     operation = rf.Enum(values=OPERATIONS, p_unavailable=0.0)
     items = Item(length=18, overflow="error", reduction=None)
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

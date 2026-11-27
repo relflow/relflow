@@ -98,7 +98,7 @@ def prediction_schema() -> Schema:
         embed=True,
         attention=None,
         color=rf.Category(p_unavailable=0.0),
-        label=rf.Category(mask=True, p_unavailable=0.0, topk=[2]),
+        label=rf.Category(predict=True, p_unavailable=0.0, topk=[2]),
     )
 
 
@@ -272,7 +272,7 @@ def test_configure_callbacks_collects_and_deduplicates_active_extension_callback
     assert callback_types.index(CounterUpdateCallback) < callback_types.index(VocabularySyncCallback)
 
 
-def test_fit_start_rejects_a_model_without_reconstruction_objectives() -> None:
+def test_fit_start_rejects_a_model_without_training_objectives() -> None:
     model = rf.Model(
         value=rf.Number,
         d_model=8,
@@ -280,7 +280,7 @@ def test_fit_start_rejects_a_model_without_reconstruction_objectives() -> None:
         n_heads=2,
     )
 
-    with pytest.raises(RuntimeError, match="no reconstruction objectives"):
+    with pytest.raises(RuntimeError, match=r"no training objectives.*predict=True.*beta self-supervised"):
         model.on_fit_start()
 
 
@@ -548,7 +548,7 @@ def test_inactive_leaf_nodes_are_ignored_by_encoding_and_forward() -> None:
         embed=True,
         attention=None,
         color=rf.Category,
-        ignored=rf.Category(active=False, embed=True, mask=True),
+        ignored=rf.Category(active=False, embed=True, predict=True),
         batch_size=2,
     )
 

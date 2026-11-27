@@ -62,7 +62,7 @@ class Request(RequestBase):
     content is stored as float32 without fitting a normalizer. ``jitter`` adds
     training-only noise in the supplied coordinate units and preserves targets.
     ``objective`` selects mean ``"l1"`` or ``"l2"`` reconstruction loss across
-    coordinates. ``mask=True`` makes the vector a supervised target.
+    coordinates. ``predict=True`` makes the vector a supervised target.
     Predictions contain a reconstructed vector of the same width.
     """
 
@@ -155,7 +155,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
 
         content, state = encode(input)
         targets = TensorDict({}, batch_size=input.shape)
-        if address in schema.objectives:
+        if sources.needs_targets(schema):
             target_content, target_state = encode(target)
             targets = TensorDict(
                 {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape

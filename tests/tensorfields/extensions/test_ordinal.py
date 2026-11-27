@@ -36,7 +36,7 @@ def test_ordinal_reuses_numeric_learning_without_a_class_vocabulary():
     assert issubclass(ordinal.TensorField, number.TensorField)
     for role in (rf.Component.observe, rf.Component.learn, rf.Component.loss):
         assert ordinal.ordinal.component(role) is number.number.component(role)
-    configured = model(VALUES, mask=True)
+    configured = model(VALUES, predict=True)
     assert configured.nodes[ADDRESS].decoder.regression.out_features == 1
     assert ordinal.ordinal.callback_factories == number.number.callback_factories
 
@@ -55,7 +55,7 @@ def test_ordinal_keeps_structural_query_validation(query):
 
 @pytest.mark.parametrize("mask", [False, True])
 def test_declared_order_becomes_numeric_rank_before_statistics_and_masking(mask):
-    configured = model(VALUES, mask=mask)
+    configured = model(VALUES, predict=mask)
     field = configured.encode(pa.table({"level": ["high", "low", None, "medium"]}), strata="train")[ADDRESS]
     content = field.targets[rf.TensorKey.content] if mask else field.content
     assert content.flatten().tolist() == [2.0, 0.0, 0.0, 1.0]
@@ -120,7 +120,7 @@ def test_declared_dictionary_values_and_nulls_have_the_same_rank_encoding():
 @pytest.mark.parametrize("mask", [False, True])
 def test_declared_labels_are_checked_before_masking(labels, mask):
     with pytest.raises(ValueError, match="Ordinal.*level"):
-        model(VALUES, mask=mask).encode(pa.table({"level": labels}), strata="train")
+        model(VALUES, predict=mask).encode(pa.table({"level": labels}), strata="train")
 
 
 def test_query_and_branch_cropping_preserve_record_holes_and_rank_values():
@@ -153,7 +153,7 @@ def test_explicit_missing_target_source_is_allowed_during_prediction():
         preset="small",
         d_model=8,
         amount=rf.Number,
-        level=rf.Ordinal(values=VALUES, query="rating", mask=True),
+        level=rf.Ordinal(values=VALUES, query="rating", predict=True),
     )
 
     output = configured.predict(pa.table({"amount": [1.0, 2.0]}))
@@ -164,11 +164,11 @@ def test_explicit_missing_target_source_is_allowed_during_prediction():
 
 @pytest.mark.parametrize("labels", [(False, True), (100, 20, -1), (1.25, -3.5), (b"low", b"high"), VALUES])
 def test_native_declared_labels_survive_json_yaml_and_checkpoint_roundtrips(labels, tmp_path):
-    configured = model(labels, mask=True)
+    configured = model(labels, predict=True)
     declaration = configured.schema.requests[ADDRESS].model_dump(mode="json", exclude={"name"})
     assert rf.Ordinal.model_validate({"values": json.loads(json.dumps(declaration))["values"]}).values == labels
     assert rf.Schema.model_validate_json(configured.schema.model_dump_json()).requests[ADDRESS].values == labels
-    declaration["mask"] = True
+    declaration["predict"] = True
     path = tmp_path / "ordinal.yaml"
     path.write_text(yaml.safe_dump({"preset": "small", "d_model": 8, "fields": {"level": declaration}}))
     restored = rf.Model.from_yaml(path)
@@ -187,11 +187,11 @@ def test_native_declared_labels_survive_json_yaml_and_checkpoint_roundtrips(labe
 @pytest.mark.parametrize("labels", [VALUES[::-1], (0, 1, 2), None])
 def test_checkpoint_rejects_changed_rank_meanings(labels):
     with pytest.raises(ValueError, match="Ordinal.*level.*declaration"):
-        model(labels, mask=True).load_state_dict(model(VALUES, mask=True).state_dict())
+        model(labels, predict=True).load_state_dict(model(VALUES, predict=True).state_dict())
 
 
 def test_stale_prefetched_batch_is_rejected_after_reordering():
-    configured = model(VALUES, mask=True)
+    configured = model(VALUES, predict=True)
     pending = encode(
         pa.table({"level": ["low", "high"]}),
         configured.schema,
@@ -205,7 +205,7 @@ def test_stale_prefetched_batch_is_rejected_after_reordering():
 
 
 def test_updating_a_declaration_resets_rank_model_weights_and_statistics():
-    configured = model(VALUES, mask=True)
+    configured = model(VALUES, predict=True)
     configured.encode(pa.table({"level": ["high"]}), strata="train")
     with torch.no_grad():
         configured.nodes[ADDRESS].decoder.regression.weight.fill_(100)
@@ -215,7 +215,7 @@ def test_updating_a_declaration_resets_rank_model_weights_and_statistics():
 
 
 def test_unrelated_extension_preserves_pending_counter_state_and_rank_statistics():
-    configured = model(VALUES, mask=True)
+    configured = model(VALUES, predict=True)
     configured.encode(pa.table({"level": ["high", "low"]}), strata="train")
     counter = configured.nodes[ADDRESS].embedder.counter
     counter.is_full = True
@@ -233,17 +233,17 @@ def test_unrelated_extension_preserves_pending_counter_state_and_rank_statistics
 @pytest.mark.parametrize("source", [None, (True, False), (1.0, 0.0)])
 def test_checkpoint_distinguishes_implicit_mode_and_label_scalar_types(source):
     with pytest.raises(ValueError, match="Ordinal.*declaration"):
-        model((1, 0), mask=True).load_state_dict(model(source, mask=True).state_dict())
+        model((1, 0), predict=True).load_state_dict(model(source, predict=True).state_dict())
 
 
 def test_writer_rounds_ties_to_even_and_clamps_declared_labels():
-    configured = model(VALUES, mask=True)
+    configured = model(VALUES, predict=True)
     written = ordinal.write(configured, prediction([-10, 0.49, 0.5, 1.5, 20]), ordinal.output(configured, ADDRESS))
     assert written.field("content").to_pylist() == ["low", "low", "low", "high", "high"]
 
 
 def test_writer_emits_open_integer_ranks_and_saturates_before_integer_cast():
-    configured = model(mask=True)
+    configured = model(predict=True)
     written = ordinal.write(configured, prediction([-1e30, -2.5, -1.5, 6.8, 1e30]), ordinal.output(configured, ADDRESS))
     assert written.field("content").type == pa.int64()
     assert written.field("content").to_pylist() == [-(2**53), -2, -2, 7, 2**53]
@@ -251,13 +251,13 @@ def test_writer_emits_open_integer_ranks_and_saturates_before_integer_cast():
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
 def test_writer_rejects_nonfinite_ranks_before_rounding(value):
-    configured = model(mask=True)
+    configured = model(predict=True)
     with pytest.raises(ValueError, match="Ordinal prediction.*level.*nonfinite"):
         ordinal.write(configured, prediction([value]), ordinal.output(configured, ADDRESS))
 
 
 def test_numeric_objective_penalizes_larger_rank_errors_and_propagates_gradient(monkeypatch):
-    configured = model(VALUES, mask=True, objective="mse")
+    configured = model(VALUES, predict=True, objective="mse")
     field = configured.encode(pa.table({"level": ["low", "medium", "high"]}), strata="train")[ADDRESS]
     monkeypatch.setattr(configured, "track", lambda *args, value, **kwargs: value)
     losses = []
@@ -281,7 +281,7 @@ def test_numeric_objective_penalizes_larger_rank_errors_and_propagates_gradient(
 @pytest.mark.parametrize("values", [None, VALUES], ids=["open-integer-ranks", "declared-labels"])
 def test_one_batch_training_and_validation_keep_native_rank_or_label_output(values):
     torch.manual_seed(91)
-    configured = rf.Model(preset="small", d_model=8, amount=rf.Number, level=rf.Ordinal(values=values, mask=True))
+    configured = rf.Model(preset="small", d_model=8, amount=rf.Number, level=rf.Ordinal(values=values, predict=True))
     train = pa.table(
         {"amount": [-3, -1, 1, 3], "level": [-3, -1, 1, 3] if values is None else ["low", "low", "high", "high"]}
     )

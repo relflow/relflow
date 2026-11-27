@@ -191,17 +191,17 @@ class OrdinalEvent(rf.Branch):
 
 class IndexedModel(rf.Model):
     events = IndexedEvent(length=8)
-    late = rf.Boolean(mask=True)
+    late = rf.Boolean(predict=True)
 
 
 class PreparedModel(rf.Model):
     events = PreparedEvent(length=8)
-    late = rf.Boolean(mask=True)
+    late = rf.Boolean(predict=True)
 
 
 class OrdinalModel(rf.Model):
     events = OrdinalEvent(length=8)
-    late = rf.Boolean(mask=True)
+    late = rf.Boolean(predict=True)
 
 
 MODELS = {"index": IndexedModel, "hours": PreparedModel, "ordinal": OrdinalModel, "donor": IndexedModel}

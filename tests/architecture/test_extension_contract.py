@@ -46,6 +46,7 @@ def build_extension(
     class Options(RequestBase):
         type: Literal[name] = name
         family: Literal["text", "bytes"] = "text"
+        ignore: list[str] | None = None
 
     @extension.register(rf.Component.TensorField)
     @tensorclass
@@ -193,6 +194,18 @@ def test_third_party_extension_receives_one_explicit_context_contract():
         TENSORFIELDS.pop(extension.name, None)
 
 
+def test_extension_ignore_option_is_independent_of_branch_mask_exemptions():
+    extension, Request = build_extension()
+    try:
+        model = rf.Model(preset="small", d_model=8, value=Request(hide="hide", ignore=["unused"]))
+        model.update(rf.where("name") == "value", ignore=["another"])
+        field = model.encode(pa.table({"value": ["one", "two"], "hide": [True, False]}), strata="train")["/value"]
+        assert field.state.flatten().tolist() == [rf.Tokens.masked, rf.Tokens.valued]
+        assert model.schema.requests["/value"].ignore == ["another"]
+    finally:
+        TENSORFIELDS.pop(extension.name, None)
+
+
 def test_tensorfield_rejects_an_invalid_binding(monkeypatch):
     extension, Request = build_extension(decoder=False, loss=False)
     try:
@@ -210,7 +223,7 @@ def test_tensorfield_rejects_an_invalid_binding(monkeypatch):
         TENSORFIELDS.pop(extension.name, None)
 
 
-@pytest.mark.parametrize("options", [{"mask": True}, {"embed": True}])
+@pytest.mark.parametrize("options", [{"predict": True}, {"embed": True}])
 def test_third_party_decoder_attaches_the_live_embedder_context(options):
     marker = object()
     extension, Request = build_extension(state=marker)
@@ -237,9 +250,9 @@ def test_reconstruction_validates_custom_leaf_and_branch_capabilities(branch):
     try:
         field = Request()
         fields = (
-            {"items": rf.Branch(value=field, length=2, mask=True)}
+            {"items": rf.Branch(value=field, length=2, task=rf.reconstruct())}
             if branch
-            else {"value": field.model_copy(update={"mask": True})}
+            else {"value": field.model_copy(update={"predict": True})}
         )
 
         with pytest.raises(ValueError, match=rf"extension '{extension.name}'.*Decoder, loss"):
@@ -252,7 +265,7 @@ def test_reconstruction_requires_decoder_and_loss_as_one_capability():
     extension, Request = build_extension(decoder=True, loss=False)
     try:
         with pytest.raises(ValueError, match=rf"extension '{extension.name}'.*required component\(s\): loss"):
-            rf.Model(value=Request(mask=True), d_model=8, n_layers=1, n_heads=2)
+            rf.Model(value=Request(predict=True), d_model=8, n_layers=1, n_heads=2)
     finally:
         TENSORFIELDS.pop(extension.name, None)
 
@@ -276,9 +289,9 @@ def test_failed_capability_mutation_restores_schema_and_runtime_graph():
         nodes = model.nodes
 
         with pytest.raises(ValueError, match=rf"extension '{extension.name}'.*Decoder, loss"):
-            model.update(rf.where("name") == "value", mask=True)
+            model.update(rf.where("name") == "value", predict=True)
 
-        assert model.schema.requests["/value"].mask == ()
+        assert model.schema.requests["/value"].predict is False
         assert model.schema.objectives == []
         assert model.nodes is nodes
     finally:
@@ -292,9 +305,9 @@ def test_failed_runtime_rebuild_restores_schema_and_runtime_graph():
         nodes = model.nodes
 
         with pytest.raises(RuntimeError, match="decoder exploded"):
-            model.update(rf.where("name") == "value", mask=True)
+            model.update(rf.where("name") == "value", predict=True)
 
-        assert model.schema.requests["/value"].mask == ()
+        assert model.schema.requests["/value"].predict is False
         assert model.schema.objectives == []
         assert model.nodes is nodes
     finally:
@@ -323,14 +336,14 @@ def test_custom_tensordict_trailing_axes_gather_embed_and_scatter():
     extension, Request = build_extension(decoder=False, loss=False)
     try:
         model = rf.Model(
-            value=Request(mask=rf.Mask(query="skip", skip=True, dropout=False)),
+            value=Request(query="record.value"),
             d_model=8,
             n_layers=1,
             n_heads=2,
             embed=True,
         )
         inputs = model.encode(
-            pa.table({"value": ["a", "bb", "ccc"], "skip": [False, True, False]}),
+            pa.table({"record": [{"value": "a"}, None, {"value": "ccc"}]}),
             strata=Strata.train,
         )
         seen = []
@@ -381,7 +394,7 @@ def test_compact_extension_presence_is_scattered_without_routing_its_payload(mon
 def test_source_less_multifamily_extension_without_public_outputs_rejects_prediction():
     extension, Request = build_extension()
     try:
-        model = rf.Model(label=Request(mask=True, family="bytes"), d_model=8, n_layers=1, n_heads=2)
+        model = rf.Model(label=Request(predict=True, family="bytes"), d_model=8, n_layers=1, n_heads=2)
 
         with pytest.raises(ValueError, match="model has no public prediction outputs"):
             model.predict(pa.table({"unused": [None, None]}))
@@ -393,12 +406,14 @@ def test_all_skipped_custom_embedder_accepts_zero_sized_parameters():
     extension, Request = build_extension(decoder=False, loss=False, empty=True)
     try:
         model = rf.Model(
-            value=Request(mask=rf.Mask(skip=True, dropout=False)),
+            value=Request(query="record.value"),
             d_model=8,
             n_layers=1,
             n_heads=2,
         )
-        field = model.encode(pa.table({"value": ["a"]}), strata=Strata.train)["/value"]
+        field = model.encode(
+            pa.table({"record": pa.array([None], type=pa.struct([("value", pa.string())]))}), strata=Strata.train
+        )["/value"]
         embedder = model.nodes["/value"].embedder
 
         parcel = embedder.embed(field)

@@ -130,6 +130,7 @@ import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 COHORTS = ("A", "B", "C")
@@ -174,7 +175,7 @@ def records(rows: int, seed: int, cohort: str):
 class PredictionModel(rf.Model):
     cohort = rf.Enum(values=COHORTS)
     x = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:

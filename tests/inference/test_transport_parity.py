@@ -20,7 +20,7 @@ def test_direct_parquet_arrow_and_json_preserve_the_same_selected_columns(tmp_pa
         d_model=8,
         embed=True,
         amount=rf.Number,
-        disputed=rf.Boolean(mask=True),
+        disputed=rf.Boolean(predict=True),
     )
     source = pa.table({"amount": [1.0, 2.0]})
     direct = model.predict(source, retain=retain, batch_size=2)

@@ -160,6 +160,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 
 def records(*, rows: int, seed: int, signal: bool, fill_nulls: bool = False) -> Iterator[dict]:
@@ -196,7 +197,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 
 class Model(rf.Model):
     measurement = rf.Number
-    target = rf.Boolean(mask=True)
+    target = rf.Boolean(**TARGET)
 
 
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.Model:

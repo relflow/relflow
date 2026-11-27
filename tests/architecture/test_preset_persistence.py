@@ -17,7 +17,7 @@ def configured() -> rf.Model:
         n_heads=2,
         amount=rf.Number,
         events=rf.Branch(length=2, amount=rf.Number),
-        target=rf.Number(mask=True),
+        target=rf.Number(predict=True),
     )
 
 
@@ -49,7 +49,7 @@ def test_checkpoint_preserves_policy_and_resolved_overrides_despite_new_defaults
         model.extend(
             rf.where("address") == "/",
             purchases=rf.Branch(length=3, price=rf.Number),
-            score=rf.Number(mask=True, n_heads=2),
+            score=rf.Number(predict=True, n_heads=2),
         )
         added = model.schema.branches[rf.Address("purchases")]
         assert added.n_layers == 1

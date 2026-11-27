@@ -194,6 +194,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 BATCH_SIZE = 64
@@ -245,7 +246,7 @@ class Source(rf.Branch):
 
 class Target(rf.Branch):
     entity_id = rf.Hash(n_hashes=4, n_bands=8)
-    value = rf.Number(mask=True, objective="mse")
+    value = rf.Number(**TARGET, objective="mse")
 
 
 class Link(rf.Branch):

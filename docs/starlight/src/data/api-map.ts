@@ -34,8 +34,8 @@ export const apiCatalog: ApiSection[] = [
         "name": "rf.Model.from_yaml"
       },
       {
-        "name": "rf.Mask",
-        "guide": "/concepts/targets/"
+        "name": "rf.reconstruct",
+        "guide": "/advanced/masking-and-pretraining/"
       },
       {
         "name": "rf.Jitter"
@@ -391,7 +391,10 @@ export const apiCatalog: ApiSection[] = [
     "description": "Look up the exported types, enums, and protocols used by model, data, training, and extension APIs.",
     "entries": [
       {
-        "name": "rf.MaskInput"
+        "name": "rf.HideInput"
+      },
+      {
+        "name": "rf.Reconstruction"
       },
       {
         "name": "rf.AttentionMode"

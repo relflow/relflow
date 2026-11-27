@@ -149,6 +149,7 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 300
 TRAIN_ROWS = 4096
@@ -160,17 +161,17 @@ ARMS = ("duration", "translated", "static", "number", "shuffled")
 
 class DurationTarget(rf.Model):
     signal = rf.Number
-    target = rf.Duration(query=("started_at", "ended_at"), granularity="hours", mask=True, objective="mse")
+    target = rf.Duration(query=("started_at", "ended_at"), granularity="hours", **TARGET, objective="mse")
 
 
 class StaticTarget(rf.Model):
     signal = rf.Number
-    target = rf.Duration(query="ended_at", start=ANCHOR, granularity="hours", mask=True, objective="mse")
+    target = rf.Duration(query="ended_at", start=ANCHOR, granularity="hours", **TARGET, objective="mse")
 
 
 class NumericTarget(rf.Model):
     signal = rf.Number
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:

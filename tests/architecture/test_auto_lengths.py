@@ -41,7 +41,7 @@ def test_nested_automatic_context_is_independent_of_batchmates(reduction):
             items=rf.Branch(reduction=None, value=rf.Number, category=rf.Boolean),
             capped=rf.Branch(length=3, overflow="tail", reduction=None, value=rf.Number),
         ),
-        answer=rf.Number(mask=True),
+        answer=rf.Number(predict=True),
     ).eval()
     for module in model.modules():
         projection = getattr(module, "mass_projection", None)
@@ -104,7 +104,7 @@ def test_dynamic_repeated_targets_share_queries_and_keep_optimizer_parameters():
         n_heads=2,
         events=rf.Branch(
             reduction=None,
-            items=rf.Branch(length=3, reduction=None, amount=rf.Number, label=rf.Number(mask=True)),
+            items=rf.Branch(length=3, reduction=None, amount=rf.Number, label=rf.Number(predict=True)),
         ),
     )
     decoder = model.nodes["/events/items/label"].decoder
@@ -141,7 +141,7 @@ def test_repeated_targets_keep_coordinates_when_neighboring_axes_grow():
         n_heads=2,
         events=rf.Branch(
             reduction=None,
-            items=rf.Branch(length=3, reduction=None, amount=rf.Number, label=rf.Number(mask=True, embed=True)),
+            items=rf.Branch(length=3, reduction=None, amount=rf.Number, label=rf.Number(predict=True, embed=True)),
         ),
     ).eval()
     short = {"events": [{"items": [{"amount": 1.0, "label": 2.0}] * 2}] * 2}
@@ -165,7 +165,7 @@ def test_empty_automatic_axes_support_backward_without_spurious_gradients(record
         d_model=8,
         n_layers=1,
         n_heads=2,
-        events=rf.Branch(reduction=None, amount=rf.Number, label=rf.Number(mask=True, embed=True)),
+        events=rf.Branch(reduction=None, amount=rf.Number, label=rf.Number(predict=True, embed=True)),
     )
     schema = pa.schema([("events", pa.list_(pa.struct([("amount", pa.float64()), ("label", pa.float64())])))])
     batch = model.encode(pa.Table.from_pylist(records, schema=schema), strata="predict")
@@ -223,9 +223,9 @@ def test_finite_decoder_heritage_retains_original_flat_memory_positions():
             length=2,
             reduction=None,
             amount=rf.Number,
-            target=rf.Number(mask=True, decoder_position=True),
+            target=rf.Number(predict=True, decoder_position=True),
         ),
-        answer=rf.Number(mask=True, decoder_position=True),
+        answer=rf.Number(predict=True, decoder_position=True),
     ).eval()
     observed = []
 
@@ -267,10 +267,10 @@ def test_three_dynamic_axes_preserve_ordered_scalar_and_repeated_predictions():
             reduction=None,
             orders=rf.Branch(
                 reduction=None,
-                items=rf.Branch(reduction=None, amount=rf.Number, target=rf.Number(mask=True, embed=True)),
+                items=rf.Branch(reduction=None, amount=rf.Number, target=rf.Number(predict=True, embed=True)),
             ),
         ),
-        answer=rf.Number(mask=True, decoder_position=True),
+        answer=rf.Number(predict=True, decoder_position=True),
     ).eval()
 
     def record(customers, orders, items):
@@ -304,7 +304,7 @@ def test_three_dynamic_axes_preserve_ordered_scalar_and_repeated_predictions():
 
 
 def test_encoded_models_pass_structural_geometry_to_custom_compute(monkeypatch):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, answer=rf.Number(mask=True)).eval()
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, answer=rf.Number(predict=True)).eval()
     encoder = model.nodes["/"].encoder
     pool = model.nodes["/answer"].decoder.pool
     encode, compute = encoder.compute, pool.compute
@@ -335,7 +335,7 @@ def test_custom_pool_compute_reports_incompatible_dynamic_queries(monkeypatch):
         d_model=8,
         n_layers=1,
         n_heads=2,
-        events=rf.Branch(reduction=None, amount=rf.Number, target=rf.Number(mask=True)),
+        events=rf.Branch(reduction=None, amount=rf.Number, target=rf.Number(predict=True)),
     ).eval()
     pool = model.nodes["/events/target"].decoder.pool
     compute = pool.compute

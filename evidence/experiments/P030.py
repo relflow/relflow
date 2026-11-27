@@ -143,6 +143,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 LENGTH = 5
 
@@ -188,7 +189,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 class Item(rf.Branch):
     quantity = rf.Number
     unit_price = rf.Number
-    subtotal = rf.Number(mask=True, objective="mse")
+    subtotal = rf.Number(**TARGET, objective="mse")
 
 
 class Model(rf.Model):

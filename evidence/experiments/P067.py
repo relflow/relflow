@@ -156,6 +156,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 BATCH_SIZE = 128
@@ -173,7 +174,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 class Model(rf.Model):
     amount = rf.Quantile
-    cost = rf.Quantile(objective="mse", mask=True)
+    cost = rf.Quantile(objective="mse", **TARGET)
 
 
 def build() -> rf.Model:

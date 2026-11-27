@@ -11,7 +11,6 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import Context
 from relflow.tensorfields.extensions.category import (
     Decoder,
@@ -34,7 +33,8 @@ def build_schema(
     *,
     topk: list[int] | None = None,
     p_unavailable: float | None = None,
-    mask: bool | Mask = False,
+    predict: bool = False,
+    task=None,
 ) -> Schema:
     options = {}
     if topk is not None:
@@ -46,7 +46,7 @@ def build_schema(
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, category=rf.Category(mask=mask, **options)),
+        items=rf.Branch(length=2, category=rf.Category(predict=predict, task=task, **options)),
     )
 
 
@@ -342,7 +342,7 @@ class TrackingModule:
 
 
 def test_category_loss_does_not_mutate_counters():
-    schema = build_schema(p_unavailable=0.0, mask=Mask(reconstruct=True))
+    schema = build_schema(p_unavailable=0.0, task=rf.reconstruct())
     state = vocabulary_state()
 
     field = tensorfield(
@@ -380,7 +380,7 @@ def test_category_loss_does_not_mutate_counters():
 
 
 def test_category_loss_retains_state_supervision_for_unavailable_content():
-    schema = build_schema(p_unavailable=0.0, mask=True)
+    schema = build_schema(p_unavailable=0.0, predict=True)
     state = vocabulary_state()
 
     tensorfield(
@@ -420,7 +420,7 @@ def test_category_loss_retains_state_supervision_for_unavailable_content():
 
 @pytest.mark.integration
 def test_category_float_nan_labels_take_the_other_state_and_never_enter_the_vocabulary(tmp_path):
-    model = rf.Model(preset="small", d_model=8, code=rf.Category, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, code=rf.Category, label=rf.Boolean(predict=True))
     rows = pa.table({"code": pa.array([1.0, float("nan"), 2.0, None, 1.0]), "label": [True, False, True, False, True]})
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
@@ -451,7 +451,9 @@ def test_category_float_nan_labels_take_the_other_state_and_never_enter_the_voca
 def test_category_strip_and_cased_fold_look_alike_labels(tmp_path):
     rows = pa.table({"code": pa.array(["Foo", "foo ", " FOO", "bar"]), "label": [True, True, True, False]})
 
-    folded = rf.Model(preset="small", d_model=8, code=rf.Category(strip=True, cased=False), label=rf.Boolean(mask=True))
+    folded = rf.Model(
+        preset="small", d_model=8, code=rf.Category(strip=True, cased=False), label=rf.Boolean(predict=True)
+    )
     data = rf.ArrowDataModule(folded, train=rows, validate=rows, shuffle=False)
     folded.fit(
         data,
@@ -473,7 +475,7 @@ def test_category_strip_and_cased_fold_look_alike_labels(tmp_path):
     field = folded.encode(rows, strata="predict")[rf.Address("code")]
     assert field.content.reshape(-1).tolist() == [0, 0, 0, 1]
 
-    exact = rf.Model(preset="small", d_model=8, code=rf.Category, label=rf.Boolean(mask=True))
+    exact = rf.Model(preset="small", d_model=8, code=rf.Category, label=rf.Boolean(predict=True))
     data = rf.ArrowDataModule(exact, train=rows, validate=rows, shuffle=False)
     exact.fit(
         data,

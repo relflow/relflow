@@ -191,6 +191,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import reconstruct
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -228,12 +229,12 @@ def records(*, rows: int, seed: int, permuted: bool = False) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    mask = rf.Mask(rate=0.35, reconstruct=True)
+    pretrain = reconstruct(0.35)
 
     class Model(rf.Model):
-        first = rf.Enum(values=CODES, p_unavailable=0.0, mask=mask)
-        second = rf.Enum(values=CODES, p_unavailable=0.0, mask=mask)
-        geometry = rf.Vector(n_dim=16, mask=mask)
+        first = rf.Enum(values=CODES, p_unavailable=0.0, **pretrain)
+        second = rf.Enum(values=CODES, p_unavailable=0.0, **pretrain)
+        geometry = rf.Vector(n_dim=16, **pretrain)
 
     model = Model(preset=CONTROL.name, embed=True)
     return model

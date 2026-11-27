@@ -6,7 +6,18 @@ import relflow as rf
 
 rf.Number(n_bands="wide")  # rejected
 rf.Number(objective="l2")  # rejected
-rf.Number(mask=None)  # rejected
+rf.Number(mask=0.2)  # rejected
+rf.Number(hide=None)  # rejected
+rf.Number(hide=["flag"])  # rejected
+rf.Number(predict="yes")  # rejected
+rf.Number(withhold="flag")  # rejected
+rf.Number(task=0.25)  # rejected
+rf.Branch(ablate="offline", value=rf.Number)  # rejected
+rf.Number(ablate="offline")  # rejected
+rf.Branch(predict="yes", value=rf.Number)  # rejected
+rf.reconstruct(query=True)  # rejected
+rf.reconstruct(ablate=0.15)  # rejected
+rf.reconstruct(fields=0.15)  # rejected
 rf.Number(n_bnads=4)  # rejected
 rf.Number(note="Transaction amount")  # rejected
 rf.Duration(query=("start", "end"), granularity="months")  # rejected

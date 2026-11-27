@@ -103,7 +103,7 @@ export function explain(
     declaration: `${node.name} = ${node.declaration}`,
     description: node.description,
     representation: node.target
-      ? 'mask=True keeps this answer value out of encoder context. Its type still defines field-owned state and the decoder contract.'
+      ? 'predict=True keeps this answer value out of encoder context. Its type still defines field-owned state and the decoder contract.'
       : representation,
     context: node.target
       ? `The decoder uses available context to answer at ${parent === '/' ? 'the observation root' : `${parent}, for each retained record`}. The masked answer is never an input clue.`

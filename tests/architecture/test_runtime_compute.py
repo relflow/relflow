@@ -13,7 +13,7 @@ from tests.architecture.test_extension_contract import build_extension
 
 @pytest.mark.parametrize("entry", ["forward", "training_step"])
 def test_forward_and_training_step_share_compute_after_host_preparation(monkeypatch, entry):
-    model = rf.Model(preset="small", value=rf.Number, label=rf.Boolean(mask=True), d_model=8, batch_size=2)
+    model = rf.Model(preset="small", value=rf.Number, label=rf.Boolean(predict=True), d_model=8, batch_size=2)
     data = rf.ArrowDataModule(
         model=model,
         train=pa.table({"value": [1.0, 5.0], "label": [False, True]}),
@@ -57,7 +57,7 @@ def test_forward_and_training_step_share_compute_after_host_preparation(monkeypa
 
 @pytest.mark.parametrize("entry", ["forward", "training_step"])
 def test_host_validation_rejects_invalid_inputs_before_compute(monkeypatch, entry):
-    model = rf.Model(preset="small", value=rf.Number, label=rf.Boolean(mask=True), d_model=8)
+    model = rf.Model(preset="small", value=rf.Number, label=rf.Boolean(predict=True), d_model=8)
     inputs = model.encode(pa.table({"value": [1.0], "label": [True]}), strata=Strata.train)
     inputs["/value"].state = inputs["/value"].state.float()
 
@@ -75,11 +75,9 @@ def test_host_validation_rejects_invalid_inputs_before_compute(monkeypatch, entr
 def test_compute_preserves_late_extension_nested_content_and_module_hooks():
     extension, Request = build_extension(decoder=False, loss=False)
     try:
-        model = rf.Model(
-            preset="small", value=Request(mask=rf.Mask(query="skip", skip=True, dropout=False)), d_model=8, embed=True
-        )
+        model = rf.Model(preset="small", value=Request(query="record.value"), d_model=8, embed=True)
         inputs = model.encode(
-            pa.table({"value": ["a", "bb", "ccc"], "skip": [False, True, False]}),
+            pa.table({"record": [{"value": "a"}, None, {"value": "ccc"}]}),
             strata=Strata.train,
         )
         embedder = model.nodes["/value"].embedder
@@ -169,7 +167,7 @@ def test_failed_checkpoint_restore_keeps_original_execution_plan():
 
 
 def test_cached_schema_plan_preserves_live_decoder_context_routes():
-    model = rf.Model(preset="small", value=rf.Number, label=rf.Number(mask=True), d_model=8)
+    model = rf.Model(preset="small", value=rf.Number, label=rf.Number(predict=True), d_model=8)
     inputs = model.encode(pa.table({"value": [1.0]}))
     decoder = model.nodes["/label"].decoder
     seen = []

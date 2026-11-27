@@ -184,6 +184,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 TARGETS = ("u", "v", "w")
 
@@ -198,12 +199,12 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 class Model(rf.Model):
     a = rf.Number
     b = rf.Number
-    u = rf.Number(mask=True, objective="mse")
-    v = rf.Number(mask=True, objective="mse")
+    u = rf.Number(**TARGET, objective="mse")
+    v = rf.Number(**TARGET, objective="mse")
 
 
 class ExtendedModel(Model):
-    w = rf.Number(mask=True, objective="mse")
+    w = rf.Number(**TARGET, objective="mse")
 
 
 def build(*, extended: bool = False) -> rf.Model:
@@ -353,7 +354,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
             )
             targets = TARGETS[:2] if arm == "continuation" else TARGETS
             if arm == "extended":
-                model.extend(rf.where("address") == "/", w=rf.Number(mask=True, objective="mse"))
+                model.extend(rf.where("address") == "/", w=rf.Number(**TARGET, objective="mse"))
                 extended_schema = model.schema.model_dump()
                 retained = model.state_dict()
                 changes = [

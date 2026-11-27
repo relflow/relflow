@@ -285,15 +285,15 @@ def test_schema_rejects_undeclared_branch_options():
 def test_schema_allows_missing_mask():
     structure = Schema.model_validate(schema_payload())
 
-    assert structure.fields.mask == ()
-    assert structure.branches["/branch"].mask == ()
-    assert structure.requests["/branch/category_leaf"].mask == ()
+    assert structure.fields.hide == ()
+    assert structure.branches["/branch"].hide == ()
+    assert structure.requests["/branch/category_leaf"].hide == ()
 
 
 def test_inactive_leaf_nodes_are_kept_in_tree_but_removed_from_runtime_maps():
     payload = schema_payload()
     payload["fields"]["fields"][0]["fields"][0]["active"] = False
-    payload["fields"]["fields"][0]["fields"][0]["mask"] = True
+    payload["fields"]["fields"][0]["fields"][0]["predict"] = True
     payload["fields"]["fields"][0]["fields"][0]["embed"] = True
 
     structure = Schema.model_validate(payload)

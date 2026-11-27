@@ -88,7 +88,7 @@ def test_adamw_decays_only_the_projection_matrices_of_a_model() -> None:
         normal=rf.Number,
         merchant=rf.Category,
         items=rf.Branch(length=2, sku=rf.Category),
-        label=rf.Category(mask=True),
+        label=rf.Category(predict=True),
     )
 
     decay_group, no_decay_group = adamw(learning_rate=1e-3, decay_bias=True, decay_1d=True, no_decay_name_fragments=())(

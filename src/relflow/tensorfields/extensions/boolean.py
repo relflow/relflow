@@ -58,7 +58,7 @@ class Request(RequestBase):
     ``threshold`` accepts one value or a nonempty list in ``[0, 1]``; repeated
     list entries are removed in their original order. Thresholds affect
     decision metrics only: predicted content remains the probability of True.
-    ``mask=True`` declares a supervised target, trained with binary content
+    ``predict=True`` declares a supervised target, trained with binary content
     loss for valued targets and separate state classification.
     """
 
@@ -173,7 +173,6 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         schema: Schema,
         context: Context,
     ) -> tuple[Self, TensorDict | None, tuple[object, ...]]:
-        address = sources.address
         projection, context, observation, binding = resolve(sources, schema=schema, context=context)
         input, target = projection.split()
         present, trainable, inferred = masks(projection)
@@ -196,7 +195,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
                 }
-                if address in schema.objectives
+                if sources.needs_targets(schema)
                 else {},
                 batch_size=input.shape,
             ),

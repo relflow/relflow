@@ -72,7 +72,7 @@ runtime resources.
 
 ## How is this leaf trained?
 
-A reconstructing mask trains a decoder against the pristine frozen encoder vector:
+A reconstruction objective trains a decoder against the pristine frozen encoder vector:
 mean squared coordinate error for `objective="l2"`, or mean absolute coordinate
 error for `"l1"`.
 
@@ -89,7 +89,7 @@ elsewhere in the schema.
 `embed=True` exports the field's learned representation in the prediction
 table's `representations` column. It does not create a training objective.
 
-A reconstructing mask on `Text` trains against the frozen encoder's vector,
+With `task=rf.reconstruct(...)`, `Text` trains against the frozen encoder's vector,
 using `objective="l2"` by default or `"l1"`. This is representation
 reconstruction; the field does not produce generated strings or completions.
 

@@ -198,6 +198,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 TRAIN_ROWS = 8192
@@ -229,18 +230,18 @@ def build(representation: str, task: str, objective: str = "mse") -> rf.Model:
 
         class Model(rf.Model):
             group = rf.Enum(values=GROUPS, p_unavailable=0.0)
-            target = scalar(objective=objective, mask=True)
+            target = scalar(objective=objective, **TARGET)
 
     elif task == "rank":
 
         class Model(rf.Model):
-            rank = rf.Enum(values=("lower", "upper"), p_unavailable=0.0, mask=True)
+            rank = rf.Enum(values=("lower", "upper"), p_unavailable=0.0, **TARGET)
             x = scalar
 
     else:
 
         class Model(rf.Model):
-            amount = rf.Number(objective="mse", mask=True)
+            amount = rf.Number(objective="mse", **TARGET)
             x = scalar
 
     return Model(preset=CONTROL.name)

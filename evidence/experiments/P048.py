@@ -153,6 +153,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 TARGETS = ("u", "v")
 
@@ -273,8 +274,8 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
 class PredictionModel(rf.Model):
     a = rf.Number
     b = rf.Number
-    u = rf.Number(mask=True, objective="mse")
-    v = rf.Number(mask=True, objective="mse")
+    u = rf.Number(**TARGET, objective="mse")
+    v = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P048", seed=4801)

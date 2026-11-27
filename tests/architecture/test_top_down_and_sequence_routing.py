@@ -12,9 +12,9 @@ def model(**options):
         n_heads=2,
         seg=rf.Category,
         items=rf.Branch(
-            length=4, v=rf.Number, c=rf.Number, target=rf.Number(mask=True), sub=rf.Branch(length=3, z=rf.Number)
+            length=4, v=rf.Number, c=rf.Number, target=rf.Number(predict=True), sub=rf.Branch(length=3, z=rf.Number)
         ),
-        y=rf.Number(mask=True),
+        y=rf.Number(predict=True),
         **options,
     ).eval()
 
@@ -109,7 +109,7 @@ def test_reduced_branches_carry_their_encoded_sequence_and_pass_through_ones_do_
     assert items.sequence.widths is not None and items.sequence.widths.tolist() == [[16], [16]]
     assert items.sequence.spans.tolist() == [16, 16] and items.sequence.sequence is None
     passthrough = rf.Model(
-        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(reduction=None, amount=rf.Number, y=rf.Number(mask=True))
+        d_model=8, n_layers=1, n_heads=2, events=rf.Branch(reduction=None, amount=rf.Number, y=rf.Number(predict=True))
     ).eval()
     captured = []
     passthrough.nodes["/events"].encoder.register_forward_hook(lambda module, args, output: captured.append(output))
@@ -163,7 +163,7 @@ def test_branches_without_a_decoder_beneath_them_skip_their_sequence():
         d_model=8,
         n_layers=1,
         n_heads=2,
-        items=rf.Branch(length=4, v=rf.Number, sub=rf.Branch(length=3, z=rf.Number, t=rf.Number(mask=True))),
+        items=rf.Branch(length=4, v=rf.Number, sub=rf.Branch(length=3, z=rf.Number, t=rf.Number(predict=True))),
     ).eval()
     captured.clear()
     for address in ("/items", "/items/sub"):

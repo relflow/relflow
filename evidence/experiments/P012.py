@@ -168,6 +168,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 LENGTH = 9
 RANKS = ("minimum", "q25", "median", "q75", "maximum")
@@ -295,7 +296,7 @@ class Item(rf.Branch):
 class PredictionModel(rf.Model):
     items = Item(length=LENGTH, overflow="error", n_layers=3, n_heads=4, reduction=None)
     rank = rf.Category(p_unavailable=0.0)
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P012", seed=3700)

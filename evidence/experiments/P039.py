@@ -142,6 +142,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -172,7 +173,7 @@ class Transaction(rf.Branch):
 
 class PredictionModel(rf.Model):
     transactions = Transaction(length=6, n_layers=2, reduction=rf.Attention(n_layers=2))
-    global_total = rf.Number(mask=True, objective="mse")
+    global_total = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P039", seed=2600)

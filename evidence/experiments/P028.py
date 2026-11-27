@@ -158,6 +158,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 MIN_LENGTH = 2
 MAX_LENGTH = 5
@@ -261,7 +262,7 @@ class RightRecord(rf.Branch):
 class PredictionModel(rf.Model):
     left = LeftRecord(length=MAX_LENGTH, n_layers=1, reduction=None)
     right = RightRecord(length=MAX_LENGTH, n_layers=1, reduction=None)
-    has_overlap = rf.Boolean(mask=True)
+    has_overlap = rf.Boolean(**TARGET)
 
 
 @experiment("P028", seed=3711)

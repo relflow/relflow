@@ -130,6 +130,7 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 400
 
@@ -143,7 +144,7 @@ def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
 def build(p_unavailable: float) -> rf.Model:
     class PredictionModel(rf.Model):
         tags = rf.Set(p_unavailable=p_unavailable)
-        nonempty = rf.Number(mask=True, objective="mse")
+        nonempty = rf.Number(**TARGET, objective="mse")
 
     model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     return model

@@ -338,6 +338,7 @@ class DecoderBase(torch.nn.Module):
         n_context = math.prod(dimension if dimension is not None else 1 for dimension in self.shape)
         self.n_context = n_context
         self.d_model = schema.d_model
+        self.reconstruction = address in schema.roles.reconstruction_targets
         # An ancestor branch reaches the decoder twice: as the summary it routes
         # upward and as the encoded sequence it keeps for its descendants.
         Coordinates = tuple[tuple[Address, ...], tuple[int | None, ...], int | None]
@@ -475,15 +476,21 @@ class DecoderBase(torch.nn.Module):
             geometry=geometry,
         )
         count = math.prod(target_shape) if target_shape is not None else self.n_context
-        # CUDA measurements found launch/synchronization overhead dominant below
-        # this query volume. Scalar/all-selected targets retain the dense path.
-        substantial = device.type != "cuda" or batch_size * count * self.d_model >= 1_048_576
+        # A short list of targets can still attend to thousands of context tokens.
+        # Include that attention matrix in the decision to compact a repeated query.
+        memory_tokens = sum(math.prod(parcel.present.shape[1:]) for parcel in parcels) if self.reconstruction else 0
+        width = max(self.d_model, memory_tokens) if isinstance(self.pool, LearnedQueryCrossAttention) else self.d_model
+        substantial = device.type != "cuda" or batch_size * count * width >= 1_048_576
+        # Row packing changes floating-point reduction order during backward.
+        # Keep narrow scalar tasks on their full-batch training path. Packing
+        # starts to save substantial work at 64K context elements per decoder.
+        sparse_scalar = count == 1 and batch_size > 1 and batch_size * memory_tokens * self.d_model >= 65_536
         original = (
             type(self).__dict__.get("coordinatewise", False)
             and getattr(self.forward, "__func__", None) is DecoderBase.forward
             and getattr(self.context, "__func__", None) is DecoderBase.context
         )
-        if not embed and count > 1 and substantial and original:
+        if not embed and (sparse_scalar or (count > 1 and substantial)) and original:
             pool = self.pool
             canonical_pool = (
                 isinstance(pool, LearnedQueryCrossAttention)
@@ -545,6 +552,7 @@ class DecoderBase(torch.nn.Module):
 
         selected_indices = None
         selected_present = None
+        selected_rows = None
         original_count = count
         if embed:
             selection = None
@@ -557,8 +565,12 @@ class DecoderBase(torch.nn.Module):
             ):
                 raise ValueError(f"decoder selection at '{self.address}' requires bool shape {(batch_size, *shape)}")
             selection = selection.reshape(batch_size, count)
-            width = int(selection.sum(dim=1).max().item()) if batch_size else 0
-            if width * 2 <= count:
+            if count == 1:
+                rows = selection[:, 0].nonzero(as_tuple=True)[0]
+                if 0 < rows.numel() * 2 <= batch_size:
+                    selected_rows = rows
+            width = int(selection.sum(dim=1).max().item()) if batch_size and count > 1 else count
+            if count > 1 and width * 2 <= count:
                 ranks = torch.arange(count, device=device).expand(batch_size, count)
                 selected_indices = torch.where(selection, ranks, count).sort(dim=1).values[:, :width]
                 selected_present = selected_indices < count
@@ -570,9 +582,10 @@ class DecoderBase(torch.nn.Module):
                     queries = queries.gather(1, selected_indices.unsqueeze(-1).expand(-1, -1, self.d_model))
                 count = width
 
+        decoded_rows = batch_size if selected_rows is None else selected_rows.numel()
         if not parcels:
             pooled = torch.zeros(
-                (batch_size, count, self.d_model),
+                (decoded_rows, count, self.d_model),
                 device=device,
                 dtype=self.anchor.dtype,
             )
@@ -636,6 +649,15 @@ class DecoderBase(torch.nn.Module):
                     contexts or (), batch_size=batch_size, n_context=original_count, selection=selected_indices
                 )
             )
+            if selected_rows is not None:
+                stacked = stacked.index_select(0, selected_rows)
+                present = present.index_select(0, selected_rows)
+                memory_positions = memory_positions.index_select(0, selected_rows)
+                positions = positions.index_select(0, selected_rows)
+                if queries is not None:
+                    queries = queries.index_select(0, selected_rows)
+                if context is not None:
+                    context = context.index_select(0, selected_rows)
             if isinstance(self.pool, LearnedQueryCrossAttention):
                 pooled = self.pool(
                     stacked,
@@ -648,21 +670,25 @@ class DecoderBase(torch.nn.Module):
             else:
                 pooled = self.pool(stacked, present=present)
                 if count != self.n_context:
-                    pooled = pooled[:, :1].expand(batch_size, count, self.d_model)
+                    pooled = pooled[:, :1].expand(decoded_rows, count, self.d_model)
             if context is not None:
                 pooled = pooled + context * 0.0
 
         payload = self.decode(pooled)
         if embed:
             payload[TensorKey.embedding] = pooled
-        if selected_indices is not None:
-            rows = torch.arange(batch_size, device=device).unsqueeze(-1)
-            destination = (rows * original_count + selected_indices).reshape(-1)
-            selected_present = cast(torch.Tensor, selected_present)
+        if selected_indices is not None or selected_rows is not None:
+            if selected_indices is not None:
+                rows = torch.arange(batch_size, device=device).unsqueeze(-1)
+                destination = (rows * original_count + selected_indices).reshape(-1)
+            else:
+                destination = cast(torch.Tensor, selected_rows)
 
             def restore(source: TensorDictBase) -> TensorDict:
                 # Extensions may include the target axis in nested batch metadata.
                 batch = list(source.batch_size)
+                if batch:
+                    batch[0] = batch_size
                 if len(batch) > 1:
                     batch[1] = original_count
                 result = TensorDict({}, batch_size=batch, device=source.device, names=source.names)
@@ -676,9 +702,12 @@ class DecoderBase(torch.nn.Module):
                         )
                     trailing = value.shape[2:]
                     dense = value.new_zeros(batch_size * original_count, *trailing)
-                    active = selected_present.to(value.device).reshape(*selected_present.shape, *([1] * len(trailing)))
-                    values = value.masked_fill(~active, 0.0).reshape(batch_size * count, *trailing)
-                    dense.index_add_(0, destination.to(value.device), values)
+                    if selected_present is not None:
+                        active = selected_present.to(value.device).reshape(
+                            *selected_present.shape, *([1] * len(trailing))
+                        )
+                        value = value.masked_fill(~active, 0.0)
+                    dense.index_add_(0, destination.to(value.device), value.reshape(decoded_rows * count, *trailing))
                     result[key] = dense.reshape(batch_size, original_count, *trailing)
                 return result
 
@@ -687,7 +716,7 @@ class DecoderBase(torch.nn.Module):
         return Prediction(
             payload=payload,
             address=self.address,
-            batch_size=pooled.shape[0],
+            batch_size=batch_size,
         )
 
     def context(

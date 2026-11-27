@@ -13,7 +13,6 @@ a training stream. Relflow can give it a vocabulary entry and grow the affected
 model storage during the same fit. Learning a useful representation still requires
 training examples. Serving a prediction does not perform that learning step.
 
-Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
 Class declarations, field state, and fit calls use that same 0.5.0 source.
 The [Category](/data-types/category/), [Set](/data-types/set/), and
 [Group](/data-types/group/) references describe their individual contracts.
@@ -78,7 +77,7 @@ class ShoppingModel(rf.Model):
     region = rf.Category
     preferred_channel = rf.Category
     account_age_days = rf.Number
-    next_category = rf.Category(mask=True, topk=[3])
+    next_category = rf.Category(predict=True, topk=[3])
 
 
 def fit_cohort(model: rf.Model, directory: Path) -> None:

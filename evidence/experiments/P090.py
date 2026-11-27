@@ -150,6 +150,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 512
@@ -229,7 +230,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         class Model(rf.Model):
             signal = rf.Number(jitter=jitter)
             nuisance = rf.Vector(n_dim=8, jitter=jitter)
-            target = rf.Number(mask=True, objective="mse")
+            target = rf.Number(**TARGET, objective="mse")
 
         model = Model(preset=CONTROL.name)
         updates = fit(model, pa.Table.from_pylist(train), pa.Table.from_pylist(validate), seed, steps, accelerator)

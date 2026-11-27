@@ -17,7 +17,6 @@ from relflow.logging.config import CONTEXT
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TensorInput
 from relflow.tensorfields.extensions.number import (
     Decoder,
@@ -38,14 +37,14 @@ from tests.tensorfields.helpers import tensorize
 ADDRESS = "/items/amount"
 
 
-def build_schema(*, mask: bool | Mask = False, jitter: Jitter | dict[str, object] | None = None) -> Schema:
+def build_schema(*, predict: bool = False, task=None, jitter: Jitter | dict[str, object] | None = None) -> Schema:
     options = {} if jitter is None else {"jitter": jitter}
     return rf.Schema.from_tree(
         d_model=16,
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, amount=rf.Number(mask=mask, **options)),
+        items=rf.Branch(length=2, amount=rf.Number(predict=predict, task=task, **options)),
     )
 
 
@@ -271,7 +270,7 @@ class TrackingModule:
 
 
 def test_number_loss_does_not_mutate_counter():
-    schema = build_schema(mask=Mask(reconstruct=True))
+    schema = build_schema(task=rf.reconstruct())
 
     field = tensorfield(
         rows=[[1.0, None], [2.0]],
@@ -303,7 +302,7 @@ def test_number_loss_does_not_mutate_counter():
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_number_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model(preset="small", d_model=8, target=rf.Number(mask=True))
+    model = rf.Model(preset="small", d_model=8, target=rf.Number(predict=True))
     decoder = model.nodes["/target"].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
@@ -324,7 +323,7 @@ def test_number_evaluation_metrics_count_valued_targets_across_unequal_batches(b
 
 
 def test_number_null_targets_train_state_without_fabricating_numeric_errors():
-    schema = build_schema(mask=Mask(reconstruct=True))
+    schema = build_schema(task=rf.reconstruct())
     field = tensorfield(rows=[[None]], schema=schema, strata=Strata.train)
     embedder = Embedder(schema=schema, address=ADDRESS)
     decoder = Decoder(schema=schema, address=ADDRESS)
@@ -568,7 +567,7 @@ def log_prediction(field, scaled: torch.Tensor) -> Prediction:
 
 @pytest.mark.parametrize("mask", [False, True], ids=["input", "target"])
 def test_number_values_stay_in_source_units_and_the_readout_learns_the_log_scale(mask):
-    model = log_model(mask=mask)
+    model = log_model(predict=mask)
     table = arrow_table([{"amount": 0.0}, {"amount": 99.0}, {"amount": -99.0}])
 
     field = model.encode(table, strata="train")[rf.Address("amount")]
@@ -587,7 +586,7 @@ def test_number_values_stay_in_source_units_and_the_readout_learns_the_log_scale
 
 def test_number_mse_and_huber_train_in_source_units():
     assert rf.Number(objective="mse").log is False and rf.Number(objective="huber").log is False
-    model = rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number(objective="mse", mask=True))
+    model = rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number(objective="mse", predict=True))
     decoder = model.nodes[rf.Address("amount")].decoder
     assert decoder.log is False
     with torch.no_grad():
@@ -602,7 +601,7 @@ def test_number_mse_and_huber_train_in_source_units():
 
 
 def test_number_readout_starts_at_the_training_mean():
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     model.encode(arrow_table([{"amount": 99.0}, {"amount": 99.0}]), strata="train")
     decoder = model.nodes[rf.Address("amount")].decoder
     with torch.no_grad():
@@ -618,7 +617,7 @@ def test_number_readout_starts_at_the_training_mean():
 
 
 def test_number_mae_loss_adds_the_source_unit_error(monkeypatch):
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     field = model.encode(arrow_table([{"amount": 9.0}, {"amount": 99.0}]), strata="train")[rf.Address("amount")]
     tracked = {}
     monkeypatch.setattr(model, "track", lambda names, value: tracked.__setitem__(names[-2:], value) or value)
@@ -642,7 +641,7 @@ def test_number_embedder_and_readout_stay_wide_under_autocast():
     schema = build_schema()
     embedder = Embedder(schema=schema, address=ADDRESS).eval()
     field = tensorfield(rows=[[8.0, 12.0]], schema=schema, strata=Strata.predict)
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     decoder = model.nodes[rf.Address("amount")].decoder
 
     with torch.autocast(device_type="cpu", dtype=torch.bfloat16):
@@ -713,7 +712,7 @@ def test_number_jitter_perturbs_the_source_value_once_for_every_lane(monkeypatch
 
 
 def test_number_log_scale_metrics_and_output_return_to_source_units(monkeypatch):
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     field = model.encode(arrow_table([{"amount": 99.0}, {"amount": 9.0}]), strata="train")[rf.Address("amount")]
     tracked = {}
     monkeypatch.setattr(model, "track", lambda names, value: tracked.__setitem__(names[-2:], value) or value)
@@ -729,7 +728,7 @@ def test_number_log_scale_metrics_and_output_return_to_source_units(monkeypatch)
 
 
 def test_number_decoder_emits_source_units_and_a_training_scale_lane():
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     decoder = model.nodes[rf.Address("amount")].decoder
     with torch.no_grad():
         decoder.regression.weight.zero_()
@@ -747,7 +746,7 @@ def test_number_decoder_emits_source_units_and_a_training_scale_lane():
 
 
 def test_number_nan_tensorizes_as_the_other_state():
-    model = log_model(mask=False)
+    model = log_model(predict=False)
     rows = arrow_table([{"amount": 9.0}, {"amount": float("nan")}, {"amount": None}, {"amount": float("inf")}])
     field = model.encode(rows, strata="train")[rf.Address("amount")]
 
@@ -757,7 +756,7 @@ def test_number_nan_tensorizes_as_the_other_state():
 
 
 def test_number_nan_and_infinite_targets_are_not_regressed(monkeypatch):
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     rows = arrow_table([{"amount": 9.0}, {"amount": 99.0}, {"amount": float("nan")}, {"amount": float("inf")}])
     field = model.encode(rows, strata="train")[rf.Address("amount")]
     assert field.targets[TensorKey.state].flatten().tolist() == [Tokens.valued] * 2 + [Tokens.other, Tokens.valued]
@@ -787,7 +786,7 @@ def test_number_observation_counts_nan_as_other_and_excludes_it_from_moments():
 
 
 def test_number_keeps_float64_source_values_at_large_offsets():
-    model = log_model(mask=True)
+    model = log_model(predict=True)
     rows = arrow_table([{"amount": 1e9 + 3.0}, {"amount": 1e9 + 5.0}])
     field = model.encode(rows, strata="train")[rf.Address("amount")]
 
@@ -796,7 +795,7 @@ def test_number_keeps_float64_source_values_at_large_offsets():
 
 
 def test_number_rejects_integers_beyond_float64_exactness():
-    model = log_model(mask=False)
+    model = log_model(predict=False)
     with pytest.raises(ValueError, match=r"number field at '/amount' holds int64 values.*2\^53"):
         model.encode(arrow_table([{"amount": 2**53 + 1}]), strata="train")
 

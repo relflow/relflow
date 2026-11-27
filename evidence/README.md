@@ -87,7 +87,7 @@ from policies import CONTROL
 class Model(rf.Model):
     value = rf.Number
     history = rf.Branch(length=8, value=rf.Number)
-    target = rf.Boolean(mask=True)
+    target = rf.Boolean(predict=True)
 
 
 # Inside the experiment's execution function:

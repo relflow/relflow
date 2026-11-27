@@ -32,7 +32,7 @@ class Customer(rf.Model):
     region = rf.Category
     preferred_channel = rf.Category
     account_age_days = rf.Number
-    next_category = rf.Category(mask=True, topk=[3])`,
+    next_category = rf.Category(predict=True, topk=[3])`,
     inputs: { region: 'north', preferred_channel: 'app', account_age_days: 240 },
     answers: { next_category: 'home' },
     output: {
@@ -88,7 +88,7 @@ class Ticket(rf.Branch):
 
     topic = rf.Category
     hours_open = rf.Number
-    destination = rf.Category(mask=True, topk=[3])
+    destination = rf.Category(predict=True, topk=[3])
 
 
 class SupportBatch(rf.Model):
@@ -163,7 +163,7 @@ class Machine(rf.Model):
     machine_family = rf.Category
     vibration_mm_s = rf.Number
     temperature_c = rf.Number
-    fault_code = rf.Category(mask=True, topk=[3])`,
+    fault_code = rf.Category(predict=True, topk=[3])`,
     inputs: { machine_family: 'pump', vibration_mm_s: 7.2, temperature_c: 84 },
     answers: { fault_code: 17 },
     output: {

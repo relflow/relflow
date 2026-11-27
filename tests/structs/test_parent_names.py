@@ -19,7 +19,8 @@ def test_parent_mappings_accept_names_that_collide_with_configuration():
         fields={"name": rf.Number, "d_model": rf.Number, "fields": rf.Number},
         items=rf.Branch(
             length=3,
-            fields={"length": rf.Number, "mask": rf.Number, "description": rf.Number},
+            fields={"length": rf.Number, "hide": rf.Number, "description": rf.Number},
+            mask=rf.Boolean,
             name=rf.Category(),
         ),
     )
@@ -28,15 +29,16 @@ def test_parent_mappings_accept_names_that_collide_with_configuration():
         "/d_model",
         "/fields",
         "/items/length",
-        "/items/mask",
+        "/items/hide",
         "/items/description",
+        "/items/mask",
         "/items/name",
     ]
     assert model.schema.branches["/items"].length == 3
 
 
 def test_reused_definitions_bind_independent_nodes_without_changing_templates():
-    category = rf.Category(topk=[2], mask=True)
+    category = rf.Category(topk=[2], predict=True)
     branch = rf.Branch(length=3, left=category, right=category)
     model = rf.Model(d_model=16, n_layers=1, n_heads=4, first=branch, second=branch)
 
@@ -45,7 +47,7 @@ def test_reused_definitions_bind_independent_nodes_without_changing_templates():
     assert all(child.parent is branch for child in branch.fields)
     nodes = list(model.schema.requests.values())
     assert len({id(node) for node in nodes}) == 4
-    assert all(node.mask == category.mask for node in nodes)
+    assert all(node.predict for node in nodes)
     nodes[0].topk.append(3)
     assert all(node.topk == [2] for node in nodes[1:])
     assert category.topk == [2]
@@ -96,7 +98,7 @@ def test_named_checkpoint_restoration_preserves_masks_aliases_and_weights(tmp_pa
         d_model=16,
         n_layers=1,
         n_heads=4,
-        items=rf.Branch(length=3, label=rf.Category(mask=True)),
+        items=rf.Branch(length=3, label=rf.Category(predict=True)),
     )
     restored = rf.Model.load(model.save(tmp_path / "named.ckpt"))
     assert restored.schema.model_dump() == model.schema.model_dump()
@@ -104,7 +106,7 @@ def test_named_checkpoint_restoration_preserves_masks_aliases_and_weights(tmp_pa
         torch.testing.assert_close(restored.state_dict()[name], tensor)
     request = restored.schema.requests["/items/label"]
     assert request.parent is restored.schema.branches["/items"]
-    assert request.mask[0].skip
+    assert request.predict is True
 
 
 def test_late_extension_fields_keep_the_same_binding_and_validation_contract():
@@ -117,12 +119,12 @@ def test_late_extension_fields_keep_the_same_binding_and_validation_contract():
             scale: float = pydantic.Field(default=1, gt=0)
             fields: int = 7
 
-        definition = Request(scale=3, fields=9, mask=0.25)
+        definition = Request(scale=3, fields=9, hide=0.25)
         schema = rf.Schema.from_tree(d_model=16, n_layers=1, n_heads=4, custom=definition)
         restored = rf.Schema.model_validate_json(schema.model_dump_json())
         assert restored.requests["/custom"].scale == 3
         assert restored.requests["/custom"].fields == 9
-        assert restored.requests["/custom"].mask == definition.mask
+        assert restored.requests["/custom"].hide == definition.hide
         assert definition.name is None
         with pytest.raises(TypeError, match="names come from the parent"):
             Request(name="custom")

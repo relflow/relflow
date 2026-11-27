@@ -62,7 +62,7 @@ def write(configured: rf.Model, predicted: Prediction) -> pa.StructArray:
 
 def test_quantile_defaults_and_schema_round_trip():
     configured = rf.Model(
-        preset="small", amount=rf.Quantile, target=rf.Quantile(compression=150, objective="huber", mask=True)
+        preset="small", amount=rf.Quantile, target=rf.Quantile(compression=150, objective="huber", predict=True)
     )
     restored = rf.Schema.model_validate_json(configured.schema.model_dump_json(round_trip=True))
     request = restored.requests[ADDRESS]
@@ -108,7 +108,7 @@ def test_quantile_nonfinite_values_take_the_other_state(strata, value):
     assert normalization(embedded)["count"] == 3 + (strata == rf.Strata.train)
 
     # A supervised field carries the same states in its training targets.
-    supervised = model(mask=True)
+    supervised = model(predict=True)
     supervised.encode(values(10, 20, 30), strata=rf.Strata.train)
     targets = supervised.encode(values(value, 20, None), strata=rf.Strata.train)[ADDRESS].targets
 
@@ -159,7 +159,7 @@ def test_quantile_repeated_null_and_empty_rows_keep_geometry():
     configured = rf.Model(
         preset="small",
         d_model=8,
-        items=rf.Branch(length=3, amount=rf.Quantile(mask=rf.Mask(reconstruct=True))),
+        items=rf.Branch(length=3, amount=rf.Quantile(task=rf.reconstruct())),
     )
     source = pa.Table.from_pylist(
         [
@@ -182,15 +182,15 @@ def test_quantile_repeated_null_and_empty_rows_keep_geometry():
 
 
 @pytest.mark.parametrize("owner", ["leaf", "branch", "root"])
-def test_quantile_observes_skipped_supervised_targets_once(owner):
+def test_quantile_observes_hidden_targets_once(owner):
     address = rf.Address("items", "amount")
-    leaf = rf.Quantile(mask=owner == "leaf")
-    branch = rf.Branch(length=3, mask=owner == "branch", amount=leaf)
-    configured = rf.Model(preset="small", d_model=8, mask=owner == "root", items=branch)
+    leaf = rf.Quantile(predict=owner == "leaf")
+    branch = rf.Branch(length=3, task=rf.reconstruct() if owner == "branch" else None, amount=leaf)
+    configured = rf.Model(preset="small", d_model=8, task=rf.reconstruct() if owner == "root" else None, items=branch)
     source = pa.Table.from_pylist([{"items": [{"amount": 2.0}, {"amount": None}, {"amount": 8.0}]}])
     field = configured.encode(source, strata=rf.Strata.train)[address]
 
-    assert not field.present.any()
+    assert field.present.flatten().tolist() == [owner != "leaf"] * 3
     assert field.trainable.all()
     assert not field.raw.any()
     assert field.targets[TensorKey.state].flatten().tolist() == [Tokens.valued, Tokens.null, Tokens.valued]
@@ -270,7 +270,7 @@ def test_quantile_checkpoint_rebuild_and_reset_preserve_state_contract(tmp_path:
 
 @pytest.mark.parametrize(("objective", "expected"), [("mae", 0.25), ("mse", 0.0625), ("huber", 0.03125)])
 def test_quantile_loss_uses_percentile_units_and_excludes_null_targets(monkeypatch, objective, expected):
-    configured = model(mask=True, objective=objective)
+    configured = model(predict=True, objective=objective)
     field = configured.encode(values(50, None), strata=rf.Strata.train)[ADDRESS]
     content = torch.tensor([[0.75], [1000.0]], requires_grad=True)
     tracked = {}
@@ -290,7 +290,7 @@ def test_quantile_loss_uses_percentile_units_and_excludes_null_targets(monkeypat
 
 
 def test_quantile_all_null_targets_have_finite_state_only_loss(monkeypatch):
-    configured = model(mask=True)
+    configured = model(predict=True)
     field = configured.encode(values(None, None), strata=rf.Strata.train)[ADDRESS]
     content = torch.zeros_like(field.content, requires_grad=True)
     monkeypatch.setattr(configured, "track", lambda names, value: value)
@@ -304,7 +304,7 @@ def test_quantile_all_null_targets_have_finite_state_only_loss(monkeypatch):
 def test_quantile_output_and_metrics_return_to_source_units(monkeypatch):
     results = []
     for scale in (1.0, 1000.0):
-        configured = model(mask=True)
+        configured = model(predict=True)
         configured.encode(values(*(value * scale for value in range(0, 101, 10))), strata=rf.Strata.train)
         field = configured.encode(values(50 * scale), strata=rf.Strata.train)[ADDRESS]
         predicted = decoded(configured, field, 0.75)
@@ -331,7 +331,7 @@ def test_quantile_output_and_metrics_return_to_source_units(monkeypatch):
 
 
 def test_quantile_decoded_prediction_keeps_its_distribution_snapshot():
-    configured = model(mask=True)
+    configured = model(predict=True)
     field = configured.encode(values(10, 20, 30), strata=rf.Strata.train)[ADDRESS]
     predicted = decoded(configured, field)
     expected = write(configured, predicted)
@@ -343,7 +343,7 @@ def test_quantile_decoded_prediction_keeps_its_distribution_snapshot():
 
 @pytest.mark.parametrize(("percentile", "expected"), [(0.0, 10.0), (1.0, 30.0)])
 def test_quantile_decoder_endpoints_return_learned_extrema(percentile, expected):
-    configured = model(mask=True)
+    configured = model(predict=True)
     field = configured.encode(values(10, 20, 30), strata=rf.Strata.train)[ADDRESS]
 
     output = write(configured, decoded(configured, field, percentile))
@@ -352,7 +352,7 @@ def test_quantile_decoder_endpoints_return_learned_extrema(percentile, expected)
 
 
 def test_quantile_nullable_false_and_typed_empty_predictions():
-    configured = model(mask=True, nullable=False)
+    configured = model(predict=True, nullable=False)
     with pytest.raises(ValueError, match="nullable=False"):
         configured.encode(values(None))
 
@@ -364,7 +364,7 @@ def test_quantile_nullable_false_and_typed_empty_predictions():
 
 
 def test_quantile_worker_encoding_does_not_mutate_live_distribution():
-    configured = model(mask=True)
+    configured = model(predict=True)
     encoded = encode(values(1, 2), configured.schema, rf.Strata.train, configured.interprocess_encoding_context)
 
     assert encoded.bindings
@@ -382,7 +382,7 @@ def test_quantile_lightning_training_learns_only_consumed_values():
         d_model=16,
         batch_size=64,
         x=rf.Quantile,
-        y=rf.Quantile(mask=True),
+        y=rf.Quantile(predict=True),
     )
     x = torch.linspace(0.0, 1.0, 64, dtype=torch.float64)
     train = pa.table({"x": x.numpy(), "y": (100 + 900 * x.square()).numpy()})
@@ -466,7 +466,7 @@ def test_quantile_forward_reuses_encoded_inputs_after_restoring_resources(tmp_pa
         preset="small",
         d_model=8,
         x=rf.Quantile,
-        y=rf.Quantile(mask=True),
+        y=rf.Quantile(predict=True),
     )
     configured.encode(pa.table({"x": [1.0, 2.0, 3.0], "y": [100.0, 200.0, 300.0]}), strata=rf.Strata.train)
     encoded = configured.encode(pa.table({"x": [2.0], "y": [None]}))
@@ -493,7 +493,7 @@ def test_quantile_forward_reuses_encoded_inputs_after_restoring_resources(tmp_pa
 
 
 def test_quantile_cold_validation_registers_undefined_source_unit_metrics(monkeypatch):
-    configured = model(mask=True)
+    configured = model(predict=True)
     field = configured.encode(values(10, 20), strata=rf.Strata.validate)[ADDRESS]
     predicted = decoded(configured, field)
     tracked = {}
@@ -523,7 +523,7 @@ def test_quantile_cold_validation_registers_undefined_source_unit_metrics(monkey
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_quantile_evaluation_metrics_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    configured = model(mask=True)
+    configured = model(predict=True)
     configured.encode(values(*range(0, 101, 10)), strata=rf.Strata.train)
     decoder = configured.nodes[ADDRESS].decoder
     with torch.no_grad():
@@ -545,7 +545,7 @@ def test_quantile_evaluation_metrics_count_valued_targets_across_unequal_batches
 
 
 def test_quantile_readout_stays_wide_under_autocast():
-    configured = model(mask=True)
+    configured = model(predict=True)
     decoder = configured.nodes[ADDRESS].decoder
 
     with torch.autocast(device_type="cpu", dtype=torch.bfloat16):

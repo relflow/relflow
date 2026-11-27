@@ -427,7 +427,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
                 }
-                if address in schema.objectives
+                if sources.needs_targets(schema)
                 else {},
                 batch_size=input.shape,
             ),
@@ -527,22 +527,18 @@ def loss(
 
     trainable = batch.trainable.reshape(numel)
 
-    loss: torch.Tensor = module.track(
+    inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(numel, -1)
+    targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(numel)
+    indices = trainable.nonzero(as_tuple=True)[0]
+    logits = inputs.index_select(0, indices)
+    states = targets.index_select(0, indices)
+    loss = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
-        value=(
-            torch.nn.functional.cross_entropy(
-                input=(inputs := cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(numel, -1)),
-                target=(targets := cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(numel)),
-                reduction="none",
-            )
-            .masked_select(mask=trainable)
-            .mean()
-        ),
+        value=torch.nn.functional.cross_entropy(logits, states),
     )
-
     module.track(
         (prediction.address, strata, Metric.accuracy, TensorKey.state),
-        value=inputs.argmax(dim=1).eq(targets).masked_select(trainable).float().mean(),
+        value=logits.argmax(dim=1).eq(states).float().mean(),
     )
 
     request: Request = cast(Request, module.schema.requests[prediction.address])

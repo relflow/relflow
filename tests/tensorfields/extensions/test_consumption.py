@@ -16,8 +16,8 @@ def test_prefetch_preserves_enum_ids_and_consumes_each_quantile_delta_once(worke
         preset="small",
         d_model=8,
         batch_size=2,
-        status=rf.Enum(values=labels, p_unavailable=0, mask=True),
-        amount=rf.Quantile(mask=True),
+        status=rf.Enum(values=labels, p_unavailable=0, predict=True),
+        amount=rf.Quantile(predict=True),
     )
     data = rf.ArrowDataModule(
         model=configured,

@@ -11,7 +11,8 @@ from relflow.structs.enums import AttentionInput, AttentionMode
 from relflow.structs.experiment import Schema, TreeFieldInput, build
 from relflow.structs.reduction import ReductionConfig
 from relflow.structs.structure import OMITTED, Branch
-from relflow.structs.tree import MaskInput, Rate
+from relflow.structs.tasks import TaskInput
+from relflow.structs.tree import HideInput, Rate
 from relflow.structs.twigs import Twig
 
 __all__ = ["BranchDefaults", "LeafDefaults", "FitDefaults", "Preset", "resolve"]
@@ -97,7 +98,9 @@ def resolve(
     cross: bool = cast(bool, OMITTED),
     reduction: ReductionConfig | None = cast(ReductionConfig | None, OMITTED),
     dropout: Rate | None = cast(Rate | None, OMITTED),
-    mask: MaskInput = False,
+    hide: HideInput = (),
+    task: TaskInput = None,
+    ignore: str | tuple[str, ...] = (),
     **children: TreeFieldInput,
 ) -> Schema:
     """Resolve local overrides into a fresh tree without changing its definitions."""
@@ -115,7 +118,14 @@ def resolve(
     )
     options.update({name: value for name, value in overrides.items() if value is not OMITTED})
     width = options.pop("d_model")
-    options.update(query=query, description=description, embed=embed, mask=mask)
+    options.update(
+        query=query,
+        description=description,
+        embed=embed,
+        hide=hide,
+        task=task,
+        ignore=ignore,
+    )
     return build(
         Schema,
         d_model=width,

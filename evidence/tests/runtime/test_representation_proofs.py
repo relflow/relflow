@@ -32,9 +32,10 @@ def test_reconstruction_labels_never_enter_training_records_or_schema():
     model = proof.build()
     assert set(model.schema.requests) == {rf.Address("first"), rf.Address("second"), rf.Address("geometry")}
     for request in model.schema.requests.values():
-        assert len(request.mask) == 1
-        assert request.mask[0].rate == 0.35
-        assert request.mask[0].reconstruct
+        assert request.address in model.schema.objectives and request.address not in model.schema.decodes
+        assert request.embedded
+        (rule,) = request.task if hasattr(request, "task") else request.mask
+        assert rule.rate == 0.35
 
 
 def test_permuted_reconstruction_views_preserve_marginals_and_destroy_common_signal():
@@ -101,14 +102,14 @@ def test_gaussian_oracle_matches_empirical_conditional_error_for_all_patterns():
 def test_sensor_schema_hides_target_and_respects_each_explicit_selector():
     proof = load("P074")
     model = proof.build()
-    for name in proof.SENSORS:
-        mask = model.schema.requests[rf.Address(name)].mask
-        assert len(mask) == 1 and mask[0].query == f"hide_{name}"
-        assert mask[0].skip and not mask[0].reconstruct
-    target = model.schema.requests[rf.Address("target")]
-    assert all(mask.skip and mask.reconstruct for mask in target.mask)
-    assert not model.schema.requests[rf.Address("nuisance")].mask
     rows = list(proof.records(rows=32, seed=11))
+    batch = model.encode(pl.DataFrame(rows), preprocess=proof.redact, strata="predict")
+    for name in proof.SENSORS:
+        np.testing.assert_array_equal(batch[f"/{name}"].present.flatten(), [not row[f"hide_{name}"] for row in rows])
+    target = model.schema.requests[rf.Address("target")]
+    assert target.address in model.schema.objectives and target.address in model.schema.decodes
+    assert not target.embedded
+    assert rf.Address("nuisance") not in model.schema.objectives
     selected = proof.select(rows, proof.UNSEEN)
     assert all(tuple(row[f"hide_{name}"] for name in proof.SENSORS) == proof.UNSEEN for row in selected)
     assert all(a["target"] == b["target"] for a, b in zip(rows, selected, strict=True))
@@ -185,10 +186,11 @@ def test_number_lanes_arms_change_only_the_numeric_datatype(inputs, target):
     assert set(requests) == {rf.Address("price"), rf.Address("rate"), rf.Address("ltv")}
     for name in ("price", "rate"):
         request = requests[rf.Address(name)]
-        assert not request.mask
+        assert request.address not in model.schema.objectives
         assert request.type == ("quantile" if inputs == "rank" else "number")
     hidden = requests[rf.Address("ltv")]
-    assert all(mask.skip and mask.reconstruct for mask in hidden.mask)
+    assert hidden.address in model.schema.objectives and hidden.address in model.schema.decodes
+    assert not hidden.embedded
     assert hidden.type == ("quantile" if target == "rank" else "number") and hidden.objective == "mae"
 
 

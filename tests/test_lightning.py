@@ -14,7 +14,7 @@ def model(merchant=rf.Category):
         d_model=8,
         amount=rf.Number,
         merchant=merchant,
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
         optimizer=rf.adamw(learning_rate=1e-3, fused=None),
     )
 
@@ -107,7 +107,7 @@ def test_native_batch_size_callback_restores_state_then_trains_bf16(tmp_path, ac
         pytest.skip("MPS is unavailable")
     field = {"category": rf.Category, "set": rf.Set, "group": rf.Group}[kind]
     options = {"n_groups": 2} if kind == "group" else {}
-    configured = model(field(mask=rf.Mask(reconstruct=True), **options))
+    configured = model(field(task=rf.reconstruct(), **options))
     initial = {name: value.clone() for name, value in configured.named_parameters()}
     finder = BatchSizeFinder(mode="binsearch", init_val=2, max_trials=2, max_val=8, margin=0)
     restored = []

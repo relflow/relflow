@@ -1,14 +1,10 @@
 Repeat purchase: a complete relflow workflow
 
-Requirements: uv and Python 3.12 or newer. From the directory containing
-repeat_purchase.py, run:
+From the root of the relflow checkout that provided this example, run:
 
-uv run --no-project --python 3.12 \
-  --with "relflow==0.5.0" \
-  repeat_purchase.py
+uv run python docs/starlight/public/examples/repeat-purchase/repeat_purchase.py
 
-This uses the published relflow 0.5.0 package. No text encoder
-or other model weights are needed. The separate recorded-source.py and
+This uses the SDK in that checkout. The separate recorded-source.py and
 recorded-run.json preserve an earlier captured execution; a new run writes its
 own receipt and does not replace that historical record. To check only the execution path, append
 --smoke. Use --output DIRECTORY to select the artifact directory.

@@ -10,7 +10,6 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import Context
 from relflow.tensorfields.extensions.set import Decoder, Embedder, TensorField, loss, write
 from relflow.tensorfields.extensions.set import output as output_type
@@ -25,7 +24,8 @@ def build_schema(
     *,
     p_unavailable: float | None = None,
     threshold: float | None = None,
-    mask: bool | Mask = False,
+    predict: bool = False,
+    task=None,
 ) -> Schema:
     options = {}
     if p_unavailable is not None:
@@ -37,7 +37,7 @@ def build_schema(
         n_layers=1,
         n_heads=4,
         dropout=0.1,
-        items=rf.Branch(length=2, tags=rf.Set(mask=mask, **options)),
+        items=rf.Branch(length=2, tags=rf.Set(predict=predict, task=task, **options)),
     )
 
 
@@ -265,7 +265,7 @@ def test_set_empty_vocabulary_keeps_declared_schema():
 
 
 def test_set_loss_does_not_mutate_counter():
-    schema = build_schema(p_unavailable=0.0, mask=Mask(reconstruct=True))
+    schema = build_schema(p_unavailable=0.0, task=rf.reconstruct())
     state = vocabulary_state()
     field = tensorfield(
         values=[[[["ALPHA", "BETA"], []]], [[["BETA"]]]],
@@ -300,7 +300,7 @@ def test_set_loss_does_not_mutate_counter():
 
 @pytest.mark.integration
 def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
-    model = rf.Model(preset="small", d_model=8, tags=rf.Set, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, tags=rf.Set, label=rf.Boolean(predict=True))
     rows = pa.table(
         {"tags": pa.array([[1.0, float("nan")], [float("nan")], [2.0, None], []]), "label": [True, False, True, False]}
     )
@@ -331,7 +331,7 @@ def test_set_float_nan_members_are_dropped_like_nulls(tmp_path):
 @pytest.mark.integration
 def test_set_strip_and_cased_fold_look_alike_members(tmp_path):
     rows = pa.table({"tags": pa.array([["Foo", "bar "], [" foo"], ["BAR"]]), "label": [True, False, True]})
-    model = rf.Model(preset="small", d_model=8, tags=rf.Set(strip=True, cased=False), label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, tags=rf.Set(strip=True, cased=False), label=rf.Boolean(predict=True))
     data = rf.ArrowDataModule(model, train=rows, validate=rows, shuffle=False)
     model.fit(
         data,

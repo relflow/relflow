@@ -16,7 +16,7 @@ class Customer(rf.Model):
 
     account_age_days = rf.Number
     has_subscription = rf.Boolean
-    buys_again_in_30d = rf.Boolean(mask=True)`,
+    buys_again_in_30d = rf.Boolean(predict=True)`,
     dataset: {
       id: 'purchase', label: 'Repeat purchase',
       observation: 'One customer at a prediction cutoff.',
@@ -52,7 +52,7 @@ class Item(rf.Branch):
     product_category = rf.Category
     price = rf.Number
     is_gift = rf.Boolean
-    returned = rf.Boolean(mask=True)
+    returned = rf.Boolean(predict=True)
 
 
 class Order(rf.Model):
@@ -118,8 +118,8 @@ class ServiceJob(rf.Model):
     asset_age_years = rf.Number
     has_remote_access = rf.Boolean
     fault_code = rf.Category
-    needs_visit = rf.Boolean(mask=True, threshold=[0.2, 0.5, 0.8])
-    needs_parts = rf.Boolean(mask=True)`,
+    needs_visit = rf.Boolean(predict=True, threshold=[0.2, 0.5, 0.8])
+    needs_parts = rf.Boolean(predict=True)`,
     dataset: {
       id: 'service', label: 'Service requirements',
       observation: 'One service request before planning the response.',

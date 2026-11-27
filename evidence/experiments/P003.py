@@ -161,6 +161,7 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
+from visibility import TARGET
 
 TRAIN_MAX = 6
 CAPACITY = 12
@@ -227,7 +228,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=CAPACITY, attention=None, n_layers=2, reduction=rf.Mean())
-    mean_amount = rf.Number(mask=True, objective="mse")
+    mean_amount = rf.Number(**TARGET, objective="mse")
 
 
 @experiment("P003", seed=3600)

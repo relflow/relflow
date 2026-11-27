@@ -123,6 +123,7 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 4096
@@ -134,22 +135,22 @@ ARMS = ("ordinal_mae", "ordinal_mse", "number_mae", "number_mse", "shuffled")
 
 class OrdinalMae(rf.Model):
     signal = rf.Number
-    rank = rf.Ordinal(mask=True)
+    rank = rf.Ordinal(**TARGET)
 
 
 class OrdinalMse(rf.Model):
     signal = rf.Number
-    rank = rf.Ordinal(mask=True, objective="mse")
+    rank = rf.Ordinal(**TARGET, objective="mse")
 
 
 class NumberMae(rf.Model):
     signal = rf.Number
-    rank = rf.Number(mask=True)
+    rank = rf.Number(**TARGET)
 
 
 class NumberMse(rf.Model):
     signal = rf.Number
-    rank = rf.Number(mask=True, objective="mse")
+    rank = rf.Number(**TARGET, objective="mse")
 
 
 def records(*, rows: int, seed: int, condition: str):

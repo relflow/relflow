@@ -131,7 +131,8 @@
 # Independently draw `z ~ Normal(0,1)` and three sensors `x_i = z + e_i`, with
 # independent Gaussian errors of standard deviations 0.8, 1.0, and 1.2. A
 # fourth, nuisance reading is independent `Normal(0,1)`. The target is z and is
-# always hidden. For any visible subset V, the exact conditional mean is
+# always hidden. A preprocessor clears each unavailable sensor record before encoding.
+# For any visible subset V, the exact conditional mean is
 # `sum(x_i / sigma_i**2) / (1 + sum(1 / sigma_i**2))`; its conditional variance
 # is `1 / (1 + sum(1 / sigma_i**2))`. With no sensors visible, the mean is zero.
 #
@@ -196,6 +197,7 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -227,12 +229,19 @@ def records(*, rows: int, seed: int, training: bool = False) -> Iterator[dict]:
         }
 
 
+@rf.preprocess
+def redact(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(
+        pl.when(~pl.col(f"hide_{name}")).then(pl.struct(value=pl.col(name))).alias(name) for name in SENSORS
+    )
+
+
 class Model(rf.Model):
-    first = rf.Number(mask=rf.Mask(query="hide_first", skip=True, dropout=False))
-    second = rf.Number(mask=rf.Mask(query="hide_second", skip=True, dropout=False))
-    third = rf.Number(mask=rf.Mask(query="hide_third", skip=True, dropout=False))
+    first = rf.Number(query="first.value")
+    second = rf.Number(query="second.value")
+    third = rf.Number(query="third.value")
     nuisance = rf.Number
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(**TARGET, objective="mse")
 
 
 def build() -> rf.Model:
@@ -251,7 +260,7 @@ def oracle(rows: list[dict], pattern: tuple[bool, ...]) -> tuple[np.ndarray, flo
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
-    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), preprocess=redact))["predictions"].to_list()
     return np.asarray([row["target"]["content"] for row in output], dtype=np.float64)
 
 
@@ -260,6 +269,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
     data = rf.SyntheticDataModule(
+        preprocessor=redact,
         train=partial(records, rows=TRAIN_ROWS, seed=seed * 100 + 1, training=True),
         validate=partial(records, rows=512, seed=seed * 100 + 2, training=True),
         seed=seed,

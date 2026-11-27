@@ -235,6 +235,7 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import reconstruct
 
 BUDGET = 600
 BATCH_SIZE = 64
@@ -301,12 +302,12 @@ def condition(rows: list[dict], length: int, reverse: bool = False) -> list[dict
 
 
 def build() -> rf.Model:
-    mask = rf.Mask(rate=0.35, reconstruct=True)
+    pretrain = reconstruct(0.35)
 
     class Transaction(rf.Branch):
-        merchant = rf.Enum(values=MERCHANTS, p_unavailable=0.0, mask=mask)
-        amount = rf.Number(mask=mask)
-        interval_days = rf.Number(mask=mask)
+        merchant = rf.Enum(values=MERCHANTS, p_unavailable=0.0, **pretrain)
+        amount = rf.Number(**pretrain)
+        interval_days = rf.Number(**pretrain)
         terminal = rf.Enum(values=TERMINALS, p_unavailable=0.0)
 
     class Model(rf.Model):

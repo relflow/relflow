@@ -106,6 +106,7 @@ from reporting import experiment, report
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from transformers import BertConfig, BertModel, PreTrainedTokenizerFast
+from visibility import TARGET
 
 FIXTURE = Path(__file__).with_suffix(".npz")
 SHA256 = "4c2debf0d099dc08d7633c9eed97af384bc8dc9275fdcf09b2192f3e4548755e"
@@ -135,7 +136,7 @@ def cache_model(directory, questions, width):
             model=str(directory), max_length=2, encoder_pooling="mean", store=str(directory / "questions")
         )
         tile = rf.Image(model=str(directory), immutable=True, base=str(directory), store=str(directory / "tiles"))
-        answer = rf.Boolean(mask=True)
+        answer = rf.Boolean(**TARGET)
 
     model = Model(preset=CONTROL.name)
 

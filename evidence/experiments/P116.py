@@ -119,6 +119,7 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
+from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 4096
@@ -131,12 +132,12 @@ ARMS = ("coordinates", "vector", "shuffled")
 
 class CoordinateModel(rf.Model):
     point = rf.Coordinates
-    distance = rf.Number(mask=True, objective="mse")
+    distance = rf.Number(**TARGET, objective="mse")
 
 
 class VectorModel(rf.Model):
     point = rf.Vector(n_dim=2)
-    distance = rf.Number(mask=True, objective="mse")
+    distance = rf.Number(**TARGET, objective="mse")
 
 
 def distance(latitude: np.ndarray, longitude: np.ndarray) -> np.ndarray:

@@ -15,7 +15,7 @@ class Customer(rf.Model):
 
     days_since_signup = rf.Number
     orders = Order(length=32, overflow="tail")
-    returns_in_30d = rf.Boolean(mask=True)`;
+    returns_in_30d = rf.Boolean(predict=True)`;
 
 export const bearingSchema = `import relflow as rf
 from bearing import Bearing
@@ -26,4 +26,4 @@ class RouteModel(rf.Model):
 
     direction = Bearing
     distance_km = rf.Number
-    delay_minutes = rf.Number(mask=True)`;
+    delay_minutes = rf.Number(predict=True)`;

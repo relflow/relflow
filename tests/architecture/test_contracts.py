@@ -141,9 +141,7 @@ def test_forward_contract_allows_masked_non_trainable_predict_input() -> None:
 
 
 def test_forward_contract_rejects_trainable_input_without_targets() -> None:
-    model = rf.Model(
-        preset="small", d_model=8, attention=None, color=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))
-    )
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category(task=rf.reconstruct()))
     inputs = prepared(model)
     field = inputs[Address("/color")]
     field.targets = TensorDict({}, batch_size=field.state.shape)
@@ -153,7 +151,7 @@ def test_forward_contract_rejects_trainable_input_without_targets() -> None:
 
 
 def test_forward_contract_rejects_presence_state_disagreement() -> None:
-    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(predict=True))
     inputs = prepared(model)
     inputs[Address("/label")].state[0, 0] = Tokens.valued.value
 
@@ -162,7 +160,7 @@ def test_forward_contract_rejects_presence_state_disagreement() -> None:
 
 
 def test_forward_contract_allows_predict_target_placeholder() -> None:
-    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(predict=True))
     inputs = prepared(
         model,
         rows=[
@@ -178,7 +176,7 @@ def test_forward_contract_allows_predict_target_placeholder() -> None:
 
 
 def test_forward_contract_rejects_predict_placeholder_in_train_strata() -> None:
-    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(mask=True))
+    model = rf.Model(preset="small", d_model=8, attention=None, color=rf.Category, label=rf.Category(predict=True))
     inputs = prepared(
         model,
         rows=[

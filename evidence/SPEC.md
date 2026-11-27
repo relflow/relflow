@@ -39,6 +39,12 @@ defaults change. A declaration refactor requires schema and initialization
 equivalence checks, with generators, seeds, budgets, controls and checks retained.
 It never establishes a fresh learning result or relabels an archived record.
 
+The shared `experiments/visibility.py` translates Evidence target declarations
+into keyword options supported by the installed wheel. Each proof owns its
+field types, selectors, and rates. Both roles run the same proof and helper
+bytes. The SDK schema determines which spelling represents a supervised leaf,
+reconstruction selection, or withheld input.
+
 Use independent training, validation, and test observations. Exclude target
 answers from inputs, control leakage, and test the declared generalization
 boundary. Include a matched negative control where signal, context, alignment,

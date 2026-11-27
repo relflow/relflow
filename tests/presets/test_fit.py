@@ -32,7 +32,7 @@ def runs(monkeypatch):
 
 @pytest.fixture
 def model():
-    return rf.Model(preset="small", d_model=16, amount=rf.Number, label=rf.Boolean(mask=True))
+    return rf.Model(preset="small", d_model=16, amount=rf.Number, label=rf.Boolean(predict=True))
 
 
 @pytest.mark.parametrize("name", ["small", "medium"])
@@ -59,6 +59,7 @@ def test_explicit_options_override_the_preset_including_disabled_averaging(model
         lit.LightningDataModule(),
         preset="small",
         batch_size=3,
+        accumulate_grad_batches=4,
         learning_rate=0.02,
         weight_decay=0.0,
         ema_decay=None,
@@ -74,8 +75,16 @@ def test_explicit_options_override_the_preset_including_disabled_averaging(model
     assert "max_epochs" not in run["options"]
     assert run["options"]["max_steps"] == 17
     assert run["options"]["gradient_clip_val"] == 0.0
+    assert run["options"]["accumulate_grad_batches"] == 4
     assert any(isinstance(callback, EarlyStopping) for callback in run["callbacks"])
     assert not any(isinstance(callback, rf.EMA) for callback in run["callbacks"])
+
+
+@pytest.mark.parametrize("count", [True, 0, -1, 1.5])
+def test_invalid_accumulation_fails_before_trainer_setup(model, runs, count):
+    with pytest.raises(ValueError, match="accumulate_grad_batches must be a positive integer"):
+        model.fit(lit.LightningDataModule(), accumulate_grad_batches=count)
+    assert not runs
 
 
 def test_an_explicit_optimizer_replaces_preset_optimizer_defaults(model, runs):
@@ -118,7 +127,7 @@ def test_constructor_preset_does_not_implicitly_select_a_fit_recipe(model, runs)
 
 @pytest.mark.integration
 def test_preset_fit_trains_and_updates_ema_on_a_native_loop(tmp_path):
-    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Boolean(predict=True))
     table = pa.table({"value": [1.0, 2.0], "label": [False, True]})
     data = rf.ArrowDataModule(train=table, num_workers=0, persistent_workers=False, pin_memory=False)
     model.fit(

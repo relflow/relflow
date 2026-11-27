@@ -23,7 +23,7 @@ def decoder(*, length=8, dropout=0.0, pooling="query", decoder_type=NumberDecode
         n_layers=1,
         dropout=dropout,
         events=rf.Branch(
-            length=length, evidence=rf.Number, target=rf.Number(mask=True, pooling=pooling, dropout=dropout)
+            length=length, evidence=rf.Number, target=rf.Number(predict=True, pooling=pooling, dropout=dropout)
         ),
     )
     return decoder_type(schema=schema, address="/events/target")
@@ -208,6 +208,51 @@ def test_small_cuda_query_volume_bypasses_selection_without_device_reductions():
     assert "selection" not in result
 
 
+@pytest.mark.parametrize("pooling", ["query", "mean"])
+@pytest.mark.parametrize(("tokens", "packed"), [(6, False), (512, True)])
+def test_scalar_reconstruction_preserves_narrow_training_and_packs_wide_contexts(monkeypatch, pooling, tokens, packed):
+    torch.manual_seed(127)
+    schema = rf.Schema.from_tree(
+        d_model=16,
+        n_layers=1,
+        n_heads=4,
+        evidence=rf.Number,
+        target=rf.Number(task=rf.reconstruct(query="chosen", ablate=True), pooling=pooling),
+    )
+    configured = NumberDecoder(schema=schema, address="/target")
+    memory = torch.randn(8, tokens, 16, requires_grad=True)
+    parcels = [
+        Parcel(
+            payload=memory, present=torch.ones(8, tokens, dtype=torch.bool), origin="/", destination=None, batch_size=8
+        )
+    ]
+    selection = torch.tensor([[False], [True], [False], [False], [False], [True], [False], [False]])
+    kwargs = dict(batch_size=8, device=torch.device("cpu"), target_shape=(1,))
+    shapes = []
+    decode = configured.decode
+
+    def observed(values):
+        shapes.append(tuple(values.shape[:2]))
+        return decode(values)
+
+    monkeypatch.setattr(configured, "decode", observed)
+    dense = configured(parcels, **kwargs)
+    sparse = configured.objective(parcels, selection=selection, **kwargs)
+    assert shapes == [(8, 1), (2 if packed else 8, 1)]
+    assert sparse.batch_size == dense.batch_size
+    for key in dense.payload.keys():
+        torch.testing.assert_close(sparse.payload[key][selection], dense.payload[key][selection], rtol=1e-5, atol=1e-6)
+        if packed:
+            assert not sparse.payload[key][~selection].any()
+        else:
+            torch.testing.assert_close(sparse.payload[key], dense.payload[key], rtol=0, atol=0)
+    parameters = (memory, *configured.parameters())
+    expected = torch.autograd.grad(dense.payload["state"][selection].sum(), parameters, allow_unused=True)
+    actual = torch.autograd.grad(sparse.payload["state"][selection].sum(), parameters, allow_unused=True)
+    for left, right in zip(expected, actual, strict=True):
+        torch.testing.assert_close(left, right, rtol=1e-4 if packed else 0, atol=2e-5 if packed else 0)
+
+
 def test_custom_forward_keeps_legacy_signature_and_custom_decode_requires_explicit_opt_in():
     class Legacy(NumberDecoder):
         coordinatewise = True
@@ -296,7 +341,7 @@ def test_ragged_extension_losses_and_full_model_gradients_match_dense_execution(
             length=None,
             reduction=None,
             evidence=rf.Number,
-            target=constructor(mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True), **options),
+            target=constructor(task=rf.reconstruct(query="selected"), **options),
         ),
     )
     source = pa.Table.from_pylist(
