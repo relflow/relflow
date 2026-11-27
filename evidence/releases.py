@@ -7,7 +7,7 @@ from pathlib import Path
 
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?")
 MINIMUM = (0, 6)
-BASELINE = "0abdd778342e4f9a1ca9cbee2c068d7f9b9f6ed5"
+BASELINE = "6e184012bf3a204a66313697b81f7edd7171811f"
 
 
 def supported(version: str) -> bool:

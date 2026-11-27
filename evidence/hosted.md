@@ -16,7 +16,7 @@ manual first parent or explicit ancestor selected by `evidence_base`.
 
 The active suite requires relflow **0.6.0 or newer**. If the event base predates
 0.6, compare against the fixed initial 0.6 implementation commit
-`0abdd778342e4f9a1ca9cbee2c068d7f9b9f6ed5`. An authenticated forced push whose
+`6e184012bf3a204a66313697b81f7edd7171811f`. An authenticated forced push whose
 old head is unavailable or no longer an ancestor uses that same anchor. Other
 missing or unrelated bases fail. The chosen baseline must always be a supported
 ancestor of the candidate. `comparison.json` and the report manifest preserve
