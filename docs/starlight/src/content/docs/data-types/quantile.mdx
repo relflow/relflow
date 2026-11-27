@@ -78,6 +78,7 @@ Choose Number when predicting outside the observed range is part of your task.
 | `compression` | `100` | Control distribution-summary resolution; larger values retain more detail. Minimum: `10`. |
 | `n_bands` | `8` | Set the number of Fourier bands used to represent percentile coordinates. |
 | `objective` | `"mae"` | Choose `"mae"`, `"mse"`, or `"huber"` loss in percentile coordinates. |
+| `hurdle` | `None` | Give one finite value, such as `0.0`, its own `hurdle` state; the distribution and percentiles then describe values that clear it. |
 
 Changing the objective changes the penalty in percentile space. Reported numeric
 error metrics still use the original units. Quantile has no `jitter` option.

@@ -181,7 +181,7 @@ class RaggedField:
                 f"{len(self.placement)} placements"
             )
         states = self.state.to_numpy(zero_copy_only=False)
-        if len(states) and (states.min() < Tokens.valued.value or states.max() > Tokens.other.value):
+        if len(states) and (states.min() < Tokens.valued.value or states.max() > max(Tokens).value):
             raise ValueError("RaggedField state contains an unknown token")
 
         positions = self.placement.to_numpy(zero_copy_only=False)

@@ -4,6 +4,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import lightning.pytorch as lit
+import polars as pl
 import pyarrow as pa
 import pydantic
 import pytest
@@ -833,3 +835,84 @@ def test_number_normalizer_keeps_float32_statistics_on_mps():
 
     assert normalizer.count.item() == 2
     assert normalizer.mean.item() == pytest.approx(2.0)
+
+
+def test_number_hurdle_values_take_their_own_state_outside_the_statistics():
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, x=rf.Number, amount=rf.Number(mask=True, hurdle=5))
+    source = pa.table({"x": [1.0, 2.0, 3.0, 4.0], "amount": [5.0, 2.0, 5.0, 4.0]})
+
+    field = model.encode(source, strata="train")["/amount"]
+
+    hurdle, valued = Tokens.hurdle.value, Tokens.valued.value
+    assert field.targets[TensorKey.state].reshape(-1).tolist() == [hurdle, valued, hurdle, valued]
+    # Like ``other``, the hurdle keeps zero content, so it is never embedded or regressed as a value.
+    assert field.targets[TensorKey.content].reshape(-1).tolist() == [0.0, 2.0, 0.0, 4.0]
+    statistics = rf.Number.normalization(model, "/amount")
+    assert (statistics["count"], statistics["mean"]) == (2, 3.0)
+    assert rf.Number(hurdle=0).hurdle == 0.0 and rf.Number().hurdle is None
+
+
+@pytest.mark.parametrize("field", [rf.Number, rf.Quantile, rf.Duration, rf.Ordinal])
+@pytest.mark.parametrize("hurdle", [True, "0", float("nan"), float("inf")])
+def test_hurdles_are_finite_numbers(field, hurdle):
+    with pytest.raises(pydantic.ValidationError, match="hurdle must be a finite number"):
+        field(hurdle=hurdle)
+
+
+def test_hurdles_survive_checkpoints_and_every_field_predicts_their_probability(tmp_path):
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        x=rf.Number,
+        amount=rf.Number(mask=True, hurdle=0),
+        q=rf.Quantile(mask=True, hurdle=0.5),
+        rank=rf.Ordinal(mask=True, hurdle=0),
+        label=rf.Category(mask=True),
+    )
+
+    restored = rf.Model.load(model.save(tmp_path / "hurdle.ckpt"))
+
+    assert {address: getattr(request, "hurdle", None) for address, request in restored.schema.requests.items()} == {
+        "/x": None,
+        "/amount": 0.0,
+        "/q": 0.5,
+        "/rank": 0.0,
+        "/label": None,
+    }
+    predictions = restored.predict(pa.table({"x": [1.0]})).schema["predictions"]
+    for name in ("amount", "q", "rank", "label"):
+        assert "hurdle" in predictions.to_schema()[name].to_schema()["state"].to_schema()
+
+
+@pytest.mark.integration
+def test_number_hurdle_learns_where_the_point_mass_sits():
+    lit.seed_everything(11)
+    rows = 256
+    x = [float(index % 4) for index in range(rows)]
+    frame = pl.DataFrame(
+        {"x": x, "amount": [0.0 if value == 0 else 10.0 + value + index % 7 for index, value in enumerate(x)]}
+    )
+    model = rf.Model(preset="small", d_model=16, x=rf.Number, amount=rf.Number(mask=True, hurdle=0))
+    data = rf.PolarsDataModule(
+        model=model, train=frame, validate=frame, num_workers=0, persistent_workers=False, pin_memory=False
+    )
+    model.fit(
+        data,
+        batch_size=32,
+        learning_rate=3e-3,
+        max_epochs=8,
+        early_stopping=False,
+        rollback=False,
+        accelerator="cpu",
+        precision="32-true",
+        logger=False,
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+
+    states = model.predict(frame.head(8)).select(pl.col("predictions").struct.field("amount").struct.field("state"))
+    hurdle = states.unnest("state")["hurdle"].to_list()
+    # Rows with x == 0 always sit at the hurdle; the others never do.
+    assert min(hurdle[0::4]) > 0.5 > max(hurdle[1::4] + hurdle[2::4] + hurdle[3::4])

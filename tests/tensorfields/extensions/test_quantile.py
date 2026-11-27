@@ -553,3 +553,13 @@ def test_quantile_readout_stays_wide_under_autocast():
 
     assert payload["percentile"].dtype == torch.float32
     assert payload[TensorKey.content].dtype == torch.float64
+
+
+def test_quantile_percentiles_describe_values_that_clear_the_hurdle():
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, x=rf.Number, q=rf.Quantile(mask=True, hurdle=0))
+
+    field = model.encode(pa.table({"x": [1.0] * 6, "q": [0.0, 0.0, 0.0, 10.0, 20.0, 30.0]}), strata="train")["/q"]
+
+    assert field.targets[TensorKey.state].reshape(-1).tolist() == [Tokens.hurdle.value] * 3 + [Tokens.valued.value] * 3
+    distribution = rf.Quantile.normalization(model, "/q")
+    assert (distribution["count"], distribution["minimum"], distribution["maximum"]) == (3, 10.0, 30.0)

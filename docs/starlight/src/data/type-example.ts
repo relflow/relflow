@@ -20,7 +20,7 @@ export interface TypeExample {
 
 export function prediction(content: Value): Record<string, Value> {
   return {
-    state: { valued: 0.96, null: 0.01, padded: 0.01, masked: 0.01, other: 0.01 },
+    state: { valued: 0.96, null: 0.01, padded: 0.01, masked: 0.01, other: 0.01, hurdle: 0.0 },
     content,
     inferred: true,
   };

@@ -37,6 +37,7 @@ from relflow.tensorfields.extensions.number import precise
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
 from relflow.tensorfields.shared.digest import Digest
+from relflow.tensorfields.shared.hurdle import Hurdle, mark
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
 if TYPE_CHECKING:
@@ -149,12 +150,16 @@ class Request(RequestBase):
     The digest learns pristine consumed training values, including hidden targets.
     Evaluation freezes the distribution. Predictions use its inverse transform
     and remain in source units; values outside learned support clip to its tails.
+    ``hurdle=0.0`` gives values equal to the hurdle their own ``hurdle`` state:
+    the digest leaves them out, so percentiles describe values that clear it,
+    and the state head learns the hurdle's probability.
     """
 
     type: Literal["quantile"] = "quantile"
     compression: Annotated[int, pydantic.Field(ge=10)] = 100
     n_bands: Annotated[int, pydantic.Field(gt=0)] = 8
     objective: Literal["mae", "mse", "huber"] = "mae"
+    hurdle: Hurdle = None
 
     if TYPE_CHECKING:
 
@@ -164,6 +169,7 @@ class Request(RequestBase):
             compression: int = 100,
             n_bands: int = 8,
             objective: Literal["mae", "mse", "huber"] = "mae",
+            hurdle: float | None = None,
             type: Literal["quantile"] = "quantile",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -206,17 +212,19 @@ def numeric(values: pa.Array | pa.ChunkedArray, address: Address) -> pa.Array:
     return converted.combine_chunks() if isinstance(converted, pa.ChunkedArray) else converted
 
 
-def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch.Tensor]:
+def encode(field: RaggedField, *, address: Address, hurdle: float | None) -> tuple[torch.Tensor, torch.Tensor]:
     """Source float64 bits and state tokens of one field.
 
     A NaN or infinite value has no percentile: its position takes the ``other``
-    state and zero bits, so it is neither ranked nor regressed against. Integer
-    bits retain source precision on devices without float64 arithmetic.
+    state and zero bits, so it is neither ranked nor regressed against. A value
+    equal to ``hurdle`` takes the ``hurdle`` state the same way. Integer bits
+    retain source precision on devices without float64 arithmetic.
     """
     data = field.place(numeric(field.values, address).to_numpy(zero_copy_only=False), fill=0.0)
     state = field.dense.copy()
     state[~np.isfinite(data) & (state == Tokens.valued.value)] = Tokens.other.value
     np.nan_to_num(data, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    mark(data, state, hurdle)
     return torch.from_numpy(data).view(torch.int64), torch.from_numpy(state)
 
 
@@ -237,7 +245,7 @@ def observe(
 ) -> TensorDict | None:
     if not learn:
         return None
-    _, states = encode(field, address=address)
+    _, states = encode(field, address=address, hurdle=cast(Request, schema.requests[address]).hurdle)
     return TensorDict({TensorKey.state: tally(states, len(Tokens))}, batch_size=[])
 
 
@@ -272,10 +280,10 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         request = cast(Request, schema.requests[address])
         digest = context.state if isinstance(context.state, Digest) else Digest(request.compression)
 
-        content, state = encode(input, address=address)
+        content, state = encode(input, address=address, hurdle=request.hurdle)
         targets = TensorDict({}, batch_size=input.shape)
         if address in schema.objectives:
-            target_raw, target_state = encode(target, address=address)
+            target_raw, target_state = encode(target, address=address, hurdle=request.hurdle)
             targets = TensorDict(
                 {
                     TensorKey.state: target_state,
@@ -315,6 +323,10 @@ def bind(
     resource = embedder.distribution
     digest = resource.state.snapshot()
     values = numeric(binding.values, address)
+    hurdle = cast(Request, module.schema.requests[address]).hurdle
+    if hurdle is not None:
+        # Percentiles describe values that clear the hurdle; nulls drop with them.
+        values = values.filter(pc.not_equal(values, pa.scalar(hurdle, type=values.type)))
     if strata == Strata.train:
         delta = Digest(resource.compression)
         delta.update(values)

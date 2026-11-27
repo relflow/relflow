@@ -178,6 +178,10 @@ model = rf.Model(
   MPS, which has no float64), so large offsets keep their spread. A float NaN
   tensorizes as the `other` state, not as a value or a null; ±inf stays valued
   but is never a regression target. Integers beyond ±2^53 are rejected.
+  `hurdle=0.0` (also on Quantile, Duration, and Ordinal ranks) gives values
+  equal to the hurdle the shared `hurdle` state: outside statistics and the
+  content loss, with the state head learning its probability. Predicted
+  `content` stays the estimate for a value that clears the hurdle.
 - `Ordinal(values=(...))` models declared labels by their ordered positions;
   bare `Ordinal` accepts integer ranks, including unseen ranks. Predictions
   round to the nearest rank with ties to even and return native labels or integers.

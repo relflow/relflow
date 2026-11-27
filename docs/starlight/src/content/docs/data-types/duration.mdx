@@ -152,6 +152,7 @@ including its numeric precision behavior; see
 | `jitter` | `rf.Jitter()` | Apply training-only noise in the configured duration units while preserving pristine targets. |
 | `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
 | `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
+| `hurdle` | `None` | Give one elapsed value in the configured units, such as `0` for no elapsed time, its own `hurdle` state. |
 
 Choose a valid endpoint combination: two query paths without constants, one
 source with exactly one constant, one source with `delta=True` inside a

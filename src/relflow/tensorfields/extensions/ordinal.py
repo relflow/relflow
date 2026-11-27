@@ -45,6 +45,8 @@ class Request(number.Request):
     rank with ties to even, returning a declared label or a native integer.
     Declared predictions clamp to their first and last labels; implicit integer
     predictions clamp to the exactly supported range, -2**53 through 2**53.
+    ``hurdle`` names a rank, not a label: with declared ``values`` it is the
+    position of the label that takes the hurdle state.
     """
 
     # A specialized Request deliberately replaces its parent's discriminator.
@@ -62,6 +64,7 @@ class Request(number.Request):
             offset: int = 4,
             alpha: float | None = None,
             objective: number.Objective | Literal["mae", "mse", "huber"] = number.Objective.mae,
+            hurdle: float | None = None,
             type: Literal["ordinal"] = "ordinal",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -75,6 +78,18 @@ class Request(number.Request):
             return enum.Request.check_values(values)
         except (ValueError, TypeError) as error:
             raise ValueError(str(error).replace("Enum", "Ordinal")) from error
+
+    @pydantic.model_validator(mode="after")
+    def check_hurdle_rank(self) -> Self:
+        if self.hurdle is None:
+            return self
+        if not self.hurdle.is_integer():
+            raise ValueError(f"Ordinal hurdle must be an integer rank, got {self.hurdle!r}")
+        if self.values is not None and not 0 <= self.hurdle < len(self.values):
+            raise ValueError(
+                f"Ordinal hurdle {int(self.hurdle)} must be a rank of the declared values, 0 through {len(self.values) - 1}"
+            )
+        return self
 
     @pydantic.field_serializer("values", when_used="json")
     def serialize_values(self, values: tuple[enum.Value, ...] | None) -> list[Any] | None:

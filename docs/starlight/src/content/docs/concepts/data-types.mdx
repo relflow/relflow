@@ -17,7 +17,7 @@ All input data for relflow models is represented as the leaf of a model tree. As
 
 Every leaf promises to emit one vector per observation, an embedding which is learned to best represent the ingressed data. The standard relflow data leaves draw a distinction between two aspects of the observed data: state, and content.
 
-The state of a data observation must be one of five distinct values, given in the below table:
+The state of a data observation must be one of six distinct values, given in the below table:
 
 | State | Meaning |
 | --- | --- |
@@ -26,6 +26,7 @@ The state of a data observation must be one of five distinct values, given in th
 | <StateToken state="padded" /> | No collection item exists at this position; padding aligns differently sized collections. |
 | <StateToken state="masked" /> | The data observed does exist, but is intentionally hidden for model training / reconstruction |
 | <StateToken state="other" /> | The data observed is not `None`, but it also is not of a usable value for modeling (this may be a `np.NaN` value for numerical representation, or a Vector with infinite values) |
+| <StateToken state="hurdle" /> | The value equals a field's declared `hurdle`, such as an exact zero, and is modeled as a state rather than a quantity |
 
 This state value is incorporated into the same embedding which a relflow leaf emits as the data observation’s representation. The decoder of each leaf, unless otherwise stated, will decode the learned embedding into
 

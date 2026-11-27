@@ -91,6 +91,7 @@ aligned result per supplied retained record.
 | `jitter` | `rf.Jitter()` | Apply training-only noise to rank inputs while preserving targets. |
 | `n_bands` | `8` | Set the lower base-two Fourier exponent to `-n_bands`; must be positive. |
 | `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
+| `hurdle` | `None` | Give one integer rank its own `hurdle` state, outside the statistics and the rank regression. With declared `values`, name the label's position, such as `0` for the first label. |
 
 Changing the declaration changes what learned ranks mean. A checkpoint with a
 different declaration is rejected rather than silently reinterpreting its
@@ -130,7 +131,7 @@ vocabulary or per-label counts helper.
 
 - **Assuming numeric labels keep their original spacing.** Declared `values=(10, 20, 30)` assigns consecutive ranks `0`, `1`, and `2`; declaration order defines the ordering. Omit `values` when source integers and their gaps should be ranks directly, and check that the resulting distances match your task. The [rank encoding tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_ordinal.py#L56) distinguish these contracts.
 - **Expecting a fractional rank to survive output writing.** The writer bounds the readout to the declared label range or supported integer range, then rounds to the nearest integer with ties to even. Inspect per-rank held-out errors and boundary behavior; use Number for a continuous readout. The [writer checks](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/tensorfields/extensions/test_ordinal.py#L224) cover rounding and saturation.
-- **Reading state probabilities as label confidence.** `state` describes valued, null, padded, masked, and other states; Ordinal `content` has no class-probability distribution or top-k candidates. Use Enum or Category when you need those outputs. See the [Ordinal output contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/ordinal.py).
+- **Reading state probabilities as label confidence.** `state` describes valued, null, padded, masked, other, and hurdle states; Ordinal `content` has no class-probability distribution or top-k candidates. Use Enum or Category when you need those outputs. See the [Ordinal output contract](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/tensorfields/extensions/ordinal.py).
 - **Treating accepted unseen ranks as demonstrated generalization.** Open integer ranks do not require vocabulary admission, but predictive quality on withheld ranks still needs evaluation. Hold out the ranks that matter in your application; [P100](/evidence/#P100) proposes this comparison and has no selected measurement in the retained publication.
 
 ## Relevant evidence

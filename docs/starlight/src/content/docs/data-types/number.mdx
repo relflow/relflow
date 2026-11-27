@@ -62,6 +62,12 @@ training spread. `objective="mse"` and `"huber"` instead penalize errors in
 the original value space, standardized by its training scale. All error metrics
 are given in the original source units, as provided to the model.
 
+With `hurdle=0.0`, exact zeros take the `hurdle` state instead of being valued.
+They embed as that state, stay out of the normalization statistics and the
+content loss, and the state head learns how likely the hurdle is. Predicted
+`content` remains the estimate for a value that clears the hurdle; read
+`state.hurdle` for the probability that the value is the hurdle itself.
+
 ### Predictions
 
 A numeric prediction returns in the same units as its training labels. For a numeric
@@ -87,6 +93,7 @@ structure is given below.
 | `jitter` | `rf.Jitter()` | Configure training-only noise while preserving reconstruction targets. |
 | `n_bands` | `8` | Set the lower base-two Fourier exponent; must be positive. |
 | `offset` | `4` | Set the upper base-two Fourier exponent; must be positive. |
+| `hurdle` | `None` | Give one finite value, such as `0.0`, its own `hurdle` state, as in a hurdle or zero-inflated model. |
 
 ### Request methods
 

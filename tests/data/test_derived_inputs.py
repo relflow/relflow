@@ -131,10 +131,10 @@ def test_transformed_values_are_observed_before_tensorization(monkeypatch):
         events.append(("observed",))
         return result
 
-    def encode(field, *, address):
+    def encode(field, *, address, hurdle):
         if not inside_observer:
             events.append(("encode", field.dense.reshape(-1).tolist()))
-        return original_encode(field, address=address)
+        return original_encode(field, address=address, hurdle=hurdle)
 
     monkeypatch.setitem(number.number.own_components, Component.observe, observe)
     monkeypatch.setattr(number, "encode", encode)

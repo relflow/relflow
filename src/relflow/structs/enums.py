@@ -14,6 +14,8 @@ class Tokens(enum.IntEnum):
     padded = 2
     masked = 3
     other = 4
+    # A declared point value, such as an exact zero, that a field models as a state.
+    hurdle = 5
 
 
 class Strata(enum.StrEnum):

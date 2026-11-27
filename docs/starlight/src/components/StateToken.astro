@@ -1,6 +1,6 @@
 ---
 interface Props {
-  state: 'valued' | 'null' | 'padded' | 'masked' | 'other';
+  state: 'valued' | 'null' | 'padded' | 'masked' | 'other' | 'hurdle';
 }
 
 const { state } = Astro.props;
@@ -62,8 +62,16 @@ const label = state[0].toUpperCase() + state.slice(1);
     --token-ink: #e9a28c;
   }
 
+  [data-state='hurdle'] {
+    --token-ink: #8fc3a8;
+  }
+
   :global(:root[data-theme='light']) [data-state='masked'] {
     --token-ink: #855414;
+  }
+
+  :global(:root[data-theme='light']) [data-state='hurdle'] {
+    --token-ink: #2f6b4c;
   }
 
   :global(:root[data-theme='light']) [data-state='other'] {

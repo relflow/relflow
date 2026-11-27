@@ -10,7 +10,7 @@ from tensordict import TensorDict, tensorclass
 
 import relflow as rf
 from relflow.data.ragged import RaggedField
-from relflow.structs.enums import Strata, TensorKey
+from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address
 from relflow.tensorfields.base import (
@@ -136,7 +136,7 @@ def build_extension(
                 if explode:
                     raise RuntimeError("decoder exploded")
                 super().__init__(schema=schema, address=address)
-                self.state = torch.nn.Linear(schema.d_model, 5)
+                self.state = torch.nn.Linear(schema.d_model, len(Tokens))
 
             def attach(self, context: object | None) -> None:
                 self.resource = context

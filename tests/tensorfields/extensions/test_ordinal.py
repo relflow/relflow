@@ -326,3 +326,21 @@ def test_one_batch_training_and_validation_keep_native_rank_or_label_output(valu
     assert len(predicted) == len(validate)
     if values is not None:
         assert set(predicted.to_list()) <= set(values)
+
+
+def test_ordinal_hurdle_names_a_rank_even_for_declared_labels():
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        x=rf.Number,
+        stars=rf.Ordinal(values=("none", "some", "many"), mask=True, hurdle=0),
+    )
+
+    field = model.encode(pa.table({"x": [1.0] * 3, "stars": ["none", "some", "many"]}), strata="train")["/stars"]
+
+    assert field.targets[rf.TensorKey.state].reshape(-1).tolist() == [5, 0, 0]
+    with pytest.raises(ValueError, match="Ordinal hurdle must be an integer rank, got 0.5"):
+        rf.Ordinal(hurdle=0.5)
+    with pytest.raises(ValueError, match="Ordinal hurdle 3 must be a rank of the declared values, 0 through 2"):
+        rf.Ordinal(values=("none", "some", "many"), hurdle=3)

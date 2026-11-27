@@ -33,6 +33,7 @@ from relflow.tensorfields.base import (
 )
 from relflow.tensorfields.output import array, struct
 from relflow.tensorfields.shared.counter import Counter, CounterUpdateCallback, tally
+from relflow.tensorfields.shared.hurdle import Hurdle, mark
 from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Errors, Metrics, Scores, errors
 
@@ -111,6 +112,12 @@ class Numeric(RequestBase):
     Fourier exponents. ``jitter=rf.Jitter(...)`` perturbs training inputs once
     in source units while retaining pristine targets. ``mask=True`` makes the
     scalar a supervised, unembedded target.
+
+    ``hurdle=0.0`` gives values equal to the hurdle their own ``hurdle`` state,
+    as in a hurdle or zero-inflated model: they embed as that state, stay out
+    of the statistics and the regression, and the state head learns their
+    probability. Predicted ``content`` remains the estimate for a value that
+    clears the hurdle; read ``state.hurdle`` for the hurdle's probability.
     """
 
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
@@ -118,6 +125,7 @@ class Numeric(RequestBase):
     offset: Annotated[int, pydantic.Field(gt=0, default=4)] = 4
     alpha: Annotated[float | None, pydantic.Field(gt=0.0, lt=1.0, default=None)] = None
     objective: Objective = Objective.mae
+    hurdle: Hurdle = None
 
     @property
     def log(self) -> bool:
@@ -177,6 +185,7 @@ class Request(Numeric):
             offset: int = 4,
             alpha: float | None = None,
             objective: Objective | Literal["mae", "mse", "huber"] = Objective.mae,
+            hurdle: float | None = None,
             type: Literal["number"] = "number",
             **options: Unpack[FieldOptions],
         ) -> None: ...
@@ -209,7 +218,7 @@ def observe(
 
     if not learn:
         return None
-    content, state = encode(field, address=address)
+    content, state = encode(field, address=address, hurdle=cast(Request, schema.requests[address]).hurdle)
     values = content.masked_select(state.eq(Tokens.valued.value))
     # Both scales keep statistics: lanes read their own, and a log target scores on its own.
     return TensorDict(
@@ -222,11 +231,12 @@ def observe(
     )
 
 
-def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch.Tensor]:
+def encode(field: RaggedField, *, address: Address, hurdle: float | None) -> tuple[torch.Tensor, torch.Tensor]:
     """Dense float64 content and state tokens of one field.
 
     A float NaN is not a number: its position takes the ``other`` state and
     zero content, so it is neither embedded as a value nor regressed against.
+    A value equal to ``hurdle`` takes the ``hurdle`` state the same way.
     Infinite values stay valued; the embedder clamps them and the loss skips them.
     """
     values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
@@ -243,6 +253,7 @@ def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch
     state = field.dense.copy()
     state[np.isnan(data) & (state == Tokens.valued.value)] = Tokens.other.value
     np.nan_to_num(data, copy=False, nan=0.0, posinf=np.inf, neginf=-np.inf)
+    mark(data, state, hurdle)
     return torch.from_numpy(data), torch.from_numpy(state)
 
 
@@ -274,10 +285,11 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         projection, context, observation, binding = resolve(sources, schema=schema, context=context)
         input, target = projection.split()
         present, trainable, inferred = masks(projection)
-        content, state = encode(input, address=address)
+        hurdle = cast(Request, schema.requests[address]).hurdle
+        content, state = encode(input, address=address, hurdle=hurdle)
         targets = TensorDict({}, batch_size=input.shape)
         if address in schema.objectives:
-            target_content, target_state = encode(target, address=address)
+            target_content, target_state = encode(target, address=address, hurdle=hurdle)
             targets = TensorDict(
                 {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
             )

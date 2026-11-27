@@ -72,6 +72,7 @@ class Request(number.Request):
             offset: int = 4,
             alpha: float | None = None,
             objective: number.Objective | Literal["mae", "mse", "huber"] = number.Objective.mae,
+            hurdle: float | None = None,
             type: Literal["duration"] = "duration",
             **options: Unpack[FieldOptions],
         ) -> None: ...

@@ -277,3 +277,18 @@ def test_absolute_ancestor_queries_and_ordinal_train_in_worker_batches(tmp_path)
     assert all(
         event["age"]["inferred"] for row in rows for group in row["predictions"]["groups"] for event in group["events"]
     )
+
+
+def test_duration_hurdle_marks_zero_elapsed_time():
+    model = rf.Model(
+        d_model=8, n_layers=1, n_heads=2, x=rf.Number, gap=rf.Duration(query=("start", "end"), mask=True, hurdle=0)
+    )
+    start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    source = pa.table(
+        {"x": [1.0, 2.0], "start": [start, start], "end": [start, datetime(2024, 1, 3, tzinfo=timezone.utc)]}
+    )
+
+    field = model.encode(source, strata="train")["/gap"]
+
+    assert field.targets[rf.TensorKey.state].reshape(-1).tolist() == [rf.Tokens.hurdle, rf.Tokens.valued]
+    assert field.targets[rf.TensorKey.content].reshape(-1).tolist() == [0.0, 2.0]

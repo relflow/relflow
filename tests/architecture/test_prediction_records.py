@@ -143,7 +143,7 @@ def test_model_without_selected_output_rejects_prediction_plan():
 
 
 def test_third_party_rich_results_keep_nested_declared_types_and_metadata(tmp_path):
-    from relflow.structs.enums import TensorKey
+    from relflow.structs.enums import TensorKey, Tokens
     from relflow.tensorfields.base import TENSORFIELDS
     from relflow.tensorfields.output import struct, variable
     from tests.architecture.test_extension_contract import build_extension
@@ -164,7 +164,7 @@ def test_third_party_rich_results_keep_nested_declared_types_and_metadata(tmp_pa
 
     @extension.register(rf.Component.write)
     def write(module, prediction, datatype):
-        count = prediction.payload[TensorKey.state].numel() // 5
+        count = prediction.payload[TensorKey.state].numel() // len(Tokens)
         values = struct({"score": pa.array([0.5] * count, type=pa.float32())}, candidate)
         return struct(
             {
