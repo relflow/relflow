@@ -11,7 +11,7 @@ REQUESTS = [
     (rf.Boolean, {}),
     (rf.Category, {}),
     (rf.Group, {"n_groups": 4}),
-    (rf.Period, {"dateparts": ["day_of_week"]}),
+    (rf.Period, {"parts": ["day_of_week"]}),
     (rf.Hash, {}),
     (rf.Number, {}),
     (rf.Quantile, {}),

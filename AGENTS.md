@@ -210,7 +210,7 @@ model = rf.Model(
   timestamps default to days. At most one Index per Branch, none at the root,
   nulls rejected, and the Branch needs attention or a positional Attention
   reduction. Positions travel as float32 `Geometry.positions`.
-- `Period` is for calendar parts. Saved schemas identify it with `type: dateparts`.
+- `Period` is for calendar parts, selected positionally or with `parts=`.
   Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label

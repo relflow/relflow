@@ -3,21 +3,11 @@
 import re
 import subprocess
 import tomllib
-from collections.abc import Iterable
 from pathlib import Path
 
 VERSION = re.compile(r"[0-9]+(?:\.[0-9]+)*(?:(?:a|b|rc)[0-9]+)?(?:\.post[0-9]+)?(?:\.dev[0-9]+)?")
 MINIMUM = (0, 6)
 BASELINE = "0abdd778342e4f9a1ca9cbee2c068d7f9b9f6ed5"
-LEGACY = {
-    "publication": "publication.json",
-    "reports": "evidence-reports.tar.gz",
-    "inputs": "evidence-inputs.tar.gz",
-    "provenance": "github-run.json",
-    "plots": "proof-visualizations.zip",
-    "measurements": "measurements.md",
-    "checksums": "SHA256SUMS",
-}
 
 
 def supported(version: str) -> bool:
@@ -99,9 +89,3 @@ def filenames(version: str) -> dict[str, str]:
         "measurements": f"{prefix}-measurements.md",
         "checksums": f"{prefix}-checksums.txt",
     }
-
-
-def inventory(version: str, available: Iterable[str]) -> dict[str, str]:
-    """Read old immutable releases; partial versioned inventories never fall back."""
-    current = filenames(version)
-    return current if set(current.values()).intersection(available) else LEGACY

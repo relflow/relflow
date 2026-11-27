@@ -10,7 +10,7 @@ import relflow as rf
 from relflow.structs.enums import AttentionMode, Overflow
 from relflow.tensorfields.base import Loss, Observe, OutputSchema, Write
 from relflow.tensorfields.extensions.number import Objective
-from relflow.tensorfields.extensions.period import DatePart
+from relflow.tensorfields.extensions.period import Part
 
 
 def schema_api() -> None:
@@ -44,10 +44,10 @@ def schema_api() -> None:
     rf.Model(preset="small", rank=rf.Ordinal, rating=ordinal)
     assert_type(rf.Group(n_groups=4).n_groups, int)
     assert_type(rf.Group(n_groups=8).n_groups, int)
-    assert_type(rf.Period(dateparts=["day_of_week", DatePart.hour_of_day]).dateparts, list[DatePart])
-    assert_type(rf.Period("day_of_week", DatePart.hour_of_day).dateparts, list[DatePart])
-    assert_type(rf.Period(dateparts=("day_of_week", DatePart.hour_of_day)).dateparts, list[DatePart])
-    parts: tuple[str | DatePart, ...] = ("day_of_week", DatePart.hour_of_day)
+    assert_type(rf.Period(parts=["day_of_week", Part.hour_of_day]).parts, list[Part])
+    assert_type(rf.Period("day_of_week", Part.hour_of_day).parts, list[Part])
+    assert_type(rf.Period(parts=("day_of_week", Part.hour_of_day)).parts, list[Part])
+    parts: tuple[str | Part, ...] = ("day_of_week", Part.hour_of_day)
     rf.Period(*parts, pattern="%Y-%m-%d", jitter=rf.Jitter(add=0.1), predict=True)
     assert_type(rf.Vector(n_dim=8, objective="l1").n_dim, int)
     rf.Text(encoder_pooling="mean", objective="l2", max_length=64)

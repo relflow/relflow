@@ -48,7 +48,7 @@ def released(tmp_path, monkeypatch):
     reports = bundle.getvalue()
     selected["report"]["reports_sha256"] = hashlib.sha256(reports).hexdigest()
     content = json.dumps(selected).encode()
-    url = f"https://github.com/relflow/relflow/releases/download/{tag}/publication.json"
+    url = f"https://github.com/relflow/relflow/releases/download/{tag}/{filenames('0.6.0')['publication']}"
     package = {"tag_name": "v0.6.0", "target_commitish": revision, "draft": False}
     report = {
         "tag_name": tag,
@@ -56,7 +56,7 @@ def released(tmp_path, monkeypatch):
         "draft": False,
         "assets": [
             {
-                "name": "publication.json",
+                "name": filenames("0.6.0")["publication"],
                 "browser_download_url": url,
                 "size": len(content),
                 "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
@@ -69,10 +69,10 @@ def released(tmp_path, monkeypatch):
         "https://api.github.com/repos/relflow/relflow/releases/tags/" + tag: report,
         url: content,
     }
-    reports_url = url.removesuffix("publication.json") + "evidence-reports.tar.gz"
+    reports_url = url.removesuffix(filenames("0.6.0")["publication"]) + filenames("0.6.0")["reports"]
     report["assets"].append(
         {
-            "name": "evidence-reports.tar.gz",
+            "name": filenames("0.6.0")["reports"],
             "browser_download_url": reports_url,
             "size": len(reports),
             "digest": "sha256:" + hashlib.sha256(reports).hexdigest(),
@@ -263,29 +263,6 @@ def test_canonical_sources_have_no_checked_in_measurements():
     for entry in registry(root).values():
         assert entry["run"] is None
         assert not {"evidence-result", "evidence-report"} & metadata((root / entry["script"]).read_text()).keys()
-
-
-def test_versioned_names_are_used_without_renaming_historical_releases(released):
-    root, responses, selected, report, calls, old_url = released
-    name = filenames("0.6.0")["publication"]
-    url = old_url.removesuffix("publication.json") + name
-    report["assets"][0].update(name=name, browser_download_url=url)
-    responses[url] = responses.pop(old_url)
-    reports_asset = report["assets"][1]
-    old_reports = reports_asset["browser_download_url"]
-    reports_url = old_reports.removesuffix("evidence-reports.tar.gz") + filenames("0.6.0")["reports"]
-    reports_asset.update(name=filenames("0.6.0")["reports"], browser_download_url=reports_url)
-    responses[reports_url] = responses.pop(old_reports)
-    path = assets.fetch(root, "0.6.0", required=True)
-    assert json.loads(path.read_text()) == selected
-    assert url in calls and old_url not in calls
-
-
-def test_partial_versioned_inventory_cannot_fall_back_to_old_publication_name(released):
-    root, _, _, report, _, _ = released
-    report["assets"].append({"name": filenames("0.6.0")["reports"]})
-    with pytest.raises(ValueError, match="requires one relflow-0.6.0-evidence.json"):
-        assets.fetch(root, "0.6.0", required=True)
 
 
 def test_publication_requires_matching_plot_asset_before_downloading(tmp_path):

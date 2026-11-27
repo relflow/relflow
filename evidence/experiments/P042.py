@@ -184,7 +184,7 @@ def records(*, start: date, weeks: int, rows: int, seed: int) -> Iterator[dict]:
 
 def fit(
     *,
-    dateparts: Sequence[str],
+    parts: Sequence[str],
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -196,7 +196,7 @@ def fit(
     lit.seed_everything(seed, workers=True)
 
     class PredictionModel(rf.Model):
-        observed_at = rf.Period(dateparts=list(dateparts))
+        observed_at = rf.Period(parts=list(parts))
         target = rf.Category(predict=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
@@ -247,7 +247,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     validate = partial(records, start=date(2021, 1, 4), weeks=26, rows=512, seed=seed + 2)
     test = partial(records, start=date(2025, 1, 6), weeks=52, rows=1024, seed=seed + 3)
     day_only = fit(
-        dateparts=("day_of_week",),
+        parts=("day_of_week",),
         train=train,
         validate=validate,
         epochs=20,
@@ -257,7 +257,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     day_accuracy = accuracy(day_only, test, accelerator)
     hour_only = fit(
-        dateparts=("hour_of_day",),
+        parts=("hour_of_day",),
         train=train,
         validate=validate,
         epochs=20,
@@ -267,7 +267,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     hour_accuracy = accuracy(hour_only, test, accelerator)
     composed = fit(
-        dateparts=("day_of_week", "hour_of_day"),
+        parts=("day_of_week", "hour_of_day"),
         train=train,
         validate=validate,
         epochs=20,

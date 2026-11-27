@@ -316,14 +316,14 @@ def test_extension_can_opt_in_to_nested_output_selection_without_shared_changes(
 
 
 @pytest.mark.parametrize(
-    "kind", ["number", "category", "set", "dateparts", "vector", "enum", "boolean", "hash", "quantile"]
+    "kind", ["number", "category", "set", "period", "vector", "enum", "boolean", "hash", "quantile"]
 )
 def test_ragged_extension_losses_and_full_model_gradients_match_dense_execution(monkeypatch, kind):
     constructors = {
         "number": (rf.Number, {}, lambda i: float(i + 1)),
         "category": (rf.Category, {"p_unavailable": 0.0}, lambda i: f"c{i % 3}"),
         "set": (rf.Set, {"p_unavailable": 0.0}, lambda i: [f"t{i % 3}", "shared"]),
-        "dateparts": (rf.Period, {"dateparts": ["day_of_week", "day_of_month"]}, lambda i: datetime(2026, 1, i + 1)),
+        "period": (rf.Period, {"parts": ["day_of_week", "day_of_month"]}, lambda i: datetime(2026, 1, i + 1)),
         "vector": (rf.Vector, {"n_dim": 3}, lambda i: [float(i), float(i + 1), float(i + 2)]),
         "enum": (rf.Enum, {"values": ("a", "b"), "p_unavailable": 0.0}, lambda i: "a" if i % 2 else "b"),
         "boolean": (rf.Boolean, {}, lambda i: bool(i % 2)),

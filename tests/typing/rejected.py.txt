@@ -75,7 +75,7 @@ CustomModel(rf.presets.SMALL, value=rf.Number)  # rejected
 rf.Number("amount")  # rejected
 rf.Number(name="amount")  # rejected
 rf.Period(7)  # rejected
-rf.Period(dateparts=None)  # rejected
+rf.Period(parts=None)  # rejected
 rf.Period("day_of_week", pattern=7)  # rejected
 rf.Period("day_of_week", name="created")  # rejected
 rf.Period("day_of_week", unknown=True)  # rejected

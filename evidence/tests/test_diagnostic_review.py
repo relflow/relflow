@@ -180,8 +180,7 @@ def test_static_review_rejects_changed_or_incomplete_assets(project, change):
     "asset",
     [
         "evidence-ci-1-attempt-1/proof-visualizations.zip",
-        "evidence-v0.5.0/proof-visualizations.zip",
-        "evidence-v0.5.0/relflow-0.5.0-evidence-plots.zip",
+        "evidence-v0.6.0/relflow-0.6.0-evidence-plots.zip",
     ],
 )
 def test_preview_fetch_verifies_archive_and_assets_before_installing(project, monkeypatch, corrupt, asset):

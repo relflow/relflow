@@ -82,13 +82,11 @@ def test_common_resources_are_available_from_package_root():
 def test_period_is_the_public_calendar_request():
     from relflow.tensorfields.extensions import period
 
-    assert relflow.Period is period.Request is relflow.TENSORFIELDS["dateparts"].Request
-    assert not hasattr(relflow, "DateParts")
+    assert relflow.Period is period.Request is relflow.TENSORFIELDS["period"].Request
     assert "Periods" not in relflow.__all__
     namespace: dict[str, object] = {}
     exec("from relflow import *", namespace)
     assert namespace["Period"] is relflow.Period
-    assert "DateParts" not in namespace
 
 
 def test_tensorfield_source_construction_replaces_the_derive_role():

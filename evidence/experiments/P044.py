@@ -161,7 +161,7 @@ def records(years: Sequence[int], *, parity: int) -> Iterator[dict]:
 
 def fit(
     *,
-    dateparts: Sequence[str],
+    parts: Sequence[str],
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -173,7 +173,7 @@ def fit(
     lit.seed_everything(seed, workers=True)
 
     class PredictionModel(rf.Model):
-        observed_at = rf.Period(dateparts=list(dateparts))
+        observed_at = rf.Period(parts=list(parts))
         target = rf.Category(predict=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
@@ -224,7 +224,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     validate = partial(records, (2021,), parity=1)
     test = list(records((2023, 2025), parity=0))
     model = fit(
-        dateparts=("day_of_year",),
+        parts=("day_of_year",),
         train=train,
         validate=validate,
         epochs=70,

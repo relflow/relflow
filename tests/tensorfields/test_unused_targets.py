@@ -29,7 +29,7 @@ class Tokenizer:
         (rf.Category, "known", {"p_unavailable": 0.0}),
         (rf.Group, "known", {"n_groups": 3, "p_unavailable": 0.0}),
         (rf.Set, ["known"], {"p_unavailable": 0.0}),
-        (rf.Period, datetime(2026, 1, 1), {"dateparts": ["day_of_week"]}),
+        (rf.Period, datetime(2026, 1, 1), {"parts": ["day_of_week"]}),
         (rf.Hash, "identifier", {}),
         (rf.Text, "hello", {"model": "local-test", "max_length": 4, "cache": False}),
     ],

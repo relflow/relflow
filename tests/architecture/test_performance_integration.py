@@ -29,7 +29,7 @@ def test_ragged_text_and_input_only_fields_preserve_dense_objective_and_gradient
             length=None,
             note=rf.Text(model="local-test", max_length=4, cache=True),
             tags=rf.Set(p_unavailable=0.0),
-            occurred=rf.Period(dateparts=("day_of_week",)),
+            occurred=rf.Period(parts=("day_of_week",)),
             amount=rf.Number,
             risk=rf.Number(
                 task=rf.reconstruct(query="selected"),

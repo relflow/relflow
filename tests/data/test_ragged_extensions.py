@@ -225,7 +225,7 @@ def test_period_encodes_heterogeneous_date_union():
     )
     model = rf.Model(
         preset="small",
-        value=rf.Period(dateparts=["day_of_month"]),
+        value=rf.Period(parts=["day_of_month"]),
         d_model=8,
     )
 

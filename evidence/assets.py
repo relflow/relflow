@@ -17,7 +17,7 @@ from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from evidence.experiments.source import describe, registry, snapshot
-from evidence.releases import VERSION, inventory, supported
+from evidence.releases import VERSION, filenames, supported
 
 REPOSITORY = "relflow/relflow"
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -95,7 +95,7 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
     report = json.loads(retained)
     if report.get("draft") is not False or report.get("tag_name") != tag or report.get("target_commitish") != revision:
         raise ValueError(f"Evidence {tag} does not identify the published package source {revision}")
-    files = inventory(version, (asset["name"] for asset in report.get("assets", [])))
+    files = filenames(version)
     assets = [asset for asset in report.get("assets", []) if asset.get("name") == files["publication"]]
     if len(assets) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", assets[0].get("digest") or ""):
         raise ValueError(f"Evidence {tag} requires one {files['publication']} asset with a GitHub SHA256 digest")
@@ -145,7 +145,7 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
 
 def sources(selected: dict, release: dict, destination: Path) -> None:
     """Recover executed declarations from the digest-bound CI report, never from Git blobs."""
-    files = inventory(selected["version"], (asset["name"] for asset in release.get("assets", [])))
+    files = filenames(selected["version"])
     matches = [asset for asset in release.get("assets", []) if asset.get("name") == files["reports"]]
     expected = selected["report"].get("reports_sha256", "")
     url = f"https://github.com/{REPOSITORY}/releases/download/evidence-v{selected['version']}/{files['reports']}"
@@ -218,7 +218,7 @@ def plots(root: Path, selected: dict, release: dict) -> None:
     target.unlink(missing_ok=True)
     if spec is None:
         return
-    files = inventory(selected["version"], (asset["name"] for asset in release.get("assets", [])))
+    files = filenames(selected["version"])
     matches = [asset for asset in release.get("assets", []) if asset.get("name") == files["plots"]]
     if len(matches) != 1 or any(
         [

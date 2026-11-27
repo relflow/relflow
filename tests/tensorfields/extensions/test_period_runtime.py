@@ -12,7 +12,7 @@ import relflow as rf
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.packages import Prediction
 from relflow.tensorfields.base import TensorInput
-from relflow.tensorfields.extensions.period import DatePart, Embedder
+from relflow.tensorfields.extensions.period import Embedder, Part
 from relflow.tensorfields.shared.jitter import Jitter
 
 ADDRESS = rf.Address("/", "created")
@@ -20,7 +20,7 @@ ADDRESS = rf.Address("/", "created")
 
 def build(jitter: Jitter | dict[str, object] | None = None) -> rf.Model:
     options = {} if jitter is None else {"jitter": jitter}
-    return rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], **options), d_model=8)
+    return rf.Model(preset="small", created=rf.Period(parts=["day_of_week"], **options), d_model=8)
 
 
 def test_period_request_hydrates_jitter_from_a_mapping():
@@ -30,7 +30,7 @@ def test_period_request_hydrates_jitter_from_a_mapping():
 
 
 def test_period_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.MonkeyPatch):
-    model = rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], predict=True), d_model=8)
+    model = rf.Model(preset="small", created=rf.Period(parts=["day_of_week"], predict=True), d_model=8)
     rows = pa.table({"created": pa.array([datetime(2024, 1, 1), None, datetime(2024, 1, 4)])})
     field = model.encode(rows, strata=Strata.train)[ADDRESS]
     target = field.targets[TensorKey.content]["day_of_week"].reshape(3, 2)
@@ -48,7 +48,7 @@ def test_period_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.
     tracked = {}
     monkeypatch.setattr(model, "track", lambda names, value, **options: tracked.setdefault(names[2:], value))
 
-    rf.TENSORFIELDS["dateparts"].loss(model, prediction, field, Strata.train)
+    rf.TENSORFIELDS["period"].loss(model, prediction, field, Strata.train)
 
     angle = 2 * math.pi * 3 / 7
     assert tracked[Metric.loss, TensorKey.content, "day_of_week"].item() == pytest.approx((1 - math.cos(angle)) / 2)
@@ -58,12 +58,12 @@ def test_period_content_loss_and_angle_exclude_null_targets(monkeypatch: pytest.
 @pytest.mark.integration
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_period_evaluation_angles_count_valued_targets_across_unequal_batches(batch_size, tmp_path):
-    model = rf.Model(preset="small", created=rf.Period(dateparts=["day_of_week"], predict=True), d_model=8)
+    model = rf.Model(preset="small", created=rf.Period(parts=["day_of_week"], predict=True), d_model=8)
     decoder = model.nodes[ADDRESS].decoder
     with torch.no_grad():
         # A constant readout on the unit circle: day 0 of the Sunday-based week.
-        decoder.dateparts["day_of_week"].weight.zero_()
-        decoder.dateparts["day_of_week"].bias.copy_(torch.tensor([0.0, 1.0]))
+        decoder.parts["day_of_week"].weight.zero_()
+        decoder.parts["day_of_week"].bias.copy_(torch.tensor([0.0, 1.0]))
     rows = pa.table({"created": pa.array([datetime(2024, 1, 7), datetime(2024, 1, 10), None])})
     data = rf.ArrowDataModule(model, validate=rows)
     values = model.validate(
@@ -82,7 +82,7 @@ def test_period_evaluation_angles_count_valued_targets_across_unequal_batches(ba
 @pytest.mark.parametrize("value", [None, 0.0, 0.2, 1, True])
 def test_period_rejects_non_jitter_configuration(value: object):
     with pytest.raises(pydantic.ValidationError):
-        rf.Period(dateparts=["day_of_week"], jitter=value)
+        rf.Period(parts=["day_of_week"], jitter=value)
 
 
 @pytest.mark.parametrize("normalize", [True, False])
@@ -105,7 +105,7 @@ def test_period_jitters_its_only_continuous_boundary(
         state=torch.tensor([Tokens.valued, Tokens.null, Tokens.masked, Tokens.valued]),
         content=TensorDict(
             {
-                DatePart.day_of_week: torch.tensor(
+                Part.day_of_week: torch.tensor(
                     [
                         [0.5, -0.5],
                         [0.0, 0.0],
@@ -140,7 +140,7 @@ def test_period_jitters_unit_circle_inputs_without_mutating_targets(monkeypatch:
     model = rf.Model(
         preset="small",
         created=rf.Period(
-            dateparts=["day_of_week"],
+            parts=["day_of_week"],
             jitter=configured,
             task=rf.reconstruct(query="supervise"),
         ),
@@ -156,8 +156,8 @@ def test_period_jitters_unit_circle_inputs_without_mutating_targets(monkeypatch:
         ),
         strata=Strata.train,
     )[ADDRESS]
-    content = field.content[DatePart.day_of_week].clone()
-    targets = field.targets[TensorKey.content][DatePart.day_of_week].clone()
+    content = field.content[Part.day_of_week].clone()
+    targets = field.targets[TensorKey.content][Part.day_of_week].clone()
     assert content[0].count_nonzero() > 0
     assert targets[1].count_nonzero() > 0
     captured: list[torch.Tensor] = []
@@ -172,8 +172,8 @@ def test_period_jitters_unit_circle_inputs_without_mutating_targets(monkeypatch:
 
     assert len(captured) == 1
     assert torch.equal(captured[0], content.reshape(-1, 2))
-    assert torch.equal(field.content[DatePart.day_of_week], content)
-    assert torch.equal(field.targets[TensorKey.content][DatePart.day_of_week], targets)
+    assert torch.equal(field.content[Part.day_of_week], content)
+    assert torch.equal(field.targets[TensorKey.content][Part.day_of_week], targets)
 
 
 def test_default_period_jitter_does_not_advance_rng_during_training():
@@ -211,7 +211,7 @@ def test_period_reads_zone_aware_timestamps_in_their_own_zone(zone: str, utc: li
     model = rf.Model(
         preset="small",
         d_model=8,
-        when=rf.Period(dateparts=["day_of_week", "hour_of_day"]),
+        when=rf.Period(parts=["day_of_week", "hour_of_day"]),
         label=rf.Boolean(predict=True),
     )
     aware = model.encode(pa.table({"when": instants}), strata="predict")

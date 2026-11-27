@@ -59,7 +59,7 @@ CONTEXT = {
     "exposures",
     "phase",
     "prefix",
-    "dateparts",
+    "parts",
     "seed",
     "arm",
     "name",

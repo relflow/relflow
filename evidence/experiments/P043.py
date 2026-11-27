@@ -162,7 +162,7 @@ def records(*, years: Sequence[int], rows: int) -> Iterator[dict]:
 
 def fit(
     *,
-    dateparts: Sequence[str],
+    parts: Sequence[str],
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -174,7 +174,7 @@ def fit(
     lit.seed_everything(seed, workers=True)
 
     class PredictionModel(rf.Model):
-        observed_at = rf.Period(dateparts=list(dateparts))
+        observed_at = rf.Period(parts=list(parts))
         target = rf.Category(predict=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
@@ -225,7 +225,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     validate = partial(records, years=tuple(range(1951, 2001)), rows=128)
     test = partial(records, years=tuple(range(2001, 2051)), rows=256)
     day_only = fit(
-        dateparts=("day_of_year",),
+        parts=("day_of_year",),
         train=train,
         validate=validate,
         epochs=10,
@@ -235,7 +235,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     ambiguous_accuracy = accuracy(day_only, test, accelerator)
     identified = fit(
-        dateparts=("day_of_year", "week_of_month"),
+        parts=("day_of_year", "week_of_month"),
         train=train,
         validate=validate,
         epochs=20,

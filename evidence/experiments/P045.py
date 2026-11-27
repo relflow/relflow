@@ -93,11 +93,11 @@
 # ### How it works
 #
 # The generator balances all seven weekday labels at every sampled ordinal
-# day. With `dateparts=["day_of_year"]`, identical visible inputs therefore
+# day. With `parts=["day_of_year"]`, identical visible inputs therefore
 # need seven different answers. The best accuracy is one seventh.
 #
 # The positive control uses
-# `dateparts=["day_of_year", "day_of_week"]`, which supplies the missing
+# `parts=["day_of_year", "day_of_week"]`, which supplies the missing
 # distinction directly. This control tests a visible weekday coordinate;
 # it does **not** test learning weekday arithmetic from a year coordinate.
 #
@@ -171,7 +171,7 @@ def records(*, years: Sequence[int], ordinal_step: int = 5) -> Iterator[dict]:
 
 def fit(
     *,
-    dateparts: Sequence[str],
+    parts: Sequence[str],
     train: Callable[[], Iterator[dict]],
     validate: Callable[[], Iterator[dict]],
     epochs: int,
@@ -183,7 +183,7 @@ def fit(
     lit.seed_everything(seed, workers=True)
 
     class PredictionModel(rf.Model):
-        observed_at = rf.Period(dateparts=list(dateparts))
+        observed_at = rf.Period(parts=list(parts))
         target = rf.Category(predict=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
@@ -234,7 +234,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     validate = partial(records, years=tuple(range(1951, 1986)))
     test = partial(records, years=tuple(range(2001, 2036)))
     day_only = fit(
-        dateparts=("day_of_year",),
+        parts=("day_of_year",),
         train=train,
         validate=validate,
         epochs=14,
@@ -244,7 +244,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     )
     ambiguous_accuracy = accuracy(day_only, test, accelerator)
     identified = fit(
-        dateparts=("day_of_year", "day_of_week"),
+        parts=("day_of_year", "day_of_week"),
         train=train,
         validate=validate,
         epochs=14,

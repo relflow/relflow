@@ -12,49 +12,49 @@ import torch
 import yaml
 
 import relflow as rf
-from relflow.tensorfields.extensions.period import DatePart
+from relflow.tensorfields.extensions.period import Part
 
 
 def test_period_selects_ordered_parts_with_keyword_options():
-    parts = ("HourOfDay", DatePart.day_of_week, "month-of-year")
+    parts = ("HourOfDay", Part.day_of_week, "month-of-year")
     request = rf.Period(*parts, pattern="%Y-%m-%d", jitter={"add": 0.1}, predict=True)
-    assert request.dateparts == [DatePart.hour_of_day, DatePart.day_of_week, DatePart.month_of_year]
+    assert request.parts == [Part.hour_of_day, Part.day_of_week, Part.month_of_year]
     assert request.pattern == "%Y-%m-%d"
     assert request.jitter == rf.Jitter(add=0.1)
     assert request.predict is True
-    assert rf.Period(dateparts=parts).dateparts == request.dateparts
+    assert rf.Period(parts=parts).parts == request.parts
 
 
 def test_period_signature_accepts_parts_and_keeps_options_keyword_only():
     signature = inspect.signature(rf.Period)
-    assert signature.parameters["parts"].kind is inspect.Parameter.VAR_POSITIONAL
-    for name in ("dateparts", "pattern", "jitter", "predict"):
+    assert signature.parameters["selected"].kind is inspect.Parameter.VAR_POSITIONAL
+    for name in ("parts", "pattern", "jitter", "predict"):
         assert signature.parameters[name].kind is inspect.Parameter.KEYWORD_ONLY
     assert "name" not in signature.parameters
     signature.bind("day_of_week", pattern="%Y-%m-%d")
 
 
-@pytest.mark.parametrize("options", [{}, {"dateparts": []}, {"dateparts": ()}])
+@pytest.mark.parametrize("options", [{}, {"parts": []}, {"parts": ()}])
 def test_period_requires_an_explicit_nonempty_selection(options):
-    with pytest.raises(pydantic.ValidationError, match="dateparts cannot be empty"):
+    with pytest.raises(pydantic.ValidationError, match="Period parts cannot be empty"):
         rf.Period(**options)
 
 
 def test_bare_period_class_requires_a_selection_in_a_schema():
-    with pytest.raises(pydantic.ValidationError, match="dateparts"):
+    with pytest.raises(pydantic.ValidationError, match="parts"):
         rf.Model(preset="small", created=rf.Period)
 
 
 @pytest.mark.parametrize(
     "parts,match",
     [
-        (("day_of_week", "Day Of Week"), "dateparts must be unique"),
-        (("day_of_week", DatePart.day_of_week), "dateparts must be unique"),
+        (("day_of_week", "Day Of Week"), "Period parts must be unique"),
+        (("day_of_week", Part.day_of_week), "Period parts must be unique"),
         (("day of wek",), "did you mean 'day_of_week'"),
-        (("year",), "unknown datepart 'year'"),
-        ((7,), "datepart values must be strings, got int"),
-        ((None,), "datepart values must be strings, got NoneType"),
-        ((["day_of_week"],), "datepart values must be strings, got list"),
+        (("year",), "unknown Period part 'year'"),
+        ((7,), "Period part values must be strings, got int"),
+        ((None,), "Period part values must be strings, got NoneType"),
+        ((["day_of_week"],), "Period part values must be strings, got list"),
     ],
 )
 def test_period_validates_positional_parts_through_the_existing_validators(parts, match):
@@ -64,34 +64,34 @@ def test_period_validates_positional_parts_through_the_existing_validators(parts
 
 @pytest.mark.parametrize("selection", [None, [], ["hour_of_day"]])
 def test_period_rejects_mixed_selections(selection):
-    with pytest.raises(TypeError, match="positionally or with dateparts="):
-        rf.Period("day_of_week", dateparts=selection)
+    with pytest.raises(TypeError, match="positionally or with parts="):
+        rf.Period("day_of_week", parts=selection)
 
 
 def test_period_preserves_rejection_of_a_null_keyword_selection():
-    with pytest.raises(pydantic.ValidationError, match="dateparts"):
-        rf.Period(dateparts=None)
+    with pytest.raises(pydantic.ValidationError, match="parts"):
+        rf.Period(parts=None)
 
 
-def test_period_preserves_json_yaml_and_legacy_request_restoration(tmp_path):
-    request = rf.Period("day_of_week", DatePart.hour_of_day, embed=True)
+def test_period_round_trips_through_json_and_yaml(tmp_path):
+    request = rf.Period("day_of_week", Part.hour_of_day, embed=True)
     model = rf.Model(preset="small", d_model=8, events=rf.Branch(length=2, created=request))
     payload = model.schema.model_dump(mode="json")
     restored = rf.Schema.model_validate_json(model.schema.model_dump_json())
     assert restored.model_dump(mode="json") == payload
     field = restored.requests["/events/created"]
     assert field.parent is restored.branches["/events"]
-    legacy = field.model_dump(mode="json")
-    assert legacy["type"] == "dateparts"
-    assert legacy["dateparts"] == ["day_of_week", "hour_of_day"]
-    assert rf.Period.model_validate(legacy).model_dump(mode="json") == legacy
-    assert rf.Period.model_validate_json(field.model_dump_json()).model_dump(mode="json") == legacy
+    dumped = field.model_dump(mode="json")
+    assert dumped["type"] == "period"
+    assert dumped["parts"] == ["day_of_week", "hour_of_day"]
+    assert rf.Period.model_validate(dumped).model_dump(mode="json") == dumped
+    assert rf.Period.model_validate_json(field.model_dump_json()).model_dump(mode="json") == dumped
     path = tmp_path / "period.yaml"
     path.write_text(yaml.safe_dump(payload))
     assert rf.Schema.model_validate(yaml.safe_load(path.read_text())).model_dump(mode="json") == payload
     path.write_text(
-        "preset: small\nd_model: 8\nfields:\n  created:\n    type: dateparts\n"
-        "    dateparts: [day_of_week, hour_of_day]\n    embed: true\n"
+        "preset: small\nd_model: 8\nfields:\n  created:\n    type: period\n"
+        "    parts: [day_of_week, hour_of_day]\n    embed: true\n"
     )
     loaded = rf.Model.from_yaml(path)
     assert loaded.schema.model_dump() == rf.Model(preset="small", d_model=8, created=request).schema.model_dump()
@@ -110,7 +110,7 @@ def test_period_checkpoint_preserves_parameters_and_predictions(tmp_path):
     assert restored.schema.model_dump() == model.schema.model_dump()
     assert pa.table(restored.predict(inputs)).equals(expected)
     assert restored.state_dict().keys() == model.state_dict().keys()
-    assert any(".dateparts.day_of_week." in name for name in model.state_dict())
+    assert any(".parts.day_of_week." in name for name in model.state_dict())
     for name, tensor in model.state_dict().items():
         torch.testing.assert_close(restored.state_dict()[name], tensor, rtol=0, atol=0)
 
@@ -121,7 +121,7 @@ def test_week_of_year_counts_sunday_start_weeks_without_aliasing():
         dtype="datetime64[D]",
     )
 
-    sin, cos = DatePart.week_of_year(days)
+    sin, cos = Part.week_of_year(days)
 
     weeks = [round(math.atan2(s, c) / (2 * math.pi) * 54) % 54 or 54 for s, c in zip(sin, cos, strict=True)]
     assert weeks == [1, 1, 1, 2, 1, 2, 54]
