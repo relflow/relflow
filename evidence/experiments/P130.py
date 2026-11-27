@@ -65,7 +65,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "reliability"

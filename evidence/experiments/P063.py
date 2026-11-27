@@ -123,7 +123,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -150,7 +150,6 @@ import pyarrow as pa
 import relflow as rf
 from relflow.tensorfields.shared.resize import Resize
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 400
 
@@ -163,7 +162,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 class PredictionModel(rf.Model):
     x = rf.Number
-    labels = rf.Set(p_unavailable=1.0, **TARGET)
+    labels = rf.Set(p_unavailable=1.0, predict=True)
 
 
 def build(size: int) -> rf.Model:

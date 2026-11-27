@@ -154,7 +154,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -181,7 +181,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 
@@ -219,7 +218,7 @@ class View(rf.Branch):
 
 class Model(rf.Model):
     views = View(length=2)
-    target = rf.Number(**TARGET, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

@@ -51,12 +51,12 @@ def test_every_experiment_declares_its_imported_dependencies_without_importing_m
             for node in ast.walk(ast.parse(source))
             if isinstance(node, ast.ImportFrom) and node.module
         }
-        expected = imports - sys.stdlib_module_names - {"reporting", "policies", "visibility", "evidence"}
+        expected = imports - sys.stdlib_module_names - {"reporting", "policies", "evidence"}
         assert expected <= dependencies, f"{path}: missing dependencies {expected - dependencies}"
         assert {"pyyaml", "torch", "relflow"} <= dependencies, f"{path}: reporter dependencies are explicit"
         assert "Path(__file__).resolve().parent" in source
         if "torchjd" in expected:
-            assert "relflow[torchjd]>=0.5.0" in declared["dependencies"]
+            assert "relflow[torchjd]>=0.6.0" in declared["dependencies"]
         if "transformers" in expected:
             extras = {
                 extra
@@ -79,7 +79,7 @@ def test_registered_proofs_have_unique_standalone_scripts() -> None:
     expected = {ROOT / path for path in paths}
     actual = set(PROOFS.rglob("*.py"))
     assert not (ROOT / "research").exists(), "keep canonical experiments together"
-    actual -= {PROOFS / name for name in ("policies.py", "reporting.py", "run.py", "source.py", "visibility.py")}
+    actual -= {PROOFS / name for name in ("policies.py", "reporting.py", "run.py", "source.py")}
     assert actual == expected, f"proof scripts and results registry disagree: {actual ^ expected}"
     assert not list(PROOFS.rglob("test_*.py")), "learning experiments belong in standalone scripts"
     pages = Counter(entry["page"] for entry in entries.values())

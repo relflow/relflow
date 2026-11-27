@@ -138,7 +138,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -166,7 +166,6 @@ import relflow as rf
 from policies import CONTROL
 from relflow.tensorfields.shared.resize import Resize
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 400
 
@@ -180,7 +179,7 @@ def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
 class Model(rf.Model):
     x = rf.Number
     entity = rf.Category()
-    label = rf.Category(**TARGET)
+    label = rf.Category(predict=True)
 
 
 def build(size: int) -> rf.Model:

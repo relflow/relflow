@@ -195,7 +195,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -225,7 +225,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import reconstruct
 
 BUDGET = 600
 BATCH_SIZE = 64
@@ -278,13 +277,13 @@ def condition(rows: list[dict], name: str, seed: int) -> list[dict]:
 
 
 def build() -> rf.Model:
-    pretrain = reconstruct(0.35)
+    pretrain = rf.reconstruct(rate=0.35)
 
     class Model(rf.Model):
-        channel = rf.Enum(values=CHANNELS, p_unavailable=0.0, **pretrain)
-        amount = rf.Number(**pretrain)
-        frequency = rf.Number(**pretrain)
-        nuisance = rf.Vector(n_dim=NUISANCE_DIM, **pretrain)
+        channel = rf.Enum(values=CHANNELS, p_unavailable=0.0, task=pretrain)
+        amount = rf.Number(task=pretrain)
+        frequency = rf.Number(task=pretrain)
+        nuisance = rf.Vector(n_dim=NUISANCE_DIM, task=pretrain)
 
     model = Model(preset=CONTROL.name, embed=True)
     return model

@@ -123,7 +123,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -150,7 +150,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 350
 LABELS = ("negative", "positive", "novel-negative", "novel-positive")
@@ -170,7 +169,7 @@ def records(*, rows: int, seed: int, shifted: bool = False) -> Iterator[dict]:
 class Model(rf.Model):
     x = rf.Number
     hint = rf.Category(p_unavailable=0.0)
-    label = rf.Category(p_unavailable=0.0, topk=[2], **TARGET)
+    label = rf.Category(p_unavailable=0.0, topk=[2], predict=True)
 
 
 def build() -> rf.Model:

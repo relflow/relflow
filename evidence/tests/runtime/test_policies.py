@@ -10,7 +10,6 @@ import relflow as rf
 import torch
 from pydantic import ValidationError
 from relflow.presets.base import resolve
-from visibility import TARGET, reconstruct
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
@@ -28,14 +27,14 @@ def historical():
 
 
 @pytest.mark.parametrize("split", ["train", "validate", "test", "predict"])
-def test_visibility_declarations_preserve_selection_on_each_split(split):
+def test_task_declarations_preserve_selection_on_each_split(split):
     model = rf.Model(
         preset="small",
         d_model=8,
-        label=rf.Number(**TARGET),
-        imputed=rf.Number(**reconstruct("held")),
-        sampled=rf.Number(**reconstruct(0.35)),
-        union=rf.Number(**reconstruct(0.35, "held")),
+        label=rf.Number(predict=True),
+        imputed=rf.Number(task=rf.reconstruct(query="held")),
+        sampled=rf.Number(task=rf.reconstruct(rate=0.35)),
+        union=rf.Number(task=(rf.reconstruct(rate=0.35), rf.reconstruct(query="held"))),
     )
     values = list(range(128))
     held = torch.tensor([i % 2 == 0 for i in values])
@@ -84,7 +83,7 @@ def test_class_policy_matches_historical_schema_seeded_weights_and_mutation_defa
 
     class Model(rf.Model):
         items = Item(length=4, overflow="tail")
-        label = rf.Boolean(**TARGET)
+        label = rf.Boolean(predict=True)
 
     previous = historical()
     torch.manual_seed(901)
@@ -92,7 +91,7 @@ def test_class_policy_matches_historical_schema_seeded_weights_and_mutation_defa
         schema=resolve(
             previous,
             items=rf.Branch(length=4, overflow="tail", amount=rf.Number, merchant=rf.Category),
-            label=rf.Boolean(**TARGET),
+            label=rf.Boolean(predict=True),
         )
     )
     old.preset = previous
@@ -103,7 +102,7 @@ def test_class_policy_matches_historical_schema_seeded_weights_and_mutation_defa
 
     for model in (old, current):
         torch.manual_seed(902)
-        model.extend(rf.where("address") == "/items", risk=rf.Number(**TARGET))
+        model.extend(rf.where("address") == "/items", risk=rf.Number(predict=True))
     assert current.schema.model_dump() == old.schema.model_dump()
     torch.testing.assert_close(current.state_dict(), old.state_dict(), rtol=0, atol=0)
     assert current.schema.requests["/items/risk"].n_heads == 2
@@ -114,7 +113,7 @@ def test_repeated_class_construction_owns_independent_state():
 
     class Model(rf.Model):
         merchant = rf.Category(topk=[2])
-        label = rf.Boolean(**TARGET)
+        label = rf.Boolean(predict=True)
 
     first = Model(preset=CONTROL.name)
     second = Model(preset=CONTROL.name)

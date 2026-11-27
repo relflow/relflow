@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 import relflow as rf
-from visibility import TARGET
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "experiments"))
@@ -128,7 +127,7 @@ def test_aggregation_readers_accept_named_scalar_outputs(name, target, arguments
         n_layers=1,
         n_heads=2,
         attention=None,
-        fields={"items": rf.Branch(length=5, value=rf.Number), target: rf.Number(**TARGET)},
+        fields={"items": rf.Branch(length=5, value=rf.Number), target: rf.Number(predict=True)},
     )
     rows = [
         {"items": [], "item_count": 0, "rank": "first", "selected_group": "A"},
@@ -151,7 +150,7 @@ def test_structure_readers_accept_named_scalar_outputs(name):
         n_heads=2,
         attention=None,
         items=rf.Branch(length=5, value=rf.Number),
-        total=rf.Number(**TARGET),
+        total=rf.Number(predict=True),
     )
     predicted = proof.prediction(model, [{"items": []}, {"items": [{"value": 2.0}]}], "items", "total")
     assert predicted.shape == (2,)
@@ -174,7 +173,7 @@ def test_peer_readers_score_real_items_without_cap_padding(name):
         n_layers=1,
         n_heads=2,
         attention=None,
-        items=rf.Branch(length=5, value=rf.Number, deviation=rf.Number(**TARGET)),
+        items=rf.Branch(length=5, value=rf.Number, deviation=rf.Number(predict=True)),
     )
     rows = [{"items": []}, {"items": [{"value": 2.0, "deviation": 0.0}, {"value": 3.0, "deviation": 0.0}]}]
     predicted = proof.predict(model, rows)
@@ -202,7 +201,7 @@ def test_subtotal_reader_preserves_each_observed_length_and_inferred_flag():
             length=proof.LENGTH,
             quantity=rf.Number,
             unit_price=rf.Number,
-            subtotal=rf.Number(**TARGET),
+            subtotal=rf.Number(predict=True),
         ),
     )
     rows = list(proof.records(rows=proof.LENGTH + 1, seed=31))

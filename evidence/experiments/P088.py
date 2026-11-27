@@ -122,7 +122,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -148,7 +148,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 400
 TRAIN_ROWS = 3072
@@ -224,7 +223,7 @@ def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: 
 
 class Model(rf.Model):
     measurement = rf.Number
-    target = rf.Enum(values=LABELS, **TARGET)
+    target = rf.Enum(values=LABELS, predict=True)
 
 
 @experiment("P088", seed=8801)

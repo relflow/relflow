@@ -151,13 +151,6 @@ class Request(RequestBase):
     objective: Objective = Objective.l2
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
 
-    @pydantic.model_validator(mode="before")
-    @classmethod
-    def check_checkpoint_scaling(cls, data: Any, info: pydantic.ValidationInfo) -> Any:
-        if isinstance(info.context, dict) and info.context.get("checkpoint") and isinstance(data, dict):
-            return {"encoder_rms": False, **data}
-        return data
-
     if TYPE_CHECKING:
 
         def __init__(
@@ -297,7 +290,6 @@ class TensorField(TensorFieldBase[TensorDict]):
 
 @text.register(Component.Embedder)
 class Embedder(FrozenEmbedder):
-    _version = 2  # PyTorch module metadata. Version 1 projected raw pooled vectors.
     backbone = CachedModel
 
     def __init__(self, schema: Schema, address: Address):
@@ -306,17 +298,6 @@ class Embedder(FrozenEmbedder):
         if self.request.encoder_rms:
             self.input_norm = torch.nn.RMSNorm(self.hidden_size, eps=1e-12, elementwise_affine=False)
         self.store = encoding(self.request) if self.request.cache else None
-
-    def _load_from_state_dict(
-        self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
-    ):
-        # Lightning can restore tensors into an already constructed, shape-compatible graph.
-        if local_metadata.get("version") == 1 and self.request.encoder_rms:
-            self.request.encoder_rms = False
-            self.input_norm = torch.nn.Identity()
-        super()._load_from_state_dict(
-            state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
-        )
 
     @property
     def context(self) -> Encoding | None:

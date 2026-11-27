@@ -88,7 +88,6 @@ import torch
 from policies import CONTROL
 from reporting import experiment, report
 from transformers import WhisperConfig, WhisperFeatureExtractor, WhisperModel
-from visibility import TARGET
 
 BUDGET = 80
 FIXTURE = Path(__file__).with_suffix(".npz")
@@ -134,7 +133,7 @@ def run(seed, steps, accelerator):
 
         class Tone(rf.Model):
             clip = rf.Audio(base=temporary, model=str(encoder), store=str(directory / "cache"), immutable=True)
-            pitch = rf.Enum("low", "high", **TARGET)
+            pitch = rf.Enum("low", "high", predict=True)
 
         model = Tone(preset=CONTROL.name)
         train_rng, val_rng, test_rng = np.random.default_rng(seed).spawn(3)

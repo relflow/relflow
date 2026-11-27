@@ -171,7 +171,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -206,7 +206,6 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import TARGET
 
 OPERATIONS = ("sum", "mean", "min", "max")
 GROUPS = ("A", "B", "C")
@@ -287,7 +286,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=12, n_layers=2, reduction=None)
-    answer = rf.Number(**TARGET, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
     operation = rf.Category(p_unavailable=0.0)
     selected_group = rf.Category(p_unavailable=0.0)
 

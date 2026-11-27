@@ -124,7 +124,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -153,7 +153,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 300
 CONTINUATION = 400
@@ -173,7 +172,7 @@ def records(*, rows: int, seed: int, phase: str = "initial") -> Iterator[dict]:
 
 class Model(rf.Model):
     x = rf.Number
-    label = rf.Category(p_unavailable=0.0, topk=[3], **TARGET)
+    label = rf.Category(p_unavailable=0.0, topk=[3], predict=True)
 
 
 def build() -> rf.Model:

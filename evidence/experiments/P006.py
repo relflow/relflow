@@ -129,7 +129,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -161,7 +161,6 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import TARGET
 
 ITEMS = 8
 
@@ -233,7 +232,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, reduction=None)
-    covariance = rf.Number(**TARGET, objective="mse")
+    covariance = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P006", seed=3508)

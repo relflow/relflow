@@ -120,7 +120,7 @@
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -150,7 +150,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 
 def records(*, rows: int, seed: int, signal: bool) -> Iterator[dict]:
@@ -178,7 +177,7 @@ class Model(rf.Model):
     segment = rf.Category(p_unavailable=0.0)
     tags = rf.Set(p_unavailable=0.0)
     leak = rf.Boolean
-    target = rf.Boolean(**TARGET)
+    target = rf.Boolean(predict=True)
 
 
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> float:

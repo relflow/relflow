@@ -66,7 +66,7 @@ def test_create_uses_next_numeric_id_without_reusing_gaps_or_publication_data(ro
     assert path == root / "experiments/P010.py"
     source = path.read_text()
     assert declaration(source) == Experiment("P010", 0)
-    assert environment(source)["dependencies"] == ["relflow>=0.5.0", "pyyaml>=6", "torch"]
+    assert environment(source)["dependencies"] == ["relflow>=0.6.0", "pyyaml>=6", "torch"]
     header = metadata(source)
     assert header["title"] == "A new question?"
     assert header["evidence-group"] == "Structure"

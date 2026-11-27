@@ -129,7 +129,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -154,7 +154,6 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
-from visibility import reconstruct
 
 BUDGET = 400
 IDENTITIES = 256
@@ -179,7 +178,7 @@ def records(*, rows: int, seed: int, cohort: int = 0) -> Iterator[dict]:
 class PredictionModel(rf.Model):
     entity = rf.Category(p_unavailable=0.2)
     context = rf.Category(p_unavailable=0.0)
-    label = rf.Category(p_unavailable=0.0, **reconstruct("hide"))
+    label = rf.Category(p_unavailable=0.0, task=rf.reconstruct(query="hide"))
 
 
 def build() -> rf.Model:

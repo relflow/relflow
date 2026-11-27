@@ -39,11 +39,9 @@ defaults change. A declaration refactor requires schema and initialization
 equivalence checks, with generators, seeds, budgets, controls and checks retained.
 It never establishes a fresh learning result or relabels an archived record.
 
-The shared `experiments/visibility.py` translates Evidence target declarations
-into keyword options supported by the installed wheel. Each proof owns its
-field types, selectors, and rates. Both roles run the same proof and helper
-bytes. The SDK schema determines which spelling represents a supervised leaf,
-reconstruction selection, or withheld input.
+Each proof owns its field types, selectors, and rates, declared with the
+schema options of the SDK it targets. Both roles run the same proof and helper
+bytes.
 
 Use independent training, validation, and test observations. Exclude target
 answers from inputs, control leakage, and test the declared generalization
@@ -305,7 +303,7 @@ Python documentation pages are maintained. Publications and exact proof sources
 come from verified CI report artifacts, cached outside Git. Local builds without
 an explicit publication show pending measurements. Hosted release versions fetch their
 matching public asset with the same run's plots. Branch and PR builds select
-the latest formal relflow release at version 0.5.0 or newer, keeping its measured revision and source
+the latest formal relflow release at version 0.6.0 or newer, keeping its measured revision and source
 provenance visible. Every full paired Evidence execution still retains
 observations without additional model calls. Routine CI keeps its reports and
 plots as Actions artifacts; only the Release workflow publishes
@@ -313,7 +311,7 @@ plots as Actions artifacts; only the Release workflow publishes
 published files are immutable. Missing or invalid assets for an actual release
 fail the build.
 Until a supported release exists, branch and PR measurements remain pending;
-pre-0.5 publications are preserved only in their historical releases.
+pre-0.6 publications are preserved only in their historical releases.
 Downloaded data is cached outside experiment sources and checked against
 GitHub's asset digest and the package source revision. Never edit generated
 pages as a second source. `make check` validates static sources and tooling;

@@ -117,7 +117,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -145,7 +145,6 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import TARGET
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -158,12 +157,12 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 class Model(rf.Model):
     a = rf.Number
     b = rf.Number
-    y = rf.Number(**TARGET, objective="mse")
+    y = rf.Number(predict=True, objective="mse")
 
 
 class RestrictedModel(rf.Model):
     a = rf.Number
-    y = rf.Number(**TARGET, objective="mse")
+    y = rf.Number(predict=True, objective="mse")
 
 
 def build(*, restricted: bool = False) -> rf.Model:

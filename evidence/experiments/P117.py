@@ -98,7 +98,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "representation"
@@ -119,7 +119,6 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 4096
@@ -132,13 +131,13 @@ ARMS = ("coordinates", "vector", "shuffled")
 class CoordinateModel(rf.Model):
     north = rf.Number
     east = rf.Number
-    position = rf.Coordinates(query=("latitude", "longitude"), **TARGET)
+    position = rf.Coordinates(query=("latitude", "longitude"), predict=True)
 
 
 class VectorModel(rf.Model):
     north = rf.Number
     east = rf.Number
-    position = rf.Vector(n_dim=2, **TARGET)
+    position = rf.Vector(n_dim=2, predict=True)
 
 
 def distance(first: np.ndarray, second: np.ndarray) -> np.ndarray:

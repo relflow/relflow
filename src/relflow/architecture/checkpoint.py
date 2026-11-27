@@ -137,7 +137,7 @@ class CheckpointState:
     @staticmethod
     def schema(state: dict[str, Any]) -> Schema:
         """Restore resolved field options, including defaults in effect when saved."""
-        return Schema.model_validate(state["schema"], context={"checkpoint": True})
+        return Schema.model_validate(state["schema"])
 
     @staticmethod
     def build(model_cls: type[M], state: dict[str, Any]) -> M:

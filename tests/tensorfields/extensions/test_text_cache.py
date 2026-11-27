@@ -233,29 +233,16 @@ def test_real_local_encoder_training_and_weight_invalidation(tmp_path, device):
     assert embedder.store.stats()["results"] > before
 
 
-def test_text_projection_scale_and_legacy_checkpoint(encoder, tmp_path):
+def test_text_projection_scales_pooled_inputs_to_unit_rms(encoder, tmp_path):
     source = pl.DataFrame({"events": [[{"body": "two"}, {"body": None}]]})
-    legacy = rf.Model(
+    model = rf.Model(
         d_model=8,
         n_layers=1,
         n_heads=2,
-        events=rf.Branch(length=2, body=rf.Text(model=MODEL, encoder_pooling="cls", encoder_rms=False, embed=True)),
+        events=rf.Branch(length=2, body=rf.Text(model=MODEL, encoder_pooling="cls", embed=True)),
     )
-    path = tmp_path / "model.ckpt"
-    legacy.save(path)
-    saved = torch.load(path, weights_only=False)
-    request = saved["schema"]["fields"]["fields"][0]["fields"][0]
-    del request["encoder_rms"]
-    torch.save(saved, path)
-    restored = rf.Model.load(path)
-    assert rf.inspect(path)["schema"]["fields"]["fields"][0]["fields"][0]["encoder_rms"] is False
-    assert restored.schema.requests["/events/body"].encoder_rms is False
-    assert restored.predict(source).equals(legacy.predict(source))
-
-    request["encoder_rms"] = True
-    restored.restore_checkpoint_state(saved)
-    embedder = restored.nodes["/events/body"].embedder
-    batch = restored.encode(source)["/events/body"]
+    embedder = model.nodes["/events/body"].embedder
+    batch = model.encode(source)["/events/body"]
     pristine = embedder.encode(content=batch.content, state=batch.state)
     seen = []
     hook = embedder.linear.register_forward_pre_hook(lambda module, args: seen.append(args[0].detach().clone()))
@@ -268,15 +255,9 @@ def test_text_projection_scale_and_legacy_checkpoint(encoder, tmp_path):
     torch.testing.assert_close(
         torch.nn.functional.normalize(projected[valued]), torch.nn.functional.normalize(pristine[valued])
     )
-    restored.save(path)
-    assert rf.Model.load(path).predict(source).equals(restored.predict(source))
-
-    # Lightning's tensor restore also accepts v1 weights in a matching user-constructed graph.
-    weights = saved["state_dict"]
-    weights._metadata["nodes./events/body.embedder"]["version"] = 1
-    restored.load_state_dict(weights)
-    assert restored.schema.requests["/events/body"].encoder_rms is False
-    assert restored.predict(source).equals(legacy.predict(source))
+    path = tmp_path / "model.ckpt"
+    model.save(path)
+    assert rf.Model.load(path).predict(source).equals(model.predict(source))
 
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])

@@ -103,7 +103,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -127,7 +127,6 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 GROUPS = ("quiet", "noisy")
@@ -146,7 +145,7 @@ def records(rows: int, seed: int):
 class PredictionModel(rf.Model):
     group = rf.Enum(values=GROUPS)
     x = rf.Number
-    answer = rf.Number(**TARGET, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

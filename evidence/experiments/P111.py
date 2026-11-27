@@ -209,7 +209,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -236,7 +236,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 4800
 EMA_DECAY = 0.99
@@ -319,7 +318,7 @@ def build(n_groups: int) -> rf.Model:
     class Model(rf.Model):
         entity = rf.Group(n_groups=n_groups, p_unavailable=0.0)
         x = rf.Number
-        y = rf.Number(**TARGET, objective="mse")
+        y = rf.Number(predict=True, objective="mse")
 
     return Model(preset=CONTROL.name)
 

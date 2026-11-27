@@ -102,7 +102,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "representation"
@@ -123,7 +123,6 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 4096
@@ -135,22 +134,22 @@ ARMS = ("ordinal_mae", "ordinal_mse", "number_mae", "number_mse", "shuffled")
 
 class OrdinalMae(rf.Model):
     signal = rf.Number
-    rank = rf.Ordinal(**TARGET)
+    rank = rf.Ordinal(predict=True)
 
 
 class OrdinalMse(rf.Model):
     signal = rf.Number
-    rank = rf.Ordinal(**TARGET, objective="mse")
+    rank = rf.Ordinal(predict=True, objective="mse")
 
 
 class NumberMae(rf.Model):
     signal = rf.Number
-    rank = rf.Number(**TARGET)
+    rank = rf.Number(predict=True)
 
 
 class NumberMse(rf.Model):
     signal = rf.Number
-    rank = rf.Number(**TARGET, objective="mse")
+    rank = rf.Number(predict=True, objective="mse")
 
 
 def records(*, rows: int, seed: int, condition: str):

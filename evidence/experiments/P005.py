@@ -128,7 +128,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -160,7 +160,6 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import TARGET
 
 TRAIN_MAX = 6
 CAPACITY = 12
@@ -220,7 +219,7 @@ class Item(rf.Branch):
 class PredictionModel(rf.Model):
     items = Item(length=CAPACITY, attention=None, n_layers=2, reduction=rf.Mean())
     item_count = rf.Number
-    total = rf.Number(**TARGET, objective="mse")
+    total = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P005", seed=3621)

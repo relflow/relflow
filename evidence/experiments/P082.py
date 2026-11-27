@@ -206,7 +206,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -235,7 +235,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import reconstruct
 
 BUDGET = 600
 BATCH_SIZE = 64
@@ -302,12 +301,12 @@ def condition(rows: list[dict], length: int, reverse: bool = False) -> list[dict
 
 
 def build() -> rf.Model:
-    pretrain = reconstruct(0.35)
+    pretrain = rf.reconstruct(rate=0.35)
 
     class Transaction(rf.Branch):
-        merchant = rf.Enum(values=MERCHANTS, p_unavailable=0.0, **pretrain)
-        amount = rf.Number(**pretrain)
-        interval_days = rf.Number(**pretrain)
+        merchant = rf.Enum(values=MERCHANTS, p_unavailable=0.0, task=pretrain)
+        amount = rf.Number(task=pretrain)
+        interval_days = rf.Number(task=pretrain)
         terminal = rf.Enum(values=TERMINALS, p_unavailable=0.0)
 
     class Model(rf.Model):

@@ -111,7 +111,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -137,7 +137,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 400
 TRAIN_ROWS = 4096
@@ -203,7 +202,7 @@ def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: 
 
 class Model(rf.Model):
     x = rf.Number
-    target = rf.Number(**TARGET, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P087", seed=8701)

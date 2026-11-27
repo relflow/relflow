@@ -183,7 +183,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -210,7 +210,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 LONG_BUDGET = 1500
@@ -284,7 +283,7 @@ def median(task: str, rows: list[dict]) -> np.ndarray:
 
 def build(task: str, inputs: str, target: str) -> rf.Model:
     scalar = rf.Quantile if inputs == "rank" else rf.Number
-    response = rf.Quantile(objective="mae", **TARGET) if target == "rank" else rf.Number(**TARGET)
+    response = rf.Quantile(objective="mae", predict=True) if target == "rank" else rf.Number(predict=True)
     if task in ("heavy", "moderate"):
 
         class Model(rf.Model):

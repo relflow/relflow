@@ -105,7 +105,7 @@
 #     "numpy",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -131,7 +131,6 @@ import pyarrow as pa
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import reconstruct
 
 BUDGET = 400
 ADAPT = 400
@@ -190,12 +189,12 @@ def records(rows: int, seed: int):
 
 
 def build() -> rf.Model:
-    pretrain = reconstruct(0.35)
+    pretrain = rf.reconstruct(rate=0.35)
 
     class PredictionModel(rf.Model):
-        first = rf.Enum(values=CODES, **pretrain)
-        second = rf.Enum(values=CODES, **pretrain)
-        geometry = rf.Vector(n_dim=16, **pretrain)
+        first = rf.Enum(values=CODES, task=pretrain)
+        second = rf.Enum(values=CODES, task=pretrain)
+        geometry = rf.Vector(n_dim=16, task=pretrain)
 
     return PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0, embed=True)
 

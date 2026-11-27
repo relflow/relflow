@@ -125,7 +125,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -151,7 +151,6 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
-from visibility import TARGET
 
 LENGTH = 5
 BUDGET = 800
@@ -184,7 +183,7 @@ def prepare(frame: pl.DataFrame) -> pl.DataFrame:
 
 class Event(rf.Branch):
     value = rf.Number(query="context.value")
-    answers = rf.Branch(length=1, reduction=None, value=rf.Number(objective="mse", **TARGET))
+    answers = rf.Branch(length=1, reduction=None, value=rf.Number(objective="mse", predict=True))
 
 
 class PredictionModel(rf.Model):

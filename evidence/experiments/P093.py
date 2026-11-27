@@ -107,7 +107,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -135,7 +135,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -179,7 +178,7 @@ class Observation(rf.Branch):
 class Model(rf.Model):
     observations = Observation(length=4, reduction=None)
     forecast_at = rf.Number
-    answer = rf.Number(**TARGET, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

@@ -113,7 +113,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -139,7 +139,6 @@ import pyarrow as pa
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 8192
@@ -251,7 +250,7 @@ def redact(frame: pl.DataFrame) -> pl.DataFrame:
 class Model(rf.Model):
     group = rf.Enum(values=GROUPS, p_unavailable=0.0)
     signal = rf.Number(query="observed.signal")
-    target = rf.Boolean(**TARGET)
+    target = rf.Boolean(predict=True)
 
 
 @experiment("P089", seed=8901)

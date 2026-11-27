@@ -110,7 +110,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -138,7 +138,6 @@ import polars as pl
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import TARGET
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:
@@ -184,7 +183,7 @@ def equal(first, second) -> bool:
 class PredictionModel(rf.Model):
     a = rf.Number
     b = rf.Number
-    y = rf.Number(**TARGET, objective="mse")
+    y = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P049", seed=4901)

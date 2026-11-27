@@ -113,7 +113,7 @@
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -145,7 +145,6 @@ import numpy as np
 import relflow as rf
 import torch
 from reporting import experiment, report
-from visibility import TARGET
 
 
 def records(years: Sequence[int], *, parity: int) -> Iterator[dict]:
@@ -175,7 +174,7 @@ def fit(
 
     class PredictionModel(rf.Model):
         observed_at = rf.Period(dateparts=list(dateparts))
-        target = rf.Category(**TARGET, p_unavailable=0.0)
+        target = rf.Category(predict=True, p_unavailable=0.0)
 
     model = PredictionModel(d_model=64, n_layers=3, n_heads=4)
     data = rf.SyntheticDataModule(train=train, validate=validate, seed=seed)

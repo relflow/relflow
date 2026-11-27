@@ -68,7 +68,7 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
     if version is not None and not VERSION.fullmatch(version):
         raise ValueError(f"Evidence publication requires a normalized package version, got {version!r}")
     if version is not None and not supported(version):
-        raise ValueError(f"Evidence publication requires relflow >=0.5.0, got {version}")
+        raise ValueError(f"Evidence publication requires relflow >=0.6.0, got {version}")
     endpoint = f"https://api.github.com/repos/{REPOSITORY}/releases/tags/"
     address = endpoint + "v" + version if version else f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
     package = download(address, missing=not required)
@@ -82,8 +82,8 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
         version = latest[1:]
     if not supported(version):
         if required:
-            raise ValueError(f"Evidence publication requires relflow >=0.5.0, got {version}")
-        print("No relflow >=0.5.0 release is available; Evidence measurements remain pending")
+            raise ValueError(f"Evidence publication requires relflow >=0.6.0, got {version}")
+        print("No relflow >=0.6.0 release is available; Evidence measurements remain pending")
         return None
     released = json.loads(package)
     revision = released.get("target_commitish", "")

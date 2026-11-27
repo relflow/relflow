@@ -158,7 +158,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -186,7 +186,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 600
 TRAIN_ROWS = 4096
@@ -216,7 +215,7 @@ def records(*, rows: int, seed: int, withheld: bool = False) -> Iterator[dict]:
 
 class Model(rf.Model):
     query = rf.Number
-    answer = rf.Number(**TARGET, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 class ContextModel(Model):

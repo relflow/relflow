@@ -62,7 +62,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "matplotlib", "numpy", "polars", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "matplotlib", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "training"
@@ -83,14 +83,13 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET, reconstruct
 
 
 class Calibration(rf.Model):
     primary = rf.Number
     secondary = rf.Number
-    settled = rf.Number(objective="mse", **TARGET)
-    meter = rf.Number(objective="mse", **reconstruct("review"))
+    settled = rf.Number(objective="mse", predict=True)
+    meter = rf.Number(objective="mse", task=rf.reconstruct(query="review"))
 
 
 def observations(seed, count):

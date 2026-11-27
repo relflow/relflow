@@ -101,7 +101,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "representation"
@@ -123,7 +123,6 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 2048
@@ -137,13 +136,13 @@ ARMS = ("duration", "number", "shuffled")
 class DurationEvent(rf.Branch):
     hint = rf.Number
     has_previous = rf.Boolean
-    gap = rf.Duration(query="at", delta=True, granularity="seconds", **TARGET)
+    gap = rf.Duration(query="at", delta=True, granularity="seconds", predict=True)
 
 
 class NumericEvent(rf.Branch):
     hint = rf.Number
     has_previous = rf.Boolean
-    gap = rf.Number(query="prepared_gap", **TARGET)
+    gap = rf.Number(query="prepared_gap", predict=True)
 
 
 class DurationModel(rf.Model):

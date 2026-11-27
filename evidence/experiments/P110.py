@@ -113,7 +113,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -142,7 +142,6 @@ import numpy as np
 import polars as pl
 import relflow as rf
 from reporting import experiment, report
-from visibility import TARGET, reconstruct
 
 BUDGET = 4800
 
@@ -199,9 +198,9 @@ def adjusted_rand(actual: np.ndarray, predicted: np.ndarray) -> float:
 
 
 class Model(rf.Model):
-    merchant_id = rf.Group(n_groups=5, **reconstruct(0.5), p_unavailable=0.0)
+    merchant_id = rf.Group(n_groups=5, task=rf.reconstruct(rate=0.5), p_unavailable=0.0)
     context = rf.Number
-    label = rf.Category(**TARGET, p_unavailable=0.0)
+    label = rf.Category(predict=True, p_unavailable=0.0)
 
 
 @experiment("P110", seed=11001)

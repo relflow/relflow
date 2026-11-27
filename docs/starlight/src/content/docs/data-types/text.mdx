@@ -55,8 +55,6 @@ format has its own namespace and warms as strings are encountered.
 
 The frozen encoder runs in float32 on CPU, including during mixed-precision
 training. On accelerators it uses the checkpoint and trainer precision.
-`rf.Model.load(path)` restores an older checkpoint’s encoder, pooling, and
-projection scale. Use the loaded model when resuming an older training run.
 
 The cache distinguishes encoder weights, tokenizer configuration, pooling,
 device type, and precision. It stores pristine values before training jitter,

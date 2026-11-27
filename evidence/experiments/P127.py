@@ -66,7 +66,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "structure"
@@ -87,7 +87,6 @@ import polars as pl
 import relflow as rf
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 320
 
@@ -100,7 +99,7 @@ def redact(frame: pl.DataFrame) -> pl.DataFrame:
 
 class Model(rf.Model):
     events = rf.Branch(length=10, marker=rf.Boolean)
-    separated = rf.Boolean(**TARGET)
+    separated = rf.Boolean(predict=True)
 
 
 def records(seed, pairs):

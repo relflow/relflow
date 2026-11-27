@@ -107,7 +107,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -135,7 +135,6 @@ import relflow as rf
 import torch
 from policies import CONTROL
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 500
 TRAIN_ROWS = 4096
@@ -159,7 +158,7 @@ def build(overflow: str) -> rf.Model:
 
     class Model(rf.Model):
         events = Event(length=CAPACITY, overflow=overflow, reduction=rf.Attention())
-        answer = rf.Number(**TARGET, objective="mse")
+        answer = rf.Number(predict=True, objective="mse")
 
     model = Model(preset=CONTROL.name)
     return model

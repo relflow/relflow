@@ -132,7 +132,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -158,7 +158,6 @@ import polars as pl
 import pyarrow as pa
 import relflow as rf
 from reporting import experiment, report
-from visibility import TARGET
 
 BUDGET = 300
 EFFECTS = {"rare-left": -1.0, "rare-right": 1.0, "cold": -1.0, "hot": 1.0}
@@ -186,7 +185,7 @@ def records(*, rows: int, seed: int, common_first: bool = False) -> Iterator[dic
 
 class PredictionModel(rf.Model):
     code = rf.Category(p_unavailable=0.0)
-    target = rf.Number(**TARGET, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

@@ -541,10 +541,10 @@ asset before publishing the package tag. New public assets use versioned
 `relflow-<version>-evidence*` filenames. The Release workflow refreshes `latest`
 after publishing Evidence and the package. `latest` requires frozen Evidence
 for the checkout's package version. Other branch and PR docs use the latest
-formal release at version >=0.5.0, or show pending measurements until one exists.
+formal release at version >=0.6.0, or show pending measurements until one exists.
 Tag docs require their matching frozen selection. Active Evidence
 comparisons require a supported baseline under the policy in `evidence/releases.py`;
-retain the actual event base separately when the fixed 0.5 anchor is selected.
+retain the actual event base separately when the fixed 0.6 anchor is selected.
 Ordinary CI retains reports and plots as Actions artifacts and creates no
 per-commit Evidence releases, publication commits, or pull requests. Experiments
 keep definitions and prose, with measured results outside their source files.
