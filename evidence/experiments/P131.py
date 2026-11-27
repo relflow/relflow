@@ -8,7 +8,7 @@
 # - {label: Reconstruction error, metric: [reconstruction_error], format: error}
 # evidence-review:
 #   question: Does a model learn both tasks from their respective inputs without reading either hidden answer?
-#   modeling: Each observation has two independent reference readings, a supervised result and a meter reading. A Boolean flag selects readings for reconstruction.
+#   modeling: Each observation has two independent reference readings. A supervised result, always hidden, follows the primary reference, while a meter reading follows the secondary reference and is reconstructed only where a Boolean review flag selects it.
 #   comparison:
 #     kind: Controlled comparison
 #     metric: Normalized RMSE
