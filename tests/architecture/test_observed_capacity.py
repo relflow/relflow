@@ -19,7 +19,10 @@ def events(*lengths: int) -> pa.Table:
 @pytest.mark.parametrize("reduction", [rf.Mean(), rf.Attention()], ids=["mean", "attention"])
 def test_training_raises_the_observed_capacity_and_evaluation_keeps_it(reduction, tmp_path):
     model = rf.Model(
-        preset="small", d_model=8, events=rf.Branch(reduction=reduction, amount=rf.Number), total=rf.Number(mask=True)
+        preset="small",
+        d_model=8,
+        events=rf.Branch(reduction=reduction, amount=rf.Number),
+        total=rf.Number(predict=True),
     )
     pool = model.nodes[EVENTS].encoder.pool
     assert pool.mass_capacity is None
@@ -39,7 +42,7 @@ def test_training_raises_the_observed_capacity_and_evaluation_keeps_it(reduction
 
 def test_bounded_branches_keep_their_static_capacity():
     model = rf.Model(
-        preset="small", d_model=8, events=rf.Branch(length=4, amount=rf.Number), total=rf.Number(mask=True)
+        preset="small", d_model=8, events=rf.Branch(length=4, amount=rf.Number), total=rf.Number(predict=True)
     )
     pool = model.nodes[EVENTS].encoder.pool
     assert pool.mass_capacity == 4

@@ -99,7 +99,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "matplotlib>=3.10", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "representation"
@@ -132,17 +132,17 @@ ARMS = ("mae", "mse", "enum", "shuffled")
 
 class OrdinalMae(rf.Model):
     signal = rf.Number
-    level = rf.Ordinal(values=LABELS, mask=True)
+    level = rf.Ordinal(values=LABELS, predict=True)
 
 
 class OrdinalMse(rf.Model):
     signal = rf.Number
-    level = rf.Ordinal(values=LABELS, mask=True, objective="mse")
+    level = rf.Ordinal(values=LABELS, predict=True, objective="mse")
 
 
 class EnumModel(rf.Model):
     signal = rf.Number
-    level = rf.Enum(*LABELS, mask=True, topk=[len(LABELS)])
+    level = rf.Enum(*LABELS, predict=True, topk=[len(LABELS)])
 
 
 def records(*, rows: int, seed: int):

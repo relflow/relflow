@@ -1,3 +1,4 @@
+import pkgutil
 import sys
 import uuid
 from decimal import Decimal
@@ -8,8 +9,10 @@ import pyarrow as pa
 import pytest
 from lightning.pytorch import Callback
 
+import relflow as rf
 from relflow.structs.enums import Component, Strata
 from relflow.structs.tree import Address, Node
+from relflow.tensorfields import extensions
 from relflow.tensorfields.base import (
     TENSORFIELDS,
     DecoderBase,
@@ -252,7 +255,7 @@ def test_custom_arrow_matcher_sees_extension_type_before_storage():
 
 
 def test_extension_prepare_decodes_dictionary_wrappers_recursively():
-    extension = Extension(name=extension_name("dictionary"), types=(str,))
+    extension = Extension(name=extension_name("dictionary"), types=(str,), lists=True)
     dictionary = pa.DictionaryArray.from_arrays(
         pa.array([0, 1, 0], type=pa.int8()),
         pa.array(["A", "B"]),
@@ -268,7 +271,7 @@ def test_extension_prepare_decodes_dictionary_wrappers_recursively():
 
 
 def test_extension_prepare_promotes_compatible_unions_recursively():
-    extension = Extension(name=extension_name("union"), types=(int | float,))
+    extension = Extension(name=extension_name("union"), types=(int | float,), lists=True)
     union = pa.UnionArray.from_dense(
         pa.array([0, 1, 0], type=pa.int8()),
         pa.array([0, 0, 1], type=pa.int32()),
@@ -608,3 +611,65 @@ def test_extension_unknown_attributes_follow_normal_python_lookup():
         assert not hasattr(extension, "not_real")
     finally:
         TENSORFIELDS.pop(extension.name, None)
+
+
+def test_builtin_extension_package_registers_every_extension_module():
+    modules = {module.name for module in pkgutil.iter_modules(extensions.__path__) if not module.ispkg}
+
+    assert set(extensions.__all__) == modules
+    assert all(getattr(extensions, name).__name__ == f"{extensions.__name__}.{name}" for name in modules)
+
+
+def test_extension_prepare_admits_list_records_only_when_declared():
+    scalar = Extension(name=extension_name("scalar"), types=(int,))
+    listed = Extension(name=extension_name("listed"), types=(int,), lists=True)
+    values = pa.array([[1, 2], [3]], type=pa.list_(pa.int64()))
+    try:
+        with pytest.raises(TypeError, match=rf"extension '{scalar.name}' at address '/value' expects one scalar value"):
+            scalar.prepare(values, address=Address("/value"))
+        nested = pa.DictionaryArray.from_arrays(pa.array([0, 1, 0], type=pa.int8()), values)
+        with pytest.raises(TypeError, match="expects one scalar value"):
+            scalar.prepare(nested, address=Address("/value"))
+        assert listed.prepare(values, address=Address("/value")) is values
+        with pytest.raises(TypeError, match="Extension lists must be a bool"):
+            Extension(name=extension_name("invalid"), types=(int,), lists=1)
+    finally:
+        TENSORFIELDS.pop(scalar.name, None)
+        TENSORFIELDS.pop(listed.name, None)
+
+
+def test_inherited_extensions_keep_or_replace_their_parent_list_policy():
+    kept = Extension.inherit(rf.Vector, name=extension_name("vectorlike"))
+    replaced = Extension.inherit(rf.Vector, name=extension_name("scalarvector"), lists=False)
+    try:
+        assert kept.lists and not replaced.lists
+    finally:
+        TENSORFIELDS.pop(kept.name, None)
+        TENSORFIELDS.pop(replaced.name, None)
+
+
+LABELS = pa.array([["a", "b"], ["b"]])
+FLAGS = pa.array([[1], [0]])
+
+
+@pytest.mark.parametrize(
+    ("field", "values"),
+    [
+        (rf.Category, LABELS),
+        (rf.Group(n_groups=2), LABELS),
+        (rf.Enum("a", "b"), LABELS),
+        (rf.Ordinal(values=("a", "b")), LABELS),
+        (rf.Period("day_of_week"), LABELS),
+        (rf.Boolean, FLAGS),
+        (rf.Number, FLAGS),
+        (rf.Hash, FLAGS),
+        (rf.Quantile, FLAGS),
+        (rf.Ordinal, FLAGS),
+    ],
+)
+@pytest.mark.parametrize("strata", [Strata.train, Strata.predict])
+def test_scalar_builtins_reject_list_valued_columns_by_address(field, values, strata):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, x=field, y=rf.Number)
+
+    with pytest.raises(TypeError, match=r"at address '/x' expects one scalar value per record, got list type"):
+        model.encode(pa.table({"x": values, "y": [1.0, 2.0]}), strata=strata)

@@ -22,7 +22,7 @@ def build() -> rf.Model:
         attention=None,
         merchant_id=rf.Group(
             n_groups=3,
-            mask=rf.Mask(rate=0.1, reconstruct=True),
+            task=rf.reconstruct(rate=0.1),
             p_unavailable=0.0,
         ),
     )
@@ -141,7 +141,7 @@ def test_group_decoder_does_not_condition_identity_on_row_siblings() -> None:
         d_model=8,
         merchant_id=rf.Group(
             n_groups=N_GROUPS,
-            mask=rf.Mask(rate=0.1, reconstruct=True),
+            task=rf.reconstruct(rate=0.1),
         ),
         amount=rf.Number,
     )

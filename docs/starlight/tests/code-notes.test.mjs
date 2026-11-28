@@ -99,6 +99,22 @@ writer = rf.Writer("predictions", format="ipc")`);
   assert.match(mediaNotes.find((note) => note.value.startsWith('store=')).text, /cache directory/);
 });
 
+test('schema visibility and reconstruction options have distinct notes', async () => {
+  const notes = await annotations(`amount = rf.Number(hide=0.2, task=rf.reconstruct(rate=0.1))
+history = rf.Branch(ablate=0.1, amount=amount)
+label = rf.Boolean(predict=True)`);
+  for (const [value, title] of [
+    ['hide', 'Hide training inputs'],
+    ['task', 'Learning task'],
+    ['rf.reconstruct', 'Reconstruction selection'],
+    ['ablate', 'Training ablation'],
+    ['predict=True', 'Prediction target'],
+  ]) {
+    assert.ok(notes.some((note) => note.value === value && note.title === title));
+  }
+  assert.deepEqual(await annotations('hide = values.is_null()'), []);
+});
+
 test('Duration delta notes stay attached to Duration calls', async () => {
   const notes = await annotations(
     'gap = rf.Duration(query="booked_at", delta=True, granularity="hours")',
@@ -129,24 +145,24 @@ def continue_training(network: rf.Model):
 
 test('comments, strings, escaped quotes, and multiline docstrings cannot inject Python notes', async () => {
   const code = String.raw`# model.fit(data, preset="small")
-description = '🙂 rf.Model(mask=True) and model.load(path)'
+description = '🙂 rf.Model(predict=True) and model.load(path)'
 escaped = "a \" rf.Number and model.load(path)"
 """model.fit(data)
-rf.Category(mask=True)
+rf.Category(predict=True)
 """
 message = "# not a comment: rf.Number"
-target = rf.Boolean(mask=True)  # rf.Number and model.save(path)`;
+target = rf.Boolean(predict=True)  # rf.Number and model.save(path)`;
   const notes = await annotations(code);
   assert.deepEqual(
     notes.map((note) => note.value),
-    ['rf.Boolean', 'mask=True'],
+    ['rf.Boolean', 'predict=True'],
   );
 });
 
 test('query string captures and indented schema fields retain linked-field annotations', async () => {
   const notes = await annotations(
     `class Delivery(rf.Model):
-    """amount = rf.Number(mask=True)"""
+    """amount = rf.Number(predict=True)"""
     amount = rf.Number
     elapsed = rf.Duration(query=("opened_at", "resolved_at"))`,
     'python',

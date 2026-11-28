@@ -46,7 +46,7 @@ def test_yaml_and_python_resolve_the_same_preset_schema(tmp_path, preset):
               cabin:
                 type: enum
                 values: [economy, business]
-                mask: true
+                predict: true
                 pooling: mean
         """,
     )
@@ -64,7 +64,7 @@ def test_yaml_and_python_resolve_the_same_preset_schema(tmp_path, preset):
             reduction=rf.Mean(),
             fields={
                 "length": rf.Number(objective="mse", dropout=None),
-                "cabin": rf.Enum(values=("economy", "business"), mask=True, pooling="mean"),
+                "cabin": rf.Enum(values=("economy", "business"), predict=True, pooling="mean"),
             },
         ),
     )
@@ -150,7 +150,7 @@ def test_python_overrides_replace_root_options_and_forward_runtime_configuration
     assert loaded.scheduler is scheduler
 
 
-def test_yaml_preserves_explicit_nulls_and_normalizes_mask_mappings(tmp_path):
+def test_yaml_preserves_explicit_nulls_and_parses_policy_keywords(tmp_path):
     path = template(
         tmp_path,
         """
@@ -160,24 +160,29 @@ def test_yaml_preserves_explicit_nulls_and_normalizes_mask_mappings(tmp_path):
         attention: null
         reduction: null
         dropout: null
-        mask:
-          rate: 0.2
+        hide: [redacted, 0.2]
+        ignore: [events]
+        task:
+          - kind: reconstruct
+            query: held
+            ignore: amount
+          - kind: reconstruct
+            rate: 0.15
+            ignore: [amount]
         fields:
           amount:
             type: number
             dropout: null
             decoder_position: null
-            mask:
-              - rate: 0.1
-              - skip: true
-                reconstruct: true
+            hide: [sensitive, 0.1]
+            predict: true
           events:
             type: branch
             attention: null
             reduction: null
             dropout: null
-            mask:
-              reconstruct: true
+            task:
+              kind: reconstruct
               rate: 0.3
             fields:
               kind:
@@ -193,17 +198,20 @@ def test_yaml_preserves_explicit_nulls_and_normalizes_mask_mappings(tmp_path):
         attention=None,
         reduction=None,
         dropout=None,
-        mask=rf.Mask(rate=0.2),
+        hide=("redacted", 0.2),
+        ignore="events",
+        task=(rf.reconstruct(query="held", ignore="amount"), rf.reconstruct(rate=0.15, ignore=("amount",))),
         amount=rf.Number(
             dropout=None,
             decoder_position=None,
-            mask=[rf.Mask(rate=0.1), rf.Mask(skip=True, reconstruct=True)],
+            hide=("sensitive", 0.1),
+            predict=True,
         ),
         events=rf.Branch(
             attention=None,
             reduction=None,
             dropout=None,
-            mask=rf.Mask(reconstruct=True, rate=0.3),
+            task=rf.reconstruct(rate=0.3),
             kind=rf.Category,
         ),
     )
@@ -257,7 +265,7 @@ def test_yaml_resolves_late_registered_extensions_and_their_validators(tmp_path)
                   payload:
                     type: {extension.name}
                     family: bytes
-                    mask: true
+                    predict: true
             """,
         )
         model = rf.Model.from_yaml(path)
@@ -266,7 +274,7 @@ def test_yaml_resolves_late_registered_extensions_and_their_validators(tmp_path)
         assert isinstance(request, Request)
         assert request.family == "bytes"
         assert request.n_heads == rf.presets.SMALL.leaf.n_heads
-        assert request.mask == rf.Number(mask=True).mask
+        assert request.predict is True
 
         path.write_text(path.read_text().replace("family: bytes", "family: unknown"))
         with pytest.raises(ValueError) as caught:
@@ -350,7 +358,7 @@ def test_yaml_model_predicts_nested_targets_and_exports_root_embedding(tmp_path)
                 type: number
               target:
                 type: number
-                mask: true
+                predict: true
                 pooling: mean
         """,
     )
@@ -374,6 +382,8 @@ def test_yaml_model_predicts_nested_targets_and_exports_root_embedding(tmp_path)
         ("preset: enormous\nfields: {}", "preset"),
         ("preset: 3\nfields: {}", "preset"),
         ("preset: small\nn_head: 2\nfields: {}", "n_head"),
+        ("preset: small\npredict: true\nfields: {}", "Set predict on a leaf or child branch"),
+        ("preset: small\nablate: 0.5\nfields: {}", "Set ablate on a leaf or child branch"),
         ("preset: small\nfields: []", "fields"),
         ("preset: small\nfields: {amount: {}}", "type"),
         ("preset: small\nfields: {amount: {type: missing}}", "missing"),
@@ -401,7 +411,7 @@ def test_invalid_templates_report_the_source_and_problem(tmp_path, content, frag
     [
         ("preset: small\npreset: small\nfields: {}", "preset"),
         ("preset: small\nfields:\n  amount: {type: number}\n  amount: {type: category}", "amount"),
-        ("preset: small\nfields: {amount: {type: number, mask: true, mask: false}}", "mask"),
+        ("preset: small\nfields: {amount: {type: number, predict: true, predict: false}}", "predict"),
         (
             """
             preset: small
@@ -453,9 +463,18 @@ def test_invalid_root_option_values_without_preset_report_the_source(tmp_path, o
     assert option in str(caught.value)
 
 
-@pytest.mark.parametrize("overrides", [{"preset": "sm"}, {"fields": {}}, {"n_head": 2}])
-def test_python_overrides_cannot_replace_template_fields_or_preset(tmp_path, overrides):
+@pytest.mark.parametrize(
+    "overrides", [{"preset": "sm"}, {"fields": {}}, {"n_head": 2}, {"predict": True}, {"ablate": 0.5}]
+)
+def test_python_overrides_reject_unsupported_model_options(tmp_path, overrides):
     path = template(tmp_path, "preset: small\nfields: {amount: {type: number}}")
 
     with pytest.raises(TypeError, match=next(iter(overrides))):
         rf.Model.from_yaml(path, **overrides)
+
+
+@pytest.mark.parametrize("override", [{"hide": ["flag"]}, {"task": {"query": "flag"}}, {"ignore": ["amount"]}])
+def test_yaml_python_overrides_use_sdk_policy_types(tmp_path, override):
+    path = template(tmp_path, "preset: small\nfields: {amount: {type: number}}")
+    with pytest.raises(ValueError, match=next(iter(override))):
+        rf.Model.from_yaml(path, **override)

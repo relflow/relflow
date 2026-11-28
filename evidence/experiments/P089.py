@@ -95,6 +95,7 @@
 # ### Population, controls, and scoring
 #
 # Generate 8,192 training, 1,024 validation, and 4,096 independent test rows with a 10% rare subgroup.
+# A preprocessor clears the observed signal record wherever its source flag is true.
 # All six group/signal cells have declared Bernoulli probabilities. One model receives 500 updates; no
 # threshold or checkpoint is selected on test. The cohort-shift condition changes rare-group frequency
 # to 40% while retaining conditional probabilities. Report proper expected loss and probability error
@@ -112,7 +113,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -182,7 +183,9 @@ def oracle(rows: list[dict], policy: str) -> np.ndarray:
 
 def prediction(model: rf.Model, rows: list[dict]) -> np.ndarray:
     visible = [{key: value for key, value in row.items() if key != "target"} for row in rows]
-    output = pl.DataFrame(model.predict(pa.Table.from_pylist(visible), batch_size=256))["predictions"].to_list()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(visible), preprocess=redact, batch_size=256))[
+        "predictions"
+    ].to_list()
     return np.asarray([row["target"]["content"]["probability"] for row in output], dtype=np.float64)
 
 
@@ -212,7 +215,9 @@ def score(predicted: np.ndarray, expected: np.ndarray, rows: list[dict], baselin
 
 def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: int | None, accelerator: str) -> int:
     """Fit the declared fixed-data protocol without checkpoint selection."""
-    data = rf.ArrowDataModule(train=train, validate=validate, num_workers=0, persistent_workers=False, pin_memory=False)
+    data = rf.ArrowDataModule(
+        preprocessor=redact, train=train, validate=validate, num_workers=0, persistent_workers=False, pin_memory=False
+    )
     model.fit(
         data,
         batch_size=64,
@@ -237,10 +242,15 @@ def fit(model: rf.Model, train: pa.Table, validate: pa.Table, seed: int, steps: 
     return int(model.trainer.global_step)
 
 
+@rf.preprocess
+def redact(frame: pl.DataFrame) -> pl.DataFrame:
+    return frame.with_columns(pl.when(~pl.col("hide_signal")).then(pl.struct("signal")).alias("observed"))
+
+
 class Model(rf.Model):
     group = rf.Enum(values=GROUPS, p_unavailable=0.0)
-    signal = rf.Number(mask=rf.Mask(query="hide_signal", skip=True, dropout=False))
-    target = rf.Boolean(mask=True)
+    signal = rf.Number(query="observed.signal")
+    target = rf.Boolean(predict=True)
 
 
 @experiment("P089", seed=8901)

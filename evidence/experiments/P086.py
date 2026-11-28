@@ -104,7 +104,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -174,7 +174,7 @@ def records(rows: int, seed: int, cohort: str):
 class PredictionModel(rf.Model):
     cohort = rf.Enum(values=COHORTS)
     x = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

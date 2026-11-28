@@ -13,7 +13,7 @@ from relflow.data.iterables import encode
 from relflow.structs.enums import Strata, TensorKey
 
 CASES = [
-    (rf.Period, [datetime(2026, 1, 1), None, datetime(2026, 2, 1)], {"dateparts": ["day_of_week"]}),
+    (rf.Period, [datetime(2026, 1, 1), None, datetime(2026, 2, 1)], {"parts": ["day_of_week"]}),
     (rf.Set, [["a", "b", "a"], [], None], {"p_unavailable": 0.0}),
     (rf.Group, ["a", None, "b"], {"n_groups": 3, "p_unavailable": 0.0}),
 ]
@@ -44,17 +44,17 @@ def nested(values):
 @pytest.mark.parametrize("objective", [False, True])
 @pytest.mark.parametrize("strata", list(Strata))
 def test_nested_target_roles_follow_reconstruction_owner(field_type, values, options, owner, objective, strata):
-    policy = rf.Mask(rate=0.5, reconstruct=objective)
+    policy = {"task": rf.reconstruct(rate=0.5)} if objective else {"hide": 0.5}
     model = rf.Model(
         preset="small",
         d_model=8,
         attention=None,
-        mask=policy if owner == "root" else False,
+        **(policy if owner == "root" else {}),
         events=rf.Branch(
             length=3,
             attention=None,
-            mask=policy if owner == "branch" else False,
-            value=field_type(mask=policy if owner == "leaf" else False, **options),
+            **(policy if owner == "branch" else {}),
+            value=field_type(**(policy if owner == "leaf" else {}), **options),
         ),
     )
     encoded = model.encode(nested(values), strata=strata)
@@ -85,7 +85,7 @@ def test_target_omission_preserves_prefetched_vocabulary_bindings(field_type, ob
         embed=True,
         value=field_type(
             p_unavailable=0.0,
-            mask=rf.Mask(query="selected", reconstruct=True) if objective else False,
+            task=rf.reconstruct(query="selected") if objective else None,
             **options,
         ),
     )

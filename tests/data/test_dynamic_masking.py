@@ -11,7 +11,7 @@ from relflow.tensorfields.base import TENSORFIELDS
 from tests.arrow import table as arrow_table
 
 
-def test_branch_query_skip_is_atomic_across_descendants():
+def test_branch_query_reconstruction_is_atomic_across_descendants():
     schema = rf.Schema.from_tree(
         n_layers=1,
         n_heads=2,
@@ -20,7 +20,7 @@ def test_branch_query_skip_is_atomic_across_descendants():
             amount=rf.Number,
             code=rf.Category,
             length=3,
-            mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True),
+            task=rf.reconstruct(query="selected"),
         ),
     )
     source = arrow_table(
@@ -38,29 +38,27 @@ def test_branch_query_skip_is_atomic_across_descendants():
     amount = projections["/items/amount"].single()
     code = projections["/items/code"].single()
 
-    assert amount.present.tolist() == code.present.tolist() == [True, False]
+    assert amount.present.tolist() == code.present.tolist() == [True, True]
     assert amount.trainable.tolist() == code.trainable.tolist() == [False, True]
     assert amount.visible.tolist() == code.visible.tolist() == [True, False]
 
     inputs, targets = amount.split()
     assert inputs.values.to_pylist() == [1.0]
-    assert inputs.dense.tolist() == [[[Tokens.valued.value, Tokens.padded.value]]]
+    assert inputs.dense.tolist() == [[[Tokens.valued.value, Tokens.masked.value]]]
     assert targets.values.to_pylist() == [2.0]
     assert targets.dense.tolist() == [[[Tokens.padded.value, Tokens.valued.value]]]
 
 
-def test_rate_skip_is_stable_for_one_batch_and_changes_by_epoch():
-    schema = rf.Schema.from_tree(
-        n_layers=1, n_heads=2, d_model=8, value=rf.Number(mask=rf.Mask(rate=0.5, skip=True, dropout=False))
-    )
+def test_rate_mask_is_stable_for_one_batch_and_changes_by_epoch():
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number(hide=0.5))
     source = arrow_table([{"value": float(index)} for index in range(512)])
 
     whole = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"].single()
     repeated = coalesce(source, schema, Strata.train, seed=17, epoch=3).fields["/value"].single()
     next_epoch = coalesce(source, schema, Strata.train, seed=17, epoch=4).fields["/value"].single()
 
-    assert np.array_equal(whole.present, repeated.present)
-    assert not np.array_equal(whole.present, next_epoch.present)
+    assert np.array_equal(whole.visible, repeated.visible)
+    assert not np.array_equal(whole.visible, next_epoch.visible)
 
 
 def test_query_and_rate_sample_only_eligible_owner_coordinates():
@@ -68,27 +66,23 @@ def test_query_and_rate_sample_only_eligible_owner_coordinates():
         n_layers=1,
         n_heads=2,
         d_model=8,
-        value=rf.Number(mask=rf.Mask(query="eligible", rate=0.5, skip=True, dropout=False)),
+        value=rf.Number(task=rf.reconstruct(query="eligible", rate=0.5)),
     )
     source = arrow_table([{"value": float(index), "eligible": index % 2 == 0} for index in range(256)])
 
     projection = coalesce(source, schema, Strata.train, seed=5, epoch=0).fields["/value"].single()
-    skipped = ~projection.present
+    skipped = ~projection.visible
 
     assert skipped.any()
     assert not skipped[1::2].any()
 
 
 @pytest.mark.parametrize(
-    "mask",
-    [
-        rf.Mask(query="selected"),
-        rf.Mask(query="selected", skip=True, dropout=False),
-        rf.Mask(query="selected", reconstruct=True),
-    ],
+    "options",
+    [{"hide": "selected"}, {"predict": True}, {"task": rf.reconstruct(query="selected")}],
 )
-def test_category_observes_pristine_values_before_mask_projection(mask):
-    configured = rf.Model(preset="small", d_model=8, value=rf.Category(mask=mask))
+def test_category_observes_pristine_values_before_mask_projection(options):
+    configured = rf.Model(preset="small", d_model=8, value=rf.Category(**options))
     source = arrow_table(
         [
             {"value": "hidden", "selected": True},
@@ -110,7 +104,7 @@ def test_category_observes_pristine_values_before_mask_projection(mask):
 
 
 def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
-    configured = rf.Model(preset="small", d_model=8, value=rf.Category(mask=rf.Mask(skip=True, dropout=False)))
+    configured = rf.Model(preset="small", d_model=8, value=rf.Category(predict=True))
     source = arrow_table([{"value": "A"}, {"value": "B"}])
     extension = TENSORFIELDS["category"]
     prepare = extension.prepare
@@ -135,7 +129,7 @@ def test_fully_skipped_source_is_prepared_and_observed(monkeypatch):
 
 
 def test_number_learns_pristine_moments_once_before_forward():
-    configured = rf.Model(preset="small", d_model=8, value=rf.Number(mask=rf.Mask(query="selected")))
+    configured = rf.Model(preset="small", d_model=8, value=rf.Number(hide="selected"))
     source = arrow_table(
         [
             {"value": 1.0, "selected": True},
@@ -188,18 +182,20 @@ def test_observation_learning_is_frozen_outside_training():
         ([1, 0], "must return Boolean"),
     ],
 )
-def test_query_selector_requires_non_null_scalar_booleans(selector, message):
-    schema = rf.Schema.from_tree(
-        n_layers=1, n_heads=2, d_model=8, value=rf.Number(mask=rf.Mask(query="selected", skip=True, dropout=False))
-    )
+@pytest.mark.parametrize(
+    ("field", "option"),
+    [(rf.Number(hide="selected"), "hide"), (rf.Number(task=rf.reconstruct(query="selected")), "reconstruct")],
+)
+def test_query_selector_requires_non_null_scalar_booleans(selector, message, field, option):
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=field)
     source = arrow_table([{"value": 1.0, "selected": selector[0]}, {"value": 2.0, "selected": selector[1]}])
 
-    with pytest.raises((TypeError, ValueError), match=message):
+    with pytest.raises((TypeError, ValueError), match=f"{option} query 'selected' at '/value' {message}"):
         coalesce(source, schema, Strata.train).fields
 
 
 def test_source_less_prediction_uses_vacancy_and_fixed_routing():
-    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, label=rf.Category(mask=True))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, label=rf.Category(predict=True))
     source = arrow_table([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict).fields["/label"].single()
@@ -216,7 +212,7 @@ def test_source_less_prediction_uses_vacancy_and_fixed_routing():
 
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate, Strata.test])
 def test_source_less_reconstruction_fails_outside_prediction(strata):
-    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number, label=rf.Category(mask=True))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, value=rf.Number, label=rf.Category(predict=True))
     source = arrow_table([{"value": 1.0}, {"value": 2.0}])
 
     with pytest.raises(ValueError, match="field 'label' is absent"):
@@ -224,9 +220,7 @@ def test_source_less_reconstruction_fails_outside_prediction(strata):
 
 
 def test_source_less_learned_mask_reconstruction_remains_present():
-    schema = rf.Schema.from_tree(
-        n_layers=1, n_heads=2, d_model=8, label=rf.Category(mask=rf.Mask(dropout=False, reconstruct=True))
-    )
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, label=rf.Category(task=rf.reconstruct()))
     source = arrow_table([{"unused": 1}, {"unused": 2}])
 
     projection = coalesce(source, schema, Strata.predict).fields["/label"].single()

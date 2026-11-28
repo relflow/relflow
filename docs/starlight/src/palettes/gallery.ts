@@ -222,7 +222,7 @@ function prepareDocument(html: string, url: URL, generation: number): string {
     note.dataset.paletteSampleNote = '';
     note.setAttribute('aria-label', 'Note');
     note.innerHTML =
-      '<p class="starlight-aside__title" aria-hidden="true">Note</p><div class="starlight-aside__content"><p>Target values stay out of the model’s inputs. Use <code>mask=True</code> for a supervised answer.</p></div>';
+      '<p class="starlight-aside__title" aria-hidden="true">Note</p><div class="starlight-aside__content"><p>Target values stay out of the model’s inputs. Use <code>predict=True</code> for a supervised answer.</p></div>';
     const firstHeading = content.querySelector('.sl-heading-wrapper');
     if (firstHeading) firstHeading.before(note);
     else content.prepend(note);

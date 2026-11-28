@@ -101,7 +101,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "representation"
@@ -136,13 +136,13 @@ ARMS = ("duration", "number", "shuffled")
 class DurationEvent(rf.Branch):
     hint = rf.Number
     has_previous = rf.Boolean
-    gap = rf.Duration(query="at", delta=True, granularity="seconds", mask=True)
+    gap = rf.Duration(query="at", delta=True, granularity="seconds", predict=True)
 
 
 class NumericEvent(rf.Branch):
     hint = rf.Number
     has_previous = rf.Boolean
-    gap = rf.Number(query="prepared_gap", mask=True)
+    gap = rf.Number(query="prepared_gap", predict=True)
 
 
 class DurationModel(rf.Model):

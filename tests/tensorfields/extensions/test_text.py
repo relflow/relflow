@@ -14,7 +14,6 @@ from relflow.data.ragged import RaggedField, Sources, coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import TENSORFIELDS, Context
 from relflow.tensorfields.extensions import text as text_extension
 from relflow.tensorfields.extensions.text import (
@@ -42,9 +41,11 @@ def build_schema(
     max_length: int = 4,
     objective: str = "l2",
     encoder_pooling: str = "cls",
+    encoder_rms: bool = True,
     encoder_batch_size: int = 2,
     tokenizer_batch_size: int | None = None,
-    mask: bool | Mask = False,
+    predict: bool = False,
+    task=None,
     jitter: Jitter | dict[str, object] | None = None,
 ) -> Schema:
     options = {}
@@ -66,8 +67,10 @@ def build_schema(
                 encoder_batch_size=encoder_batch_size,
                 cache=False,
                 encoder_pooling=encoder_pooling,
+                encoder_rms=encoder_rms,
                 objective=objective,
-                mask=mask,
+                predict=predict,
+                task=task,
                 **options,
             ),
         ),
@@ -125,8 +128,9 @@ class FakeTokenizer:
         }
 
 
-class FakeHFModel:
+class FakeHFModel(torch.nn.Module):
     def __init__(self, hidden_size: int = 4):
+        super().__init__()
         self.config = SimpleNamespace(hidden_size=hidden_size)
         self.device = torch.device("cpu")
         self.calls = 0
@@ -197,7 +201,10 @@ def test_text_request_is_available_in_structure():
 def test_text_request_uses_default_model():
     request = rf.Text()
 
-    assert request.model == DEFAULT_TEXT_MODEL
+    assert request.model == DEFAULT_TEXT_MODEL == "sentence-transformers/all-MiniLM-L6-v2"
+    assert request.encoder_pooling == "mean" and request.encoder_rms
+    assert rf.Text(model="other").encoder_pooling == "cls"
+    assert rf.Text(encoder_pooling="cls").encoder_pooling == "cls"
 
 
 def test_text_request_rejects_blank_model():
@@ -310,6 +317,16 @@ def test_text_shared_model_moves_with_shared_device_state(monkeypatch: pytest.Mo
     assert fake_model.device == torch.device("cpu")
 
 
+def test_frozen_device_transfer_retains_buffer_version_counters():
+    module = torch.nn.Module()
+    module.register_buffer("positions", torch.arange(4))
+    frozen = CachedModel("position-buffer", module, 4)
+    with torch.inference_mode():
+        frozen.module_for(torch.device("meta"))
+    assert not torch.is_inference(module.positions)
+    assert module.positions._version >= 0
+
+
 def test_text_tensorfield_tokenizes_strings(monkeypatch: pytest.MonkeyPatch):
     patch_hf(monkeypatch)
 
@@ -397,7 +414,7 @@ def test_text_tokenizes_unique_strings_and_restores_sparse_coordinates(
         if objective
         else target
     )
-    schema = build_schema(max_length=max_length, tokenizer_batch_size=2, mask=objective)
+    schema = build_schema(max_length=max_length, tokenizer_batch_size=2, predict=objective)
     present = torch.from_numpy(states != Tokens.padded).reshape(target.shape)
     trainable = present.clone() if objective else torch.zeros_like(present)
     inferred = torch.zeros_like(present)
@@ -463,7 +480,7 @@ def test_text_jitters_only_training_valued_finite_embeddings(
 ):
     patch_hf(monkeypatch)
 
-    schema = build_schema(d_model=4, n_heads=2, jitter=Jitter(add=0.5, normalize=normalize))
+    schema = build_schema(d_model=4, n_heads=2, encoder_rms=False, jitter=Jitter(add=0.5, normalize=normalize))
     field = tensorfield(
         values=[[["alpha", None]], [["gamma", "delta"]]],
         schema=schema,
@@ -508,7 +525,7 @@ def test_text_forward_never_reads_reconstruction_targets(
 
     schema = build_schema(
         encoder_batch_size=2,
-        mask=Mask(reconstruct=True),
+        task=rf.reconstruct(),
     )
     field = tensorfield(
         values=values(),
@@ -708,7 +725,7 @@ def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.M
 
     schema = build_schema(
         jitter=Jitter(add=0.5),
-        mask=Mask(reconstruct=True),
+        task=rf.reconstruct(),
     )
     field = tensorfield(values=values(), schema=schema, strata=Strata.train)
     embedder = Embedder(schema=schema, address=ADDRESS)
@@ -748,7 +765,7 @@ def test_text_loss_encodes_pristine_targets_without_jitter(monkeypatch: pytest.M
 def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch, objective: str, expected: float):
     patch_hf(monkeypatch)
 
-    schema = build_schema(objective=objective, mask=Mask(reconstruct=True))
+    schema = build_schema(objective=objective, task=rf.reconstruct())
     field = tensorfield(
         values=values(),
         schema=schema,
@@ -782,7 +799,7 @@ def test_text_loss_reconstructs_frozen_embedding(monkeypatch: pytest.MonkeyPatch
 def test_text_evaluation_metrics_accumulate_across_unequal_batches(monkeypatch: pytest.MonkeyPatch):
     patch_hf(monkeypatch)
 
-    schema = build_schema(mask=Mask(reconstruct=True))
+    schema = build_schema(task=rf.reconstruct())
     embedder = Embedder(schema=schema, address=ADDRESS)
     decoder = Decoder(schema=schema, address=ADDRESS)
     module = DummyModule(schema, embedder, decoder)

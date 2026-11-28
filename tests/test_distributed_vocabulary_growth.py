@@ -226,16 +226,16 @@ class GrowthAudit(lit.Callback):
 
 def train(directory, bucket_view, accumulation, init_sync):
     lit.seed_everything(31415, workers=True)
-    selected = rf.Mask(query="selected", reconstruct=True)
+    selected = rf.reconstruct(query="selected")
     model = rf.Model(
         d_model=8,
         n_layers=1,
         n_heads=2,
         batch_size=2,
-        category=rf.Category(p_unavailable=0, mask=selected),
-        tags=rf.Set(p_unavailable=0, mask=selected),
-        group=rf.Group(n_groups=2, p_unavailable=0, mask=selected),
-        outcome=rf.Boolean(mask=True),
+        category=rf.Category(p_unavailable=0, task=selected),
+        tags=rf.Set(p_unavailable=0, task=selected),
+        group=rf.Group(n_groups=2, p_unavailable=0, task=selected),
+        outcome=rf.Boolean(predict=True),
     )
     # Visible rows train the input embeddings through outcome; masked rows train each vocabulary decoder.
     records = []

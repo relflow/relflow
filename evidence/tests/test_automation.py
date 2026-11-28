@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -466,23 +467,36 @@ def test_workflow_never_promotes_pr_runs_or_installs_model_runtime():
     assert "evidence" in release["jobs"]["publish"]["needs"]
 
 
+@pytest.mark.parametrize("name", ["release.yml", "publish-evidence.yml", "coverage.yml"])
+def test_publication_workflows_pin_external_actions(name):
+    workflow = Path(__file__).resolve().parents[2] / ".github/workflows" / name
+    jobs = yaml.safe_load(workflow.read_text())["jobs"]
+    for job in jobs.values():
+        for step in job.get("steps", []):
+            action = step.get("uses")
+            if action and not action.startswith("./"):
+                assert re.fullmatch(r"[^@]+@[0-9a-f]{40}", action), action
+
+
 def test_ci_attempts_keep_all_artifacts_and_checkpoint_consumers_separate():
     workflows = Path(__file__).resolve().parents[2] / ".github/workflows"
     for name in ("tests.yml", "docs.yml", "publish-evidence.yml", "evidence-hosted.yml", "evidence.yml"):
         value = yaml.safe_load((workflows / name).read_text())
         for job in value["jobs"].values():
             for step in job.get("steps", []):
-                if step.get("uses") == "actions/upload-artifact@v4":
+                if step.get("uses", "").startswith("actions/upload-artifact@"):
                     assert "github.run_attempt" in step["with"]["name"], (name, step)
     tests = yaml.safe_load((workflows / "tests.yml").read_text())["jobs"]
     checkpoint = next(
         step["with"]["name"]
         for step in tests["checkpoint"]["steps"]
-        if step.get("uses") == "actions/upload-artifact@v4"
+        if step.get("uses", "").startswith("actions/upload-artifact@")
     )
     for name in ("suite", "preview"):
         downloads = [
-            step["with"]["name"] for step in tests[name]["steps"] if step.get("uses") == "actions/download-artifact@v4"
+            step["with"]["name"]
+            for step in tests[name]["steps"]
+            if step.get("uses", "").startswith("actions/download-artifact@")
         ]
         assert checkpoint in downloads
     coverage = yaml.safe_load((workflows / "coverage.yml").read_text())["jobs"]
@@ -490,7 +504,7 @@ def test_ci_attempts_keep_all_artifacts_and_checkpoint_consumers_separate():
         step["with"]["name"]
         for job in coverage.values()
         for step in job["steps"]
-        if step.get("uses") == "actions/download-artifact@v4"
+        if step.get("uses", "").startswith("actions/download-artifact@")
     ]
     assert downloads == ["coverage-attempt-${{ github.event.workflow_run.run_attempt }}"]
 

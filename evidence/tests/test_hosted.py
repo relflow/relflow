@@ -107,9 +107,9 @@ def planned(tmp_path, monkeypatch, request):
                 "schema": 1,
                 "event_base": "e" * 40,
                 "baseline": request["baseline"],
-                "reason": "pre-0.5",
-                "candidate_version": "0.5.0",
-                "baseline_version": "0.5.0",
+                "reason": "pre-0.6",
+                "candidate_version": "0.6.0",
+                "baseline_version": "0.6.0",
             }
         )
     )

@@ -101,6 +101,23 @@ def equivalent(target: pa.DataType, actual: pa.DataType) -> bool:
     return target.equals(actual)
 
 
+def nullable(field: pa.Field) -> pa.Field:
+    """Return ``field`` with every level nullable, as Polars renders nulls."""
+
+    datatype = field.type
+    if pa.types.is_struct(datatype):
+        datatype = pa.struct([nullable(child) for child in datatype])
+    elif pa.types.is_fixed_size_list(datatype):
+        datatype = pa.list_(nullable(datatype.value_field), datatype.list_size)
+    elif pa.types.is_large_list(datatype):
+        datatype = pa.large_list(nullable(datatype.value_field))
+    elif pa.types.is_list(datatype):
+        datatype = pa.list_(nullable(datatype.value_field))
+    elif pa.types.is_map(datatype):
+        datatype = pa.map_(datatype.key_type, nullable(datatype.item_field).type, datatype.keys_sorted)
+    return field.with_type(datatype).with_nullable(True)
+
+
 def arrow(value: pl.DataFrame, *, context: str, schema: pa.Schema | None = None) -> pa.Table:
     """Convert one eager Polars frame to the canonical Arrow representation.
 
@@ -126,6 +143,13 @@ def arrow(value: pl.DataFrame, *, context: str, schema: pa.Schema | None = None)
     )
     if table.schema.equals(restored, check_metadata=True):
         return table
+    try:
+        return table.cast(restored)
+    except (pa.ArrowInvalid, ValueError):
+        # A processor may null values a source field declared non-null; keep
+        # the source type and relax only its nullability.
+        for index, field in enumerate(restored):
+            restored = restored.set(index, nullable(field))
     try:
         return table.cast(restored)
     except (pa.ArrowInvalid, ValueError) as error:

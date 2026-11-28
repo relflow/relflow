@@ -131,8 +131,90 @@ def accept(source: ArrowInput, *, strata: Strata) -> ArrowSource:
     )
 
 
+def unview(datatype: pa.DataType) -> pa.DataType:
+    """Replace view layouts, which most compute kernels lack, with ordinary ones.
+
+    String and binary views become large layouts; list views become the list
+    layout of the same width, rebuilt by ``relist``.
+    """
+
+    if pa.types.is_string_view(datatype):
+        return pa.large_string()
+    if pa.types.is_binary_view(datatype):
+        return pa.large_binary()
+    if pa.types.is_struct(datatype):
+        return pa.struct([field.with_type(unview(field.type)) for field in datatype])
+    if pa.types.is_map(datatype):
+        return pa.map_(unview(datatype.key_type), unview(datatype.item_type), datatype.keys_sorted)
+    if pa.types.is_dictionary(datatype):
+        value = unview(datatype.value_type)
+        return pa.dictionary(datatype.index_type, value, datatype.ordered)  # pyrefly: ignore[bad-specialization]
+    if pa.types.is_fixed_size_list(datatype):
+        return pa.list_(datatype.value_field.with_type(unview(datatype.value_type)), datatype.list_size)
+    if pa.types.is_list(datatype):
+        return pa.list_(datatype.value_field.with_type(unview(datatype.value_type)))
+    if pa.types.is_list(datatype) or pa.types.is_list_view(datatype):
+        return pa.list_(datatype.value_field.with_type(unview(datatype.value_type)))
+    if pa.types.is_large_list(datatype) or pa.types.is_large_list_view(datatype):
+        return pa.large_list(datatype.value_field.with_type(unview(datatype.value_type)))
+    return datatype
+
+
+def views(datatype: pa.DataType) -> bool:
+    """Whether a list view occurs anywhere in ``datatype``."""
+
+    if pa.types.is_list_view(datatype) or pa.types.is_large_list_view(datatype):
+        return True
+    return any(views(datatype.field(index).type) for index in range(datatype.num_fields))
+
+
+def relist(array: pa.Array) -> pa.Array:
+    """Rebuild list views as list layouts from their logical values and lengths.
+
+    Arrow's own cast from a list view can emit offsets that fail validation.
+    """
+
+    datatype = array.type
+    if not views(datatype):
+        return array
+    mask = array.is_null() if array.null_count else None
+    if pa.types.is_struct(datatype):
+        struct = cast(pa.StructArray, array)
+        children = [relist(struct.field(index)) for index in range(datatype.num_fields)]
+        fields = [datatype.field(index).with_type(child.type) for index, child in enumerate(children)]
+        return pa.StructArray.from_arrays(children, fields=fields, mask=mask)
+    if pa.types.is_list_view(datatype) or pa.types.is_large_list_view(datatype):
+        listed = cast(pa.ListViewArray | pa.LargeListViewArray, array)
+        values = relist(listed.flatten())
+        lengths = listed.value_lengths().fill_null(0).to_numpy(zero_copy_only=False)
+        offsets = np.concatenate([[0], np.cumsum(lengths, dtype=np.int64)])
+        large = pa.types.is_large_list_view(datatype)
+    elif pa.types.is_list(datatype) or pa.types.is_large_list(datatype):
+        listed = cast(pa.ListArray | pa.LargeListArray, array)
+        start, stop = listed.offsets[0].as_py(), listed.offsets[-1].as_py()
+        values = relist(listed.values.slice(start, stop - start))
+        offsets = listed.offsets.to_numpy() - start
+        large = pa.types.is_large_list(datatype)
+    else:
+        raise TypeError(f"Arrow list views inside {datatype} are unsupported; cast them to lists before relflow")
+    field = datatype.value_field.with_type(values.type)
+    if large:
+        return pa.LargeListArray.from_arrays(
+            pa.array(offsets, type=pa.int64()), values, type=pa.large_list(field), mask=mask
+        )
+    return pa.ListArray.from_arrays(pa.array(offsets, type=pa.int32()), values, type=pa.list_(field), mask=mask)
+
+
+def unviewed(schema: pa.Schema) -> pa.Schema:
+    """Return ``schema`` with every view layout replaced, keeping names, nullability, and metadata."""
+
+    for index, field in enumerate(schema):
+        schema = schema.set(index, field.with_type(unview(field.type)))
+    return schema
+
+
 def convert(unit: ArrowUnit) -> pa.Table:
-    """Normalize one Arrow unit to a table."""
+    """Normalize one Arrow unit to a table without view layouts."""
 
     if isinstance(unit, pa.RecordBatch):
         table = pa.Table.from_batches([unit])
@@ -142,7 +224,14 @@ def convert(unit: ArrowUnit) -> pa.Table:
         raise TypeError(f"Arrow factories must yield Table or RecordBatch; got {type(unit).__name__}")
     if table.num_columns == 0:
         raise ValueError("Arrow observations must contain at least one column")
-    return table
+    schema = unviewed(table.schema)
+    if schema.equals(table.schema, check_metadata=True):
+        return table
+    for index, field in enumerate(table.schema):
+        if views(field.type):
+            chunks = [relist(chunk) for chunk in table.column(index).chunks] or [relist(pa.array([], field.type))]
+            table = table.set_column(index, field.with_type(chunks[0].type), pa.chunked_array(chunks))
+    return table.cast(schema)
 
 
 def scan(
@@ -193,6 +282,7 @@ def scan(
     try:
         declared = stream.schema if isinstance(stream, pa.RecordBatchReader) else declared
         if declared is not None:
+            declared = unviewed(declared)
             lock(schemas, "source", declared, context="Arrow source schema changed")
 
         emitted = False
@@ -513,6 +603,10 @@ class ArrowDataset(IterableDataset[Encoded]):
             worker=worker if sharded else 0,
             workers=workers if sharded else 1,
         )
+        # Sharded workers own disjoint rows, so each draws its own sample and
+        # shuffle streams; a shared stream would align their permutations.
+        # Replaying workers must agree on one stream to divide its batches.
+        stream = f"{worker}/{workers}" if sharded else ""
         try:
             batches: Iterable[pa.Table] = process(
                 scanned,
@@ -525,7 +619,7 @@ class ArrowDataset(IterableDataset[Encoded]):
             batches = sample(
                 batches,
                 rate=self.options.sample,
-                random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="sample"),
+                random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation=f"sample{stream}"),
             )
 
             if isinstance(self.source, (pa.Table, pa.RecordBatch)):
@@ -534,7 +628,7 @@ class ArrowDataset(IterableDataset[Encoded]):
                 if self.options.shuffle and materialized is not None:
                     materialized = arrange(
                         materialized,
-                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation=f"shuffle{stream}"),
                     )
                     batches = (materialized,)
                 batches = limit(batches, size=self.options.epoch_size)
@@ -549,7 +643,7 @@ class ArrowDataset(IterableDataset[Encoded]):
                     batches = shuffle(
                         batches,
                         rows=self.options.shuffle_rows,
-                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation="shuffle"),
+                        random=randomizer(self.seed, strata=self.strata, epoch=epoch, operation=f"shuffle{stream}"),
                     )
                 batches = limit(batches, size=self.options.epoch_size)
 

@@ -8,7 +8,6 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.base import Context
 from relflow.tensorfields.extensions.hashable import (
     Decoder,
@@ -29,7 +28,8 @@ def build_schema(
     n_bands: int = 4,
     offset: int = 2,
     n_buckets: int = 4,
-    mask: bool | Mask = False,
+    predict: bool = False,
+    task=None,
 ) -> Schema:
     return rf.Schema.from_tree(
         d_model=16,
@@ -38,7 +38,14 @@ def build_schema(
         dropout=0.1,
         items=rf.Branch(
             length=length,
-            identifier=rf.Hash(n_hashes=n_hashes, n_bands=n_bands, offset=offset, n_buckets=n_buckets, mask=mask),
+            identifier=rf.Hash(
+                n_hashes=n_hashes,
+                n_bands=n_bands,
+                offset=offset,
+                n_buckets=n_buckets,
+                predict=predict,
+                task=task,
+            ),
         ),
     )
 
@@ -197,7 +204,7 @@ def test_hashable_tensorfield_rejects_non_scalar_values():
         [[[5, 6], [7, 8]]],
     ]
 
-    with pytest.raises(ValueError, match="expects scalar Arrow values"):
+    with pytest.raises(TypeError, match="expects one scalar value per record"):
         tensorfield(
             values=values,
             schema=schema,
@@ -214,7 +221,7 @@ def test_hashable_rejects_arrow_struct_values():
 
 
 def test_hashable_reconstruction_projects_targets_before_zeroing_input():
-    schema = build_schema(n_hashes=4, mask=Mask(reconstruct=True))
+    schema = build_schema(n_hashes=4, task=rf.reconstruct())
     values = [
         [["a", "b"]],
         [["c", "d"]],
@@ -273,7 +280,7 @@ def test_hashable_hashes_are_stable_across_calls():
 
 @pytest.mark.parametrize("n_buckets", [2, 5, 16])
 def test_hashable_loss_bucket_boundaries_and_null_gradients(n_buckets, monkeypatch):
-    model = rf.Model(preset="small", d_model=8, id=rf.Hash(n_hashes=2, n_buckets=n_buckets, mask=True))
+    model = rf.Model(preset="small", d_model=8, id=rf.Hash(n_hashes=2, n_buckets=n_buckets, predict=True))
     field = model.encode(pa.table({"id": ["low", "negative", "zero", "high", None]}), strata="train")["/id"]
     raw = torch.tensor([-(2**63), -(2**62), 0, 2**63 - 1, 0], dtype=torch.int64)
     field.targets[TensorKey.content].copy_(raw[:, None, None].expand(-1, 1, 2))
@@ -343,7 +350,7 @@ def test_hashable_training_loss_covers_state_and_content_heads():
     n_buckets = 4
     model = rf.Model(
         preset="small",
-        items=rf.Branch(id=rf.Hash(n_hashes=n_hashes, n_buckets=n_buckets, mask=rf.Mask(reconstruct=True)), length=3),
+        items=rf.Branch(id=rf.Hash(n_hashes=n_hashes, n_buckets=n_buckets, task=rf.reconstruct()), length=3),
         d_model=8,
         batch_size=2,
     )
@@ -372,7 +379,7 @@ def test_hashable_training_loss_covers_state_and_content_heads():
 @pytest.mark.parametrize("batch_size", [1, 2, 3])
 def test_hashable_evaluation_accuracy_counts_valued_targets_across_unequal_batches(batch_size, tmp_path):
     torch.manual_seed(0)
-    model = rf.Model(preset="small", d_model=8, id=rf.Hash(n_hashes=2, n_buckets=4, mask=True))
+    model = rf.Model(preset="small", d_model=8, id=rf.Hash(n_hashes=2, n_buckets=4, predict=True))
     rows = table([{"id": "alpha"}, {"id": "beta"}, {"id": None}])
     data = rf.ArrowDataModule(model, validate=rows)
     values = model.validate(
@@ -440,7 +447,7 @@ def hashable_model(**kwargs) -> "rf.Model":
 
 
 def test_hashable_fields_keep_state_embeddings_and_decoders_local():
-    model = hashable_model(mask=True)
+    model = hashable_model(predict=True)
     items = model.nodes["/items/id"]
     owner = model.nodes["/owner"]
 
@@ -542,7 +549,7 @@ def test_validation_and_prediction_preserve_identical_key_payload_context():
         dropout=0.0,
         owner=rf.Hash(n_hashes=4),
         items=rf.Branch(length=4, id=rf.Hash(n_hashes=4), value=rf.Number, reduction=None),
-        target=rf.Number(mask=True),
+        target=rf.Number(predict=True),
     ).eval()
     records = table(
         [

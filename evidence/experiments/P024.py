@@ -111,7 +111,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -185,7 +185,7 @@ class MemoryRecord(rf.Branch):
     entity_id = rf.Hash(n_hashes=4, n_bands=8)
     role = rf.Category(p_unavailable=0.0)
     is_query = rf.Boolean
-    value = rf.Number(mask=rf.Mask(query="is_query", dropout=False, reconstruct=True), objective="mse")
+    value = rf.Number(task=rf.reconstruct(query="is_query"), objective="mse")
 
 
 class PredictionModel(rf.Model):

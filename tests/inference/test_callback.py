@@ -44,7 +44,7 @@ def test_writer_persists_the_written_arrow_table(tmp_path):
 
 @pytest.mark.parametrize("format", ["parquet", "ipc"])
 def test_finish_publishes_a_typed_empty_prediction(tmp_path, format):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Boolean(predict=True))
     schema = pa.schema([("id", pa.string()), ("amount", pa.float64())])
     writer = rf.Writer(tmp_path, format=format)
     writer.finish(model, schema, retain=("id",))
@@ -59,7 +59,7 @@ def test_finish_publishes_a_typed_empty_prediction(tmp_path, format):
 
 
 def test_finish_requires_a_schema_for_an_empty_prediction(tmp_path):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(mask=True))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(predict=True))
     writer = rf.Writer(tmp_path, format="ipc")
     with pytest.raises(RuntimeError, match="no processed schema"):
         writer.finish(model, None)
@@ -67,7 +67,7 @@ def test_finish_requires_a_schema_for_an_empty_prediction(tmp_path):
 
 
 def test_finish_does_not_replace_an_already_published_shard(tmp_path):
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(mask=True))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, label=rf.Boolean(predict=True))
     writer = rf.Writer(tmp_path)
     output = pa.table({"value": [1]})
     writer.write(output)

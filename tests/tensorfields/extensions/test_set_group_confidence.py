@@ -19,11 +19,11 @@ from relflow.tensorfields.shared.reconstruction import Metrics
 from tests.distributed import launch
 
 
-def model(kind, *, p_unavailable=0.0, mask=True):
+def model(kind, *, p_unavailable=0.0, predict=True, task=None):
     request = (
-        rf.Set(p_unavailable=p_unavailable, mask=mask)
+        rf.Set(p_unavailable=p_unavailable, predict=predict, task=task)
         if kind == "set"
-        else rf.Group(n_groups=4, p_unavailable=p_unavailable, mask=mask)
+        else rf.Group(n_groups=4, p_unavailable=p_unavailable, predict=predict, task=task)
     )
     result = rf.Model(preset="small", d_model=8, x=rf.Number, label=request)
     labels = [["a"], ["b"]] if kind == "set" else ["a", "b"]
@@ -51,7 +51,7 @@ def evaluate(module, labels, logits, strata=rf.Strata.test, *, encode_strata=rf.
 
 @pytest.mark.parametrize("kind", ["set", "group"])
 def test_input_augmentation_preserves_pristine_answers(kind):
-    module = model(kind, p_unavailable=1.0, mask=False)
+    module = model(kind, p_unavailable=1.0, predict=False)
     labels = [["a", "b"], [], None] if kind == "set" else ["a", "b", None]
     field = module.encode(pa.table({"x": [0.0] * 3, "label": labels}), strata="train")["/label"]
     supervised = model(kind, p_unavailable=1.0)
@@ -70,7 +70,7 @@ def test_input_augmentation_preserves_pristine_answers(kind):
 
 
 def test_group_state_loss_ignores_simulated_input_unavailability():
-    module = model("group", p_unavailable=1.0, mask=rf.Mask(reconstruct=True))
+    module = model("group", p_unavailable=1.0, predict=False, task=rf.reconstruct())
     logits = torch.zeros(4, 4, requires_grad=True)
 
     objective = evaluate(module, ["a", "b", "b", "a"], logits, rf.Strata.train, encode_strata=rf.Strata.train)
@@ -85,7 +85,7 @@ def test_group_state_loss_ignores_simulated_input_unavailability():
 
 
 def test_set_unknown_counts_preserve_set_semantics_and_reach_encoder():
-    module = model("set", mask=False)
+    module = model("set", predict=False)
     labels = [["a", "new", "new", "other", None], ["other", "new", "a"], [], ["new"], None]
     batch = module.encode(pa.table({"x": [0.0] * 5, "label": labels}), strata="test")["/label"]
     assert batch.content["unavailable"].reshape(-1).tolist() == [2, 2, 0, 1, 0]
@@ -178,7 +178,7 @@ def test_group_known_and_unknown_targets_use_only_state_loss():
 
 @pytest.mark.parametrize("kind", ["set", "group"])
 def test_empty_vocabulary_keeps_state_loss_finite(kind):
-    request = rf.Set(mask=True) if kind == "set" else rf.Group(n_groups=4, mask=True)
+    request = rf.Set(predict=True) if kind == "set" else rf.Group(n_groups=4, predict=True)
     module = rf.Model(preset="small", d_model=8, x=rf.Number, label=request)
     module.track = lambda names, value: value
     logits = torch.randn(2, 8 if kind == "set" else 4, requires_grad=True)
@@ -196,7 +196,7 @@ def test_empty_vocabulary_keeps_state_loss_finite(kind):
 
 
 def test_group_does_not_register_reconstruction_metrics():
-    module = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=4, mask=True))
+    module = rf.Model(preset="small", d_model=8, label=rf.Group(n_groups=4, predict=True))
     assert not hasattr(module.nodes["/label"].decoder, "metrics")
     assert not any(isinstance(callback, Metrics) for callback in module.configure_callbacks())
 
@@ -205,9 +205,9 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
     module = rf.Model(
         preset="small",
         d_model=8,
-        category=rf.Category(mask=True),
-        tags=rf.Set(mask=True),
-        group=rf.Group(n_groups=4, mask=True),
+        category=rf.Category(predict=True),
+        tags=rf.Set(predict=True),
+        group=rf.Group(n_groups=4, predict=True),
     )
     assert sum(isinstance(callback, Metrics) for callback in module.configure_callbacks()) == 1
     assert not hasattr(module.nodes["/group"].decoder, "metrics")
@@ -222,15 +222,15 @@ def test_registered_metrics_share_one_callback_and_reset_each_stage():
 
 
 def mixed_metrics():
-    selection = rf.Mask(query="selected", reconstruct=True)
+    selection = rf.reconstruct(query="selected")
     module = rf.Model(
         preset="small",
         d_model=8,
         batch_size=2,
         x=rf.Number,
-        label=rf.Category(mask=selection),
-        tags=rf.Set(mask=selection),
-        group=rf.Group(n_groups=4, mask=selection),
+        label=rf.Category(task=selection),
+        tags=rf.Set(task=selection),
+        group=rf.Group(n_groups=4, task=selection),
     )
     module.encode(
         pa.table(
@@ -286,7 +286,7 @@ def test_mixed_vocabulary_metrics_include_a_distributed_objective_empty_rank():
 
 
 def test_set_checkpoint_preserves_learned_unavailable_embedding(tmp_path):
-    module = model("set", mask=False)
+    module = model("set", predict=False)
     with torch.no_grad():
         module.nodes["/label"].embedder.unavailable.fill_(0.75)
     path = tmp_path / "set.rf"
@@ -320,8 +320,8 @@ def test_set_and_group_train_with_bfloat16_mixed_precision(accelerator):
         d_model=8,
         batch_size=4,
         x=rf.Number,
-        tags=rf.Set(p_unavailable=0.5, mask=rf.Mask(rate=0.5, reconstruct=True)),
-        group=rf.Group(n_groups=4, p_unavailable=0.5, mask=True),
+        tags=rf.Set(p_unavailable=0.5, task=rf.reconstruct(rate=0.5)),
+        group=rf.Group(n_groups=4, p_unavailable=0.5, predict=True),
     )
     source = pa.table(
         {

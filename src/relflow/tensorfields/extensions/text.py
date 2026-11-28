@@ -3,7 +3,8 @@ from __future__ import annotations
 import enum
 import math
 from collections.abc import Sequence
-from dataclasses import InitVar
+from copy import deepcopy
+from dataclasses import InitVar, dataclass
 from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, Unpack, cast
 
 import numpy as np
@@ -25,7 +26,8 @@ from relflow.tensorfields.base import (
     masks,
     resolve,
 )
-from relflow.tensorfields.extensions.text_cache.context import Encoding, token_rows
+from relflow.tensorfields.extensions.text_cache.context import Encoding
+from relflow.tensorfields.extensions.text_cache.tokens import token_rows
 from relflow.tensorfields.shared.cache import Payloads
 from relflow.tensorfields.shared.counter import CounterUpdateCallback
 from relflow.tensorfields.shared.frozen import Backbone, Objective, learn, loss, observe
@@ -35,7 +37,7 @@ from relflow.tensorfields.shared.jitter import Jitter
 from relflow.tensorfields.shared.reconstruction import Metrics
 
 if TYPE_CHECKING:
-    from transformers import PreTrainedTokenizerBase
+    from transformers import PreTrainedModel, PreTrainedTokenizerBase
 
     from relflow.data.ragged import Sources
     from relflow.structs.experiment import Schema
@@ -51,7 +53,7 @@ text: Extension = Extension(
 INPUT_IDS = "input_ids"
 ATTENTION_MASK = "attention_mask"
 IDENTIFIERS = "ids"
-DEFAULT_TEXT_MODEL = "google/bert_uncased_L-2_H-128_A-2"
+DEFAULT_TEXT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 
 class Pooling(enum.StrEnum):
@@ -60,8 +62,29 @@ class Pooling(enum.StrEnum):
     pooler = "pooler"
 
 
+@dataclass
 class CachedModel(Backbone):
+    # Text owns its CPU execution policy even when another modality uses the same model ID.
+    _models: ClassVar[dict[str, Backbone]] = {}
+    cpu_model: PreTrainedModel | None = None
+    cpu_revision: str | None = None
+
     _tokenizers: ClassVar[dict[str, PreTrainedTokenizerBase]] = {}
+
+    def module_for(self, device: torch.device) -> PreTrainedModel:
+        model = super().module_for(device)
+        if device.type != "cpu":
+            return model
+        if all(not t.is_floating_point() or t.dtype == torch.float32 for t in (*model.parameters(), *model.buffers())):
+            return model
+        revision = self.identity()
+        if self.cpu_revision != revision:
+            # Keep the checkpoint weights available at their native precision for accelerators.
+            with torch.inference_mode(False):
+                self.cpu_model = deepcopy(model).float()
+            self.cpu_revision = revision
+        assert self.cpu_model is not None
+        return self.cpu_model
 
     @classmethod
     def get_tokenizer(cls, key: str) -> PreTrainedTokenizerBase:
@@ -86,7 +109,10 @@ class CachedModel(Backbone):
 class Request(RequestBase):
     """String input represented by a frozen Hugging Face encoder.
 
-    ``model`` names a pretrained model or local path. ``max_length`` limits
+    ``model`` defaults to all-MiniLM-L6-v2 with masked mean pooling. Custom
+    encoders retain CLS pooling unless configured explicitly. ``encoder_rms``
+    scales each pooled input to unit RMS before jitter and projection.
+    CPU encoder inference uses float32. ``max_length`` limits
     tokens; ``tokenizer_batch_size`` and ``encoder_batch_size`` bound each
     tokenizer and encoder call. ``encoder_pooling`` selects ``"cls"``,
     ``"mean"``, or ``"pooler"``. Automatic ``cache=True`` sends stable IDs
@@ -114,7 +140,10 @@ class Request(RequestBase):
     max_length: Annotated[int, pydantic.Field(gt=0, default=128)] = 128
     tokenizer_batch_size: Annotated[int, pydantic.Field(gt=0, default=4096)] = 4096
     encoder_batch_size: Annotated[int, pydantic.Field(gt=0, default=32)] = 32
-    encoder_pooling: Pooling = Pooling.cls
+    encoder_pooling: Pooling = pydantic.Field(
+        default_factory=lambda data: Pooling.mean if data.get("model") == DEFAULT_TEXT_MODEL else Pooling.cls
+    )
+    encoder_rms: pydantic.StrictBool = True
     cache: pydantic.StrictBool | Annotated[pydantic.StrictInt, pydantic.Field(gt=0)] = True
     store: Annotated[str, pydantic.Field(min_length=1)] | None = None
     resident: Annotated[pydantic.StrictInt, pydantic.Field(ge=0)] | None = None
@@ -131,7 +160,8 @@ class Request(RequestBase):
             max_length: int = 128,
             tokenizer_batch_size: int = 4096,
             encoder_batch_size: int = 32,
-            encoder_pooling: Pooling | Literal["cls", "mean", "pooler"] = Pooling.cls,
+            encoder_pooling: Pooling | Literal["cls", "mean", "pooler"] = ...,
+            encoder_rms: bool = True,
             cache: bool | int = True,
             store: str | None = None,
             resident: int | None = None,
@@ -249,7 +279,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
                 }
-                if address in schema.objectives
+                if sources.needs_targets(schema)
                 else {},
                 batch_size=input.shape,
             ),
@@ -265,6 +295,8 @@ class Embedder(FrozenEmbedder):
     def __init__(self, schema: Schema, address: Address):
         super().__init__(schema=schema, address=address)
         self.request = cast(Request, schema.requests[address])
+        if self.request.encoder_rms:
+            self.input_norm = torch.nn.RMSNorm(self.hidden_size, eps=1e-12, elementwise_affine=False)
         self.store = encoding(self.request) if self.request.cache else None
 
     @property
@@ -272,14 +304,18 @@ class Embedder(FrozenEmbedder):
         return self.store
 
     def variant(self, device: torch.device) -> str:
-        return self._cached_model.variant(device, self.request.encoder_pooling.value)
+        pooling = self.request.encoder_pooling.value
+        if device.type == "cpu":
+            with torch.autocast("cpu", enabled=False):
+                return self._cached_model.variant(device, f"{pooling}:cpu-fp32")
+        return self._cached_model.variant(device, pooling)
 
     def cached(self, inputs: Payloads, device: torch.device) -> torch.Tensor:
         rows = token_rows(inputs, self.request.max_length)
         return self.pool(torch.from_numpy(rows[:, 0]).to(device), torch.from_numpy(rows[:, 1]).to(device))
 
     def warm(self, values: Sequence[str] | pa.Array | pa.ChunkedArray) -> int:
-        """Populate the automatic cache using the current device and autocast precision."""
+        """Populate the automatic cache using the execution precision for the current device."""
         if self.store is None:
             raise ValueError(f"text field at '{self.origin}' has cache=False; enable caching before warming")
         texts = values.to_pylist() if isinstance(values, (pa.Array, pa.ChunkedArray)) else list(values)
@@ -373,7 +409,7 @@ class Embedder(FrozenEmbedder):
             batch_ids = valued_ids[start:stop, :width]
             batch_mask = valued_mask[start:stop, :width]
 
-            with torch.inference_mode():
+            with torch.inference_mode(), torch.autocast("cpu", enabled=False):
                 outputs = model(
                     input_ids=batch_ids,
                     attention_mask=batch_mask,

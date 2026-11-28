@@ -139,8 +139,8 @@ def cache_model(directory, width):
 
     class Inspection(rf.Model):
         recordings = Recording(length=2)
-        pitch = rf.Enum(*LABELS["pitch"], mask=True)
-        rhythm = rf.Enum(*LABELS["rhythm"], mask=True)
+        pitch = rf.Enum(*LABELS["pitch"], predict=True)
+        rhythm = rf.Enum(*LABELS["rhythm"], predict=True)
 
     model = Inspection(preset=CONTROL.name)
 

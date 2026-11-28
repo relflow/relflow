@@ -175,6 +175,8 @@ class TensorField(number.TensorField):
         request = cast(Request, schema.requests[address])
         (selected,) = sources.inputs
         values = selected.values
+        # Labels map to ranks before the shared boundary, which only admits integers.
+        ordinal.require_scalar(values.type, address=address)
         if pa.types.is_dictionary(values.type):
             values = pc.dictionary_decode(values)  # pyrefly: ignore [missing-attribute]
         values = nullify(values, selected.present)

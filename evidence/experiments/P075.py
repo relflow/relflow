@@ -167,7 +167,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -245,7 +245,7 @@ class Source(rf.Branch):
 
 class Target(rf.Branch):
     entity_id = rf.Hash(n_hashes=4, n_bands=8)
-    value = rf.Number(mask=True, objective="mse")
+    value = rf.Number(predict=True, objective="mse")
 
 
 class Link(rf.Branch):

@@ -43,7 +43,7 @@ experiments, their protocol, runtime tests, and recorded results live in
   released Evidence assets and build Starlight for its exact hosted version URL.
   Preserve checkout-revision checks and digest-verified release selection.
   `latest` builds wait for frozen Evidence for the checkout's package version.
-  Other branch and PR docs use the latest formal release at version >=0.5.0, or
+  Other branch and PR docs use the latest formal release at version >=0.6.0, or
   show pending measurements until one exists. Tag builds require the matching
   version and source revision. Never select PR-head CI measurements
   for hosted docs or publish per-commit Evidence releases. Preserve static

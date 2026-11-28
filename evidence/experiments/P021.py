@@ -138,7 +138,7 @@
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -197,7 +197,7 @@ def fit(*, identity: Literal["hash", "category"], seed: int, steps: int | None, 
     class PredictionModel(rf.Model):
         left_id = rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0)
         right_id = rf.Hash(n_hashes=4) if identity == "hash" else rf.Category(p_unavailable=0.0)
-        equal = rf.Boolean(mask=True)
+        equal = rf.Boolean(predict=True)
 
     model = PredictionModel(d_model=48, n_layers=2, n_heads=4)
     data = rf.SyntheticDataModule(

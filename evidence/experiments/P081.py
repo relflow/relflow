@@ -195,7 +195,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -277,13 +277,13 @@ def condition(rows: list[dict], name: str, seed: int) -> list[dict]:
 
 
 def build() -> rf.Model:
-    mask = rf.Mask(rate=0.35, reconstruct=True)
+    pretrain = rf.reconstruct(rate=0.35)
 
     class Model(rf.Model):
-        channel = rf.Enum(values=CHANNELS, p_unavailable=0.0, mask=mask)
-        amount = rf.Number(mask=mask)
-        frequency = rf.Number(mask=mask)
-        nuisance = rf.Vector(n_dim=NUISANCE_DIM, mask=mask)
+        channel = rf.Enum(values=CHANNELS, p_unavailable=0.0, task=pretrain)
+        amount = rf.Number(task=pretrain)
+        frequency = rf.Number(task=pretrain)
+        nuisance = rf.Vector(n_dim=NUISANCE_DIM, task=pretrain)
 
     model = Model(preset=CONTROL.name, embed=True)
     return model

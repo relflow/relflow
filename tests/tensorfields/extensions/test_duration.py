@@ -45,7 +45,7 @@ def test_numeric_field_subclasses_survive_batch_consolidation_and_pickle():
 
 @pytest.mark.parametrize("mask", [False, True])
 def test_duration_observes_computed_values_in_source_units_before_input_masking(mask):
-    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(query=("start", "end"), mask=mask))
+    model = rf.Model(preset="small", d_model=8, elapsed=rf.Duration(query=("start", "end"), predict=mask))
     records = pa.table({"start": ["2026-01-01"] * 4, "end": ["2026-01-02T12:00:00", "2026-01-01", "2025-12-31", None]})
 
     field = model.encode(records, strata="train")["/elapsed"]
@@ -202,7 +202,9 @@ def test_duration_can_train_and_predict_with_number_objectives(tmp_path):
             "end": ["2026-01-02", "2026-01-03", "2026-01-04", "2026-01-05"],
         }
     )
-    model = rf.Model(preset="small", d_model=8, input=rf.Number, elapsed=rf.Duration(query=("start", "end"), mask=True))
+    model = rf.Model(
+        preset="small", d_model=8, input=rf.Number, elapsed=rf.Duration(query=("start", "end"), predict=True)
+    )
     data = rf.ArrowDataModule(
         train=records, validate=records, num_workers=0, persistent_workers=False, pin_memory=False
     )
@@ -249,7 +251,7 @@ def test_absolute_ancestor_queries_and_ordinal_train_in_worker_batches(tmp_path)
             events=rf.Branch(
                 length=2,
                 level=rf.Ordinal(values=("low", "high"), query="severity"),
-                age=rf.Duration(query=("/groups/opened_at", "/groups/events/at"), mask=True),
+                age=rf.Duration(query=("/groups/opened_at", "/groups/events/at"), predict=True),
             ),
         ),
     )

@@ -63,7 +63,7 @@ def test_request_rejects_non_geographic_vector_options(options):
 )
 def test_invalid_coordinates_are_rejected_even_when_masked(point, message):
     with pytest.raises(ValueError, match=message):
-        encoded(rf.Coordinates(mask=True), pl.DataFrame({"point": [point]}))
+        encoded(rf.Coordinates(predict=True), pl.DataFrame({"point": [point]}))
 
 
 def test_partial_null_and_nonfinite_points_are_not_targets():
@@ -75,7 +75,7 @@ def test_partial_null_and_nonfinite_points_are_not_targets():
             )
         }
     )
-    field = model(rf.Coordinates(mask=True)).encode(source, strata="train")["/point"]
+    field = model(rf.Coordinates(predict=True)).encode(source, strata="train")["/point"]
     assert field.targets[TensorKey.state].reshape(-1).tolist() == [
         Tokens.valued,
         Tokens.null,
@@ -95,7 +95,7 @@ def test_structural_absence_hides_invalid_values_from_the_other_source():
 
 
 def test_training_center_uses_hidden_valued_targets_and_is_not_updated_by_validation(tmp_path):
-    fitted = model(rf.Coordinates(mask=True))
+    fitted = model(rf.Coordinates(predict=True))
     frame = pa.table(
         {"point": pa.array([[0.0, 179.9], [0.0, -179.9], None, [float("nan"), 0.0]], type=pa.list_(pa.float64()))}
     )
@@ -117,7 +117,7 @@ def test_training_center_uses_hidden_valued_targets_and_is_not_updated_by_valida
 
 
 def test_polar_training_targets_have_finite_gradients():
-    fitted = model(rf.Coordinates(mask=True))
+    fitted = model(rf.Coordinates(predict=True))
     fitted.encode(pa.table({"point": [[90.0, 0.0], [90.0, 180.0]]}), strata="train")
     decoder = fitted.nodes["/point"].decoder
     pooled = torch.zeros(2, 8, requires_grad=True)
@@ -173,7 +173,7 @@ def test_embedder_represents_the_two_sides_of_the_date_line_together():
 
 
 def test_decoder_readout_keeps_source_precision_under_mixed_precision():
-    fitted = model(rf.Coordinates(mask=True))
+    fitted = model(rf.Coordinates(predict=True))
     decoder = fitted.nodes["/point"].decoder
     pooled = torch.randn(4, 8).bfloat16()
     with torch.autocast("cpu", dtype=torch.bfloat16):
@@ -183,7 +183,7 @@ def test_decoder_readout_keeps_source_precision_under_mixed_precision():
 
 
 def test_loss_uses_spherical_distance_and_metrics_count_positions():
-    fitted = model(rf.Coordinates(mask=True))
+    fitted = model(rf.Coordinates(predict=True))
     field = fitted.encode(pl.DataFrame({"point": [[0.0, 1.0], [0.0, 2.0], None]}), strata="train")["/point"]
     state = torch.full((*field.state.shape, len(Tokens)), -50.0)
     state.scatter_(-1, field.targets[TensorKey.state].unsqueeze(-1), 50.0)
@@ -204,7 +204,7 @@ def test_loss_uses_spherical_distance_and_metrics_count_positions():
 
 
 def test_null_only_targets_have_finite_loss():
-    fitted = model(rf.Coordinates(mask=True))
+    fitted = model(rf.Coordinates(predict=True))
     field = fitted.encode(pa.table({"point": pa.array([None], type=pa.list_(pa.float64()))}), strata="train")["/point"]
     state = torch.zeros((*field.state.shape, len(Tokens)), requires_grad=True)
     content = torch.zeros((*field.state.shape, 2), requires_grad=True)
@@ -217,7 +217,7 @@ def test_null_only_targets_have_finite_loss():
 
 
 def test_schema_roundtrip_preserves_coordinates():
-    fitted = model(rf.Coordinates(query=("lat", "lon"), mask=True))
+    fitted = model(rf.Coordinates(query=("lat", "lon"), predict=True))
     schema = rf.Schema.model_validate_json(fitted.schema.model_dump_json())
     request = schema.requests["/point"]
     assert isinstance(request, rf.Coordinates)
@@ -239,7 +239,7 @@ def test_coordinates_fit_validate_and_predict(tmp_path):
         d_model=8,
         input=rf.Number,
         current=rf.Coordinates,
-        point=rf.Coordinates(query=("lat", "lon"), mask=True),
+        point=rf.Coordinates(query=("lat", "lon"), predict=True),
     )
     data = rf.PolarsDataModule(train=source, validate=source, num_workers=0, persistent_workers=False, pin_memory=False)
     fitted.fit(

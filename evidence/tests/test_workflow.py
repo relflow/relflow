@@ -25,7 +25,7 @@ def history(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
     revisions = []
-    for version in ("0.4.7", "0.5.0", "0.5.1"):
+    for version in ("0.5.4", "0.6.0", "0.6.1"):
         (tmp_path / "pyproject.toml").write_text(f'[project]\nversion="{version}"\n')
         subprocess.run(["git", "add", "pyproject.toml"], cwd=tmp_path, check=True)
         subprocess.run(
@@ -54,18 +54,18 @@ def test_supported_baseline_preserves_the_actual_event_base(history):
     assert result["reason"] == "event-base"
 
 
-def test_pre_05_event_base_uses_the_fixed_supported_anchor(history):
+def test_pre_06_event_base_uses_the_fixed_supported_anchor(history):
     root, (base, anchor, candidate) = history
     result = releases.comparison(root, candidate, base)
     assert result == {
         "schema": 1,
         "event_base": base,
         "baseline": anchor,
-        "reason": "pre-0.5",
-        "candidate_version": "0.5.1",
-        "baseline_version": "0.5.0",
+        "reason": "pre-0.6",
+        "candidate_version": "0.6.1",
+        "baseline_version": "0.6.0",
     }
-    with pytest.raises(ValueError, match="candidate.*requires relflow >=0.5.0"):
+    with pytest.raises(ValueError, match="candidate.*requires relflow >=0.6.0"):
         releases.comparison(root, base, base)
 
 
@@ -100,7 +100,7 @@ def test_unrelated_base_requires_an_authenticated_forced_push(history, available
 def test_anchor_must_be_supported_and_an_ancestor(history, monkeypatch):
     root, (old, anchor, candidate) = history
     monkeypatch.setattr(releases, "BASELINE", old)
-    with pytest.raises(ValueError, match="baseline.*requires relflow >=0.5.0"):
+    with pytest.raises(ValueError, match="baseline.*requires relflow >=0.6.0"):
         releases.comparison(root, candidate, old)
     monkeypatch.setattr(releases, "BASELINE", candidate)
     with pytest.raises(ValueError, match="baseline.*available ancestor"):
@@ -164,7 +164,7 @@ def test_comparison_base_is_bound_to_the_actual_event(tmp_path, monkeypatch, nam
         "before": baseline,
         "forced": True,
     }
-    selection = {"event_base": baseline, "baseline": measured, "reason": "event-base" if supported else "pre-0.5"}
+    selection = {"event_base": baseline, "baseline": measured, "reason": "event-base" if supported else "pre-0.6"}
     request = {
         "candidate": candidate,
         "baseline": measured,

@@ -120,7 +120,7 @@
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -177,7 +177,7 @@ class Model(rf.Model):
     segment = rf.Category(p_unavailable=0.0)
     tags = rf.Set(p_unavailable=0.0)
     leak = rf.Boolean
-    target = rf.Boolean(mask=True)
+    target = rf.Boolean(predict=True)
 
 
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> float:

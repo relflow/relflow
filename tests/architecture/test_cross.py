@@ -17,7 +17,7 @@ def test_cross_is_local_in_python_yaml_and_checkpoints(tmp_path, at_root):
         fields={
             "cross": rf.Number,
             "items": rf.Branch(cross=not at_root, length=2, fields={"cross": rf.Number, "other": rf.Number}),
-            "target": rf.Number(mask=True),
+            "target": rf.Number(predict=True),
         },
     ).eval()
     path = tmp_path / "model.yaml"
@@ -31,7 +31,7 @@ def test_cross_is_local_in_python_yaml_and_checkpoints(tmp_path, at_root):
         "    length: 2\n"
         f"    cross: {str(not at_root).lower()}\n"
         "    fields: {cross: {type: number}, other: {type: number}}\n"
-        "  target: {type: number, mask: true}\n"
+        "  target: {type: number, predict: true}\n"
     )
     assert rf.Model.from_yaml(path).schema.model_dump() == model.schema.model_dump()
     for address, enabled in (("/", at_root), ("/items", not at_root)):
@@ -60,7 +60,7 @@ def test_old_checkpoint_without_cross_retains_coordinate_attention(tmp_path):
 
 
 def test_one_input_and_a_hidden_target_do_not_allocate_a_cross():
-    model = rf.Model(d_model=8, n_heads=2, n_layers=1, cross=True, value=rf.Number, label=rf.Number(mask=True))
+    model = rf.Model(d_model=8, n_heads=2, n_layers=1, cross=True, value=rf.Number, label=rf.Number(predict=True))
     assert model.nodes["/"].encoder.coordinate_encoder is None
 
 

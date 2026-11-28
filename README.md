@@ -82,6 +82,19 @@ With pip, use `python -m pip install relflow`. Media fields use
 `uv add "relflow[text,serving]"`. See
 [Installation](https://www.relflow.ai/latest/installation/) for the full list.
 
+### Run the churn example
+
+Download the script and its fictional customer records into an empty directory.
+
+```sh
+curl -fsSLO https://raw.githubusercontent.com/relflow/relflow/main/docs/starlight/public/examples/churn/churn.py
+curl -fsSLO https://raw.githubusercontent.com/relflow/relflow/main/docs/starlight/public/examples/churn/customers.json
+uv run --no-project --python 3.12 --with "relflow==0.5.4" python churn.py
+```
+
+The script writes the fixture to temporary Parquet files, streams one training
+and validation batch, and prints churn probabilities for two unlabeled customers.
+
 ## Describe your data. Define your predictions.
 
 Suppose you want to predict whether a subscriber will cancel within 90 days.
@@ -115,7 +128,7 @@ class ChurnModel(rf.Model):
     tenure_months = rf.Number
     monthly_usage = MonthlyUsage(length=12, overflow="tail")
     support_tickets = SupportTicket(length=32, overflow="tail")
-    churn_90d = rf.Boolean(mask=True)
+    churn_90d = rf.Boolean(predict=True)
 
 
 if __name__ == "__main__":
@@ -142,7 +155,7 @@ independently selects training defaults, including the optimizer, batch size,
 and training budget. The bundled `small` and `medium` presets are alternative
 recipes; you do not need to configure those settings individually to get started.
 
-`mask=True` makes `churn_90d` a supervised target: the historical answer trains
+`predict=True` makes `churn_90d` a supervised target: the historical answer trains
 the model without becoming an input. Validation and test records also include
 observed answers, hidden in the same way for evaluation. New prediction requests
 may omit the target. Each history is supplied oldest to newest;
@@ -216,15 +229,15 @@ individual learning capabilities with controlled comparisons, source code,
 measurements, and execution provenance.
 
 <details>
-<summary>Selected historical learning checks · relflow 0.4.2</summary>
+<summary>Selected learning checks · relflow 0.5.4</summary>
 
 <!-- evidence-results:start -->
 
 | Experiment | relflow result | Control |
 | --- | --- | --- |
-| [Match IDs absent from training](https://www.relflow.ai/latest/evidence/P021/) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
-| [Recall a value by an unfamiliar ID](https://www.relflow.ai/latest/evidence/P025/) | **0.100 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
-| [Distinguish nulls from zero](https://www.relflow.ai/latest/evidence/P038/) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
+| [Match IDs absent from training](https://www.relflow.ai/v0.5.4/evidence/P021/) | **0.9991 AUC** with `Hash` | 0.5000 with unknown `Category` labels |
+| [Recall a value by an unfamiliar ID](https://www.relflow.ai/v0.5.4/evidence/P025/) | **0.079 normalized RMSE**, median of three seeds | 1.401 after corrupting the lookup IDs |
+| [Distinguish nulls from zero](https://www.relflow.ai/v0.5.4/evidence/P038/) | **100% accuracy** with value states preserved | 50% after filling nulls with zero |
 
 <!-- evidence-results:end -->
 

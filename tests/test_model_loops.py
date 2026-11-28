@@ -46,7 +46,7 @@ class DistributedState(lit.Callback):
 
 @pytest.fixture
 def model():
-    return rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number, label=rf.Boolean(mask=True))
+    return rf.Model(preset="small", d_model=8, batch_size=2, amount=rf.Number, label=rf.Boolean(predict=True))
 
 
 @pytest.fixture
@@ -92,6 +92,57 @@ class Events(lit.Callback):
 
     def on_validation_epoch_end(self, trainer, pl_module):
         self.validation_sizes.append(self.counts["validate"] - self.before_validation)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("jacobian", [False, True])
+def test_fit_accumulates_independently_sampled_heads_across_microbatches(options, jacobian):
+    if jacobian:
+        pytest.importorskip("torchjd")
+        pytest.importorskip("quadprog")
+    fields = {f"x{i}": rf.Number for i in range(12)}
+    model = rf.Model(
+        d_model=8,
+        n_layers=1,
+        n_heads=2,
+        jacobian=jacobian,
+        task=rf.reconstruct(fields=2, ablate=True),
+        fields=fields,
+    )
+    table = pa.table({name: list(range(32)) for name in fields})
+    data = rf.ArrowDataModule(model=model, train=table, num_workers=0, shuffle=False)
+
+    class Gradients(lit.Callback):
+        def __init__(self):
+            self.active = []
+            self.updates = []
+
+        def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+            self.active.append({a for a in model.schema.objectives if batch.tensors[a].trainable.any()})
+
+        def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+            heads = {
+                a
+                for a in model.schema.objectives
+                if any(p.grad is not None for p in model.nodes[a].decoder.parameters())
+            }
+            self.updates.append(heads)
+
+    audit = Gradients()
+    model.fit(
+        data,
+        batch_size=4,
+        accumulate_grad_batches=4,
+        callbacks=[audit],
+        max_epochs=1,
+        early_stopping=False,
+        rollback=False,
+        **options,
+    )
+    assert model.trainer.global_step == 2
+    assert len(audit.active) == 8 and all(len(heads) == 2 for heads in audit.active)
+    assert audit.updates == [set.union(*audit.active[:4]), set.union(*audit.active[4:])]
+    assert all(len(heads) > 2 for heads in audit.updates)
 
 
 @pytest.mark.integration
@@ -192,7 +243,7 @@ def test_lazy_binding_keeps_model_ownership_across_loops(model, options):
     table = pa.table({"amount": [1.0, 2.0], "label": [False, True]})
     data = rf.ArrowDataModule(validate=table, predict=table)
     model.validate(data, limit_val_batches=1, verbose=False, **options)
-    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(predict=True))
     with pytest.raises(ValueError, match="different model"):
         other.predict(data, **options)
     assert data.model is model
@@ -236,7 +287,7 @@ def test_custom_lightning_data_module_can_own_lazy_binding(model, options):
     explicit.model = model
     model.validate(explicit, limit_val_batches=1, verbose=False, **options)
     assert explicit.bindings == 0
-    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(predict=True))
     with pytest.raises(ValueError, match="different model"):
         other.validate(data, **options)
     assert data.model is model
@@ -249,7 +300,7 @@ def test_custom_model_owned_data_module_retains_ownership_guard(model, options):
             super().__init__()
             self.model = model
 
-    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(predict=True))
     with pytest.raises(ValueError, match="different model"):
         other.validate(Owned(), **options)
 
@@ -362,7 +413,7 @@ def test_custom_policies_replace_defaults_and_train_only_requires_a_policy_choic
 
 
 def test_input_ownership_and_option_conflicts_fail_before_execution(model, data, options):
-    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True))
+    other = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(predict=True))
     with pytest.raises(ValueError, match="different model"):
         other.fit(data, **options)
     with pytest.raises(TypeError, match="LightningDataModule"):
@@ -400,6 +451,16 @@ def test_inline_adamw_retains_the_default_recipe(model, data, options):
     assert model.scheduler is None
 
 
+@pytest.mark.parametrize("precision", ["bf16-true", "16-true", "64-true"])
+def test_true_low_or_double_precision_fails_before_recasting_the_model(model, data, options, precision):
+    statistics = {name: buffer.dtype for name, buffer in model.named_buffers()}
+
+    with pytest.raises(ValueError, match=rf"precision='{precision}' recasts every parameter.*'bf16-mixed'"):
+        model.fit(data, **{**options, "precision": precision}, max_epochs=1, early_stopping=False, rollback=False)
+
+    assert {name: buffer.dtype for name, buffer in model.named_buffers()} == statistics
+
+
 @pytest.mark.integration
 @pytest.mark.parametrize("fused", [None, False])
 @pytest.mark.parametrize("fragments", [("attention",), ()])
@@ -428,11 +489,15 @@ def test_inline_adamw_options_control_the_live_optimizer(model, data, options, f
     assert optimizer.defaults["eps"] == 1e-6
     assert optimizer.defaults["fused"] is fused
     names = {id(parameter): name for name, parameter in model.named_parameters() if parameter.requires_grad}
+    modules = dict(model.named_modules())
     optimized = {id(parameter) for group in optimizer.param_groups for parameter in group["params"]}
     assert optimized == names.keys()
     for group in optimizer.param_groups:
         for parameter in group["params"]:
-            expected = 0.0 if any(fragment in names[id(parameter)].lower() for fragment in fragments) else 0.17
+            name = names[id(parameter)]
+            owner = modules[name.rpartition(".")[0]]
+            decayed = parameter.ndim <= 1 or isinstance(owner, torch.nn.Linear)
+            expected = 0.17 if decayed and not any(fragment in name.lower() for fragment in fragments) else 0.0
             assert group["weight_decay"] == expected
     assert optimizer.state
     assert all(state["step"] == 1 for state in optimizer.state.values())
@@ -836,7 +901,7 @@ def test_constructor_module_factories_do_not_become_checkpointed_architecture(tm
         n_layers=1,
         n_heads=2,
         amount=rf.Number,
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
         optimizer=optimizer,
         scheduler=scheduler,
     )
@@ -968,7 +1033,7 @@ def test_distributed_ranks_share_reduced_losses_and_observed_capacity(options, t
     from lightning.pytorch.strategies import DDPStrategy
 
     model = rf.Model(
-        preset="small", d_model=8, batch_size=2, events=rf.Branch(amount=rf.Number), label=rf.Boolean(mask=True)
+        preset="small", d_model=8, batch_size=2, events=rf.Branch(amount=rf.Number), label=rf.Boolean(predict=True)
     )
     # Only row 1 carries the longest collection, so a single rank observes it directly.
     table = pa.Table.from_pylist(

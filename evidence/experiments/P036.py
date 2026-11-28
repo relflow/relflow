@@ -114,7 +114,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -191,7 +191,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
 
         class TargetRecord(rf.Branch):
             entity_id = rf.Category(p_unavailable=0.0)
-            value = rf.Number(mask=True, objective="mse")
+            value = rf.Number(predict=True, objective="mse")
 
         class PredictionModel(rf.Model):
             source = SourceRecord(length=PAIR_COUNT, n_layers=2, reduction=reduction)

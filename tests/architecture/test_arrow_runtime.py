@@ -17,11 +17,11 @@ def model(*, nested: bool = False, embed: bool = False) -> rf.Model:
             "items": rf.Branch(
                 length=3,
                 value=rf.Number,
-                label=rf.Boolean(mask=True),
+                label=rf.Boolean(predict=True),
             )
         }
         if nested
-        else {"value": rf.Number, "label": rf.Boolean(mask=True)}
+        else {"value": rf.Number, "label": rf.Boolean(predict=True)}
     )
     return rf.Model(preset="small", d_model=8, batch_size=2, embed=embed, **fields)
 
@@ -276,7 +276,7 @@ def test_predict_batches_after_global_preprocessor_expansion_and_postprocesses_o
 
 
 def test_predict_rejects_fieldless_mapping_rows():
-    configured = rf.Model(preset="small", label=rf.Boolean(mask=True), d_model=8)
+    configured = rf.Model(preset="small", label=rf.Boolean(predict=True), d_model=8)
 
     with pytest.raises(TypeError, match="without fields"):
         configured.predict([{}, {}])
@@ -407,10 +407,10 @@ def test_nested_sibling_results_share_structural_slots_and_allow_metadata_names(
         events=rf.Branch(
             length=3,
             amount=rf.Number,
-            state=rf.Boolean(mask=True),
-            embedding=rf.Number(mask=True),
-            items=rf.Boolean(mask=True),
-            outputs=rf.Boolean(mask=True),
+            state=rf.Boolean(predict=True),
+            embedding=rf.Number(predict=True),
+            items=rf.Boolean(predict=True),
+            outputs=rf.Boolean(predict=True),
         ),
     )
     source = pa.Table.from_pylist([{"events": [{"amount": 1.0}, None, {"amount": 2.0}]}])
@@ -514,7 +514,7 @@ def test_empty_retain_omits_inputs_without_changing_row_count():
 
 
 def test_reconstruction_without_public_extension_output_rejects_an_empty_plan():
-    configured = rf.Model(preset="small", value=rf.Number, identifier=rf.Hash(mask=True), d_model=8)
+    configured = rf.Model(preset="small", value=rf.Number, identifier=rf.Hash(predict=True), d_model=8)
 
     with pytest.raises(ValueError, match="no public prediction outputs"):
         configured.predict(pa.table({"value": [1.0, 2.0]}))

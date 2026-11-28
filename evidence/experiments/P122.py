@@ -132,8 +132,8 @@ def cache_model(directory, notes, width):
     class Model(rf.Model):
         note = rf.Text(model=str(directory), max_length=2, store=str(directory / "notes"))
         tile = rf.Image(model=str(directory), immutable=True, base=str(directory), store=str(directory / "tiles"))
-        topic = rf.Boolean(mask=True)
-        pattern = rf.Boolean(mask=True)
+        topic = rf.Boolean(predict=True)
+        pattern = rf.Boolean(predict=True)
 
     model = Model(preset=CONTROL.name)
 

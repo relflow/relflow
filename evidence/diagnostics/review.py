@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from urllib import request
 
-from evidence.releases import LEGACY, VERSION, filenames
+from evidence.releases import VERSION, filenames
 
 
 def prepare(root: Path, spec: dict) -> Path:
@@ -19,11 +19,11 @@ def prepare(root: Path, spec: dict) -> Path:
         r"https://github.com/relflow/relflow/releases/download/(evidence-(?:ci-\d+-attempt-\d+|v[0-9A-Za-z.]+))/([^/]+)",
         spec.get("url", ""),
     )
-    allowed = {LEGACY["plots"]}
+    # Retained CI attempts carry the run's bundle name; version releases carry their versioned name.
+    allowed = {"proof-visualizations.zip"}
     if location and location[1].startswith("evidence-v"):
         version = location[1].removeprefix("evidence-v")
-        if VERSION.fullmatch(version):
-            allowed.add(filenames(version)["plots"])
+        allowed = {filenames(version)["plots"]} if VERSION.fullmatch(version) else set()
     if (
         not re.fullmatch(r"[a-f0-9]{64}", spec.get("sha256", ""))
         or type(spec.get("size")) is not int

@@ -69,8 +69,10 @@ from relflow.structs.experiment import (
     where,
 )
 from relflow.structs.reduction import Attention, Mean, ReductionConfig
-from relflow.structs.structure import Branch, Mask
-from relflow.structs.tree import Address, Leaf, MaskInput
+from relflow.structs.structure import Branch
+from relflow.structs.tasks import Reconstruction, Task, reconstruct
+from relflow.structs.tree import Address, HideInput, Leaf
+from relflow.structs.twigs import Index, Twig
 from relflow.tensorfields import (
     TENSORFIELDS,
     BatchContext,
@@ -172,11 +174,14 @@ __all__ = [
     "Hash",
     "Schema",
     "Image",
+    "Index",
     "Jitter",
     "Leaf",
     "Metric",
-    "Mask",
-    "MaskInput",
+    "Task",
+    "Reconstruction",
+    "reconstruct",
+    "HideInput",
     "Mean",
     "Model",
     "MutationLockCallback",
@@ -220,6 +225,7 @@ __all__ = [
     "Text",
     "Tokens",
     "TreeFieldInput",
+    "Twig",
     "Vector",
     "VocabularySyncCallback",
     "Writer",

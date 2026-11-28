@@ -158,4 +158,5 @@ def test_model_constructors_accept_current_public_api(identifier):
         models = [module.build()]
     for model in models:
         target = model.schema.requests[rf.Address("answer")]
-        assert target.mask[0].skip and target.mask[0].reconstruct
+        assert target.address in model.schema.objectives and target.address in model.schema.decodes
+        assert not target.embedded

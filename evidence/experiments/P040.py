@@ -122,7 +122,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -189,7 +189,7 @@ class Session(rf.Branch):
 
 class PredictionModel(rf.Model):
     sessions = Session(length=3, reduction=rf.Attention())
-    largest_session_total = rf.Number(mask=True, objective="mse")
+    largest_session_total = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P040", seed=2601)

@@ -30,6 +30,18 @@ class RollbackCheckpoint(ModelCheckpoint):
         if self.save_top_k == 0:
             raise ValueError("RollbackCheckpoint requires at least one saved checkpoint; set save_top_k != 0")
 
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Keep the previous best score when a resumed fit writes to a new directory.
+
+        Every fit generates its own default directory. Lightning restores the
+        selection state only for an unchanged directory, so a resumed fit would
+        otherwise rank its first validation above a better earlier checkpoint.
+        """
+        best = state_dict.get("best_model_path")
+        if best and self._fs.exists(best):
+            state_dict = {**state_dict, "dirpath": self.dirpath}
+        super().load_state_dict(state_dict)
+
     def on_fit_end(self, trainer: lit.Trainer, pl_module: lit.LightningModule) -> None:
         from relflow.architecture.root import Model
 
@@ -39,7 +51,11 @@ class RollbackCheckpoint(ModelCheckpoint):
 
         best_model_path = self.best_model_path
         if not best_model_path:
-            raise RuntimeError("RollbackCheckpoint did not find a best checkpoint to restore")
+            # A step or time budget can end before the first monitored validation.
+            logger.bind(component="checkpoint", monitor=self.monitor).warning(
+                "rollback found no monitored checkpoint; keeping the final weights"
+            )
+            return
 
         strategy = getattr(trainer, "strategy", None)
         if strategy is not None:
@@ -119,9 +135,14 @@ class CheckpointState:
         return state
 
     @staticmethod
+    def schema(state: dict[str, Any]) -> Schema:
+        """Restore resolved field options, including defaults in effect when saved."""
+        return Schema.model_validate(state["schema"])
+
+    @staticmethod
     def build(model_cls: type[M], state: dict[str, Any]) -> M:
         """Construct the saved graph from validated CPU state and restore its provenance."""
-        model = model_cls(schema=Schema.model_validate(state["schema"]), batch_size=state["batch_size"])
+        model = model_cls(schema=CheckpointState.schema(state), batch_size=state["batch_size"])
         CheckpointState.restore_metadata(model, state)
         model.load_state_dict(state_dict=state["state_dict"])
         return model
@@ -140,7 +161,7 @@ class CheckpointState:
         previous_preset = module.preset
         previous_version = module.version
         try:
-            module.schema = Schema.model_validate(checkpoint["schema"])
+            module.schema = CheckpointState.schema(checkpoint)
             module.batch_size = checkpoint["batch_size"]
             CheckpointState.restore_metadata(module, checkpoint)
             ModelGraph.install(module)

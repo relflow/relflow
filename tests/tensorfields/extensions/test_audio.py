@@ -253,7 +253,7 @@ def test_nested_fields_share_pristine_vectors_and_preserve_holes(acoustic, tmp_p
         n_layers=1,
         n_heads=2,
         calls=rf.Branch(clip=recording(embed=True)),
-        answer=recording(mask=True),
+        answer=recording(predict=True),
     )
     data = pl.DataFrame(
         {
@@ -726,7 +726,7 @@ def test_offline_whisper_training_prediction_and_checkpoint_with_loader_worker(t
     def recording(**options):
         return rf.Audio(model=str(assets), store=str(tmp_path / "store"), **options)
 
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, clip=recording(embed=True), target=recording(mask=True))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, clip=recording(embed=True), target=recording(predict=True))
     data = pl.DataFrame({"clip": paths, "target": list(reversed(paths))})
     embedder = model.nodes["/clip"].embedder
     before = embedder.linear[0].weight.detach().clone()
@@ -901,8 +901,8 @@ def test_end_to_end_multiformat_relational_audio_pipeline(tmp_path, monkeypatch)
             embed=True,
         )
         calls = Call(length=3, overflow="tail")
-        escalated = rf.Boolean(mask=True)
-        priority = rf.Enum("routine", "urgent", mask=True)
+        escalated = rf.Boolean(predict=True)
+        priority = rf.Enum("routine", "urgent", predict=True)
 
     model = EscalationModel(d_model=32, n_layers=2, n_heads=4)
     backbone = audio.CachedModel.get_model(str(encoder_dir)).model
@@ -1025,7 +1025,7 @@ def test_end_to_end_multiformat_relational_audio_pipeline(tmp_path, monkeypatch)
                         "window": 0.2,
                         "clip": "tail",
                     },
-                    "escalated": {"type": "boolean", "mask": True},
+                    "escalated": {"type": "boolean", "predict": True},
                 },
             }
         )

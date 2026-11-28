@@ -138,6 +138,7 @@ class Source:
             roots = []
             for path in paths:
                 magic = re.search(r"[*?\[]", path) if not self.explicit else None
+                scanned = True
                 if magic:
                     root = posixpath.dirname(path[: magic.start()]) or "."
                     candidates = filesystem.get_file_info(fs.FileSelector(root, recursive=True))
@@ -149,6 +150,7 @@ class Source:
                     elif info.type == fs.FileType.File:
                         root = posixpath.dirname(path)
                         candidates = [info]
+                        scanned = False
                     else:
                         raise FileNotFoundError(
                             f"{self.label}: expected an existing {'file' if self.explicit else 'file or directory'} at {path!r}"
@@ -157,8 +159,9 @@ class Source:
                 for info in candidates:
                     if info.type != fs.FileType.File:
                         continue
+                    # Scans skip hidden files and sidecars; a named file is always read.
                     relative = posixpath.relpath(info.path, root)
-                    if any(part.startswith((".", "_")) for part in PurePosixPath(relative).parts):
+                    if scanned and any(part.startswith((".", "_")) for part in PurePosixPath(relative).parts):
                         continue
                     normalized = posixpath.normpath(info.path)
                     if magic and not matches(normalized, posixpath.normpath(path)):
@@ -168,7 +171,18 @@ class Source:
                     selected[normalized] = File(normalized, info.size, info.mtime_ns)
             if not selected:
                 raise FileNotFoundError(f"{self.label}: no files selected; check the path, glob, and match pattern")
-            base = self.partition_base_dir if self.partition_base_dir is not None else posixpath.commonpath(roots)
+            base = self.partition_base_dir
+            if base is None:
+                base = posixpath.commonpath(roots)
+                # Hive keys name their own directories, so a selection inside one
+                # partition still reads the keys above it, like a wider selection.
+                if (
+                    self.partitioning == "hive"
+                    or isinstance(self.partitioning, ds.HivePartitioning)
+                    or (isinstance(self.partitioning, ds.PartitioningFactory) and self.partitioning.type_name == "hive")
+                ):
+                    while "=" in posixpath.basename(base):
+                        base = posixpath.dirname(base)
             return filesystem, tuple(selected[path] for path in sorted(selected)), base
         finally:
             filesystem = None

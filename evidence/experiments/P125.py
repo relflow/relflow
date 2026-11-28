@@ -133,7 +133,7 @@ def run(seed, steps, accelerator):
 
         class Tone(rf.Model):
             clip = rf.Audio(base=temporary, model=str(encoder), store=str(directory / "cache"), immutable=True)
-            pitch = rf.Enum("low", "high", mask=True)
+            pitch = rf.Enum("low", "high", predict=True)
 
         model = Tone(preset=CONTROL.name)
         train_rng, val_rng, test_rng = np.random.default_rng(seed).spawn(3)

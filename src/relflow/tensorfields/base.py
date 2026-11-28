@@ -47,6 +47,7 @@ from relflow.data.arrow import Geometry, variants
 from relflow.structs.enums import Component, Strata, TensorKey, Tokens
 from relflow.structs.packages import Parcel, Prediction
 from relflow.structs.tree import Address, Leaf
+from relflow.structs.twigs import Twig
 
 if TYPE_CHECKING:
     from relflow.architecture.root import Model
@@ -337,6 +338,7 @@ class DecoderBase(torch.nn.Module):
         n_context = math.prod(dimension if dimension is not None else 1 for dimension in self.shape)
         self.n_context = n_context
         self.d_model = schema.d_model
+        self.reconstruction = address in schema.roles.reconstruction_targets
         # An ancestor branch reaches the decoder twice: as the summary it routes
         # upward and as the encoded sequence it keeps for its descendants.
         Coordinates = tuple[tuple[Address, ...], tuple[int | None, ...], int | None]
@@ -375,13 +377,14 @@ class DecoderBase(torch.nn.Module):
             addresses = [node.address]
             if getattr(node, "type", None) == "branch" and node.reduction is None:
                 for child in node.fields:
-                    addresses.extend(visible(child))
+                    if not isinstance(child, Twig):
+                        addresses.extend(visible(child))
             return addresses
 
         context_addresses: list[Address] = []
         if conditioned:
             for child in cast("Branch", request.parent).fields:
-                if child.address == address:
+                if child.address == address or isinstance(child, Twig):
                     continue
                 context_addresses.extend(visible(child))
         self.context_addresses = tuple(dict.fromkeys(context_addresses))
@@ -473,15 +476,21 @@ class DecoderBase(torch.nn.Module):
             geometry=geometry,
         )
         count = math.prod(target_shape) if target_shape is not None else self.n_context
-        # CUDA measurements found launch/synchronization overhead dominant below
-        # this query volume. Scalar/all-selected targets retain the dense path.
-        substantial = device.type != "cuda" or batch_size * count * self.d_model >= 1_048_576
+        # A short list of targets can still attend to thousands of context tokens.
+        # Include that attention matrix in the decision to compact a repeated query.
+        memory_tokens = sum(math.prod(parcel.present.shape[1:]) for parcel in parcels) if self.reconstruction else 0
+        width = max(self.d_model, memory_tokens) if isinstance(self.pool, LearnedQueryCrossAttention) else self.d_model
+        substantial = device.type != "cuda" or batch_size * count * width >= 1_048_576
+        # Row packing changes floating-point reduction order during backward.
+        # Keep narrow scalar tasks on their full-batch training path. Packing
+        # starts to save substantial work at 64K context elements per decoder.
+        sparse_scalar = count == 1 and batch_size > 1 and batch_size * memory_tokens * self.d_model >= 65_536
         original = (
             type(self).__dict__.get("coordinatewise", False)
             and getattr(self.forward, "__func__", None) is DecoderBase.forward
             and getattr(self.context, "__func__", None) is DecoderBase.context
         )
-        if not embed and count > 1 and substantial and original:
+        if not embed and (sparse_scalar or (count > 1 and substantial)) and original:
             pool = self.pool
             canonical_pool = (
                 isinstance(pool, LearnedQueryCrossAttention)
@@ -543,6 +552,7 @@ class DecoderBase(torch.nn.Module):
 
         selected_indices = None
         selected_present = None
+        selected_rows = None
         original_count = count
         if embed:
             selection = None
@@ -555,8 +565,12 @@ class DecoderBase(torch.nn.Module):
             ):
                 raise ValueError(f"decoder selection at '{self.address}' requires bool shape {(batch_size, *shape)}")
             selection = selection.reshape(batch_size, count)
-            width = int(selection.sum(dim=1).max().item()) if batch_size else 0
-            if width * 2 <= count:
+            if count == 1:
+                rows = selection[:, 0].nonzero(as_tuple=True)[0]
+                if 0 < rows.numel() * 2 <= batch_size:
+                    selected_rows = rows
+            width = int(selection.sum(dim=1).max().item()) if batch_size and count > 1 else count
+            if count > 1 and width * 2 <= count:
                 ranks = torch.arange(count, device=device).expand(batch_size, count)
                 selected_indices = torch.where(selection, ranks, count).sort(dim=1).values[:, :width]
                 selected_present = selected_indices < count
@@ -568,9 +582,10 @@ class DecoderBase(torch.nn.Module):
                     queries = queries.gather(1, selected_indices.unsqueeze(-1).expand(-1, -1, self.d_model))
                 count = width
 
+        decoded_rows = batch_size if selected_rows is None else selected_rows.numel()
         if not parcels:
             pooled = torch.zeros(
-                (batch_size, count, self.d_model),
+                (decoded_rows, count, self.d_model),
                 device=device,
                 dtype=self.anchor.dtype,
             )
@@ -634,6 +649,15 @@ class DecoderBase(torch.nn.Module):
                     contexts or (), batch_size=batch_size, n_context=original_count, selection=selected_indices
                 )
             )
+            if selected_rows is not None:
+                stacked = stacked.index_select(0, selected_rows)
+                present = present.index_select(0, selected_rows)
+                memory_positions = memory_positions.index_select(0, selected_rows)
+                positions = positions.index_select(0, selected_rows)
+                if queries is not None:
+                    queries = queries.index_select(0, selected_rows)
+                if context is not None:
+                    context = context.index_select(0, selected_rows)
             if isinstance(self.pool, LearnedQueryCrossAttention):
                 pooled = self.pool(
                     stacked,
@@ -646,21 +670,25 @@ class DecoderBase(torch.nn.Module):
             else:
                 pooled = self.pool(stacked, present=present)
                 if count != self.n_context:
-                    pooled = pooled[:, :1].expand(batch_size, count, self.d_model)
+                    pooled = pooled[:, :1].expand(decoded_rows, count, self.d_model)
             if context is not None:
                 pooled = pooled + context * 0.0
 
         payload = self.decode(pooled)
         if embed:
             payload[TensorKey.embedding] = pooled
-        if selected_indices is not None:
-            rows = torch.arange(batch_size, device=device).unsqueeze(-1)
-            destination = (rows * original_count + selected_indices).reshape(-1)
-            selected_present = cast(torch.Tensor, selected_present)
+        if selected_indices is not None or selected_rows is not None:
+            if selected_indices is not None:
+                rows = torch.arange(batch_size, device=device).unsqueeze(-1)
+                destination = (rows * original_count + selected_indices).reshape(-1)
+            else:
+                destination = cast(torch.Tensor, selected_rows)
 
             def restore(source: TensorDictBase) -> TensorDict:
                 # Extensions may include the target axis in nested batch metadata.
                 batch = list(source.batch_size)
+                if batch:
+                    batch[0] = batch_size
                 if len(batch) > 1:
                     batch[1] = original_count
                 result = TensorDict({}, batch_size=batch, device=source.device, names=source.names)
@@ -674,9 +702,12 @@ class DecoderBase(torch.nn.Module):
                         )
                     trailing = value.shape[2:]
                     dense = value.new_zeros(batch_size * original_count, *trailing)
-                    active = selected_present.to(value.device).reshape(*selected_present.shape, *([1] * len(trailing)))
-                    values = value.masked_fill(~active, 0.0).reshape(batch_size * count, *trailing)
-                    dense.index_add_(0, destination.to(value.device), values)
+                    if selected_present is not None:
+                        active = selected_present.to(value.device).reshape(
+                            *selected_present.shape, *([1] * len(trailing))
+                        )
+                        value = value.masked_fill(~active, 0.0)
+                    dense.index_add_(0, destination.to(value.device), value.reshape(decoded_rows * count, *trailing))
                     result[key] = dense.reshape(batch_size, original_count, *trailing)
                 return result
 
@@ -685,7 +716,7 @@ class DecoderBase(torch.nn.Module):
         return Prediction(
             payload=payload,
             address=self.address,
-            batch_size=pooled.shape[0],
+            batch_size=batch_size,
         )
 
     def context(
@@ -820,7 +851,9 @@ class Extension:
     of accepted canonical Arrow terminal families. Separate tuple entries are
     incompatible; types joined in one PEP 604 union may share one Arrow column.
     ``arrow`` supplies a physical-type matcher for custom Python atoms or
-    overrides a standard matcher. ``requires`` maps importable module names to
+    overrides a standard matcher. ``lists`` admits list-valued records, such as a set of
+    labels or a vector; other extensions receive one scalar per record, and the
+    boundary rejects list columns for them. ``requires`` maps importable module names to
     their package requirements. ``queries`` declares accepted query counts as
     an integer, tuple, or Python slice; its default is one. ``callbacks`` lists the Lightning callback
     classes or factories every model using the extension attaches; every rank
@@ -835,6 +868,7 @@ class Extension:
         types: tuple[ValueTypeFamily, ...],
         queries: int | tuple[int, ...] | slice = 1,
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
+        lists: bool = False,
         requires: Mapping[str, str] | None = None,
         callbacks: Sequence[CallbackFactory] = (),
     ):
@@ -866,6 +900,9 @@ class Extension:
                 raise ValueError("Extension query slices require non-negative bounds and a positive step")
         else:
             raise TypeError("Extension queries must be a non-negative integer, tuple of counts, or slice")
+
+        if not isinstance(lists, bool):
+            raise TypeError(f"Extension lists must be a bool, got {type(lists).__name__}")
 
         if not isinstance(types, tuple):
             raise TypeError("Extension types must be a tuple of types or PEP 604 unions")
@@ -939,6 +976,7 @@ class Extension:
         self.name: str = name
         self.queries: int | tuple[int, ...] | slice = queries
         self.value_types: tuple[ValueTypeFamily, ...] = types
+        self.lists: bool = lists
         self.families: tuple[tuple[type[Any], ...], ...] = tuple(families)
         self.family_by_type: Mapping[type[Any], int] = MappingProxyType(type_to_family)
         self.matchers: Mapping[type[Any], ArrowMatcher] = MappingProxyType(
@@ -970,6 +1008,7 @@ class Extension:
         types: tuple[ValueTypeFamily, ...] | None = None,
         queries: int | tuple[int, ...] | slice | None = None,
         arrow: Mapping[type[Any], ArrowMatcher] | None = None,
+        lists: bool | None = None,
         requires: Mapping[str, str] | None = None,
         callbacks: Sequence[CallbackFactory] = (),
     ) -> Self:
@@ -1010,6 +1049,7 @@ class Extension:
             types=value_types,
             queries=source.queries if queries is None else queries,
             arrow=matchers,
+            lists=source.lists if lists is None else lists,
             requires={**source.requires, **(requires or {})},
             callbacks=(*source.callback_factories, *callbacks),
         )
@@ -1202,6 +1242,20 @@ class Extension:
             return pa.ListArray.from_arrays(pc.cast(offsets, pa.int32()), child, type=datatype, mask=mask)
         return pc.cast(values, datatype, safe=True)
 
+    def require_scalar(self, datatype: pa.DataType, *, address: Address) -> None:
+        """Reject list-valued records unless this extension declared ``lists=True``."""
+
+        canonical = self.canonical(datatype)
+        if self.lists or not (
+            pa.types.is_list(canonical) or pa.types.is_large_list(canonical) or pa.types.is_fixed_size_list(canonical)
+        ):
+            return
+        raise TypeError(
+            f"extension '{self.name}' at address '{address}' expects one scalar value per record, "
+            f"got list type {datatype}; select one element with a query such as 'name[0]', "
+            f"or reshape the column in a preprocessor"
+        )
+
     def prepare(
         self,
         values: pa.Array | pa.ChunkedArray,
@@ -1214,6 +1268,7 @@ class Extension:
             raise TypeError(
                 f"extension '{self.name}' at address '{address}' requires an Arrow array, got {type(values).__name__}"
             )
+        self.require_scalar(values.type, address=address)
         if not self.accepts(values.type):
             expected = ", ".join(" | ".join(member.__name__ for member in members) for members in self.families)
             raise TypeError(

@@ -14,14 +14,14 @@ wheel to package tests, Evidence, and release. The baseline comes from the
 actual comparison revision: PR or merge-group base, pre-push commit, or the
 manual first parent or explicit ancestor selected by `evidence_base`.
 
-The active suite requires relflow **0.5.0 or newer**. If the event base predates
-0.5, compare against the fixed initial 0.5 implementation commit
-`b868c450249de1c68c843506dca512bce7a6b333`. An authenticated forced push whose
+The active suite requires relflow **0.6.0 or newer**. If the event base predates
+0.6, compare against the fixed initial 0.6 implementation commit
+`6e184012bf3a204a66313697b81f7edd7171811f`. An authenticated forced push whose
 old head is unavailable or no longer an ancestor uses that same anchor. Other
 missing or unrelated bases fail. The chosen baseline must always be a supported
 ancestor of the candidate. `comparison.json` and the report manifest preserve
 the actual event base, measured baseline, package versions, and selection reason;
-these runs do not measure a regression against 0.4.7. Once the event base is a
+these runs do not measure a regression against 0.5.4. Once the event base is a
 supported ancestor, normal comparisons use it directly. Both roles still run
 the full catalog with the original checks, seeds, and budgets.
 

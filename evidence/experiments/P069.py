@@ -136,7 +136,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -186,7 +186,7 @@ def records(*, rows: int, seed: int, shuffled: bool = False) -> Iterator[dict]:
 class Model(rf.Model):
     route = rf.Enum(values=ROUTES, p_unavailable=0.0)
     channel = rf.Enum(values=CHANNELS, p_unavailable=0.0)
-    label = rf.Enum(values=LABELS, p_unavailable=0.0, topk=[4], mask=True)
+    label = rf.Enum(values=LABELS, p_unavailable=0.0, topk=[4], predict=True)
 
 
 def build() -> rf.Model:

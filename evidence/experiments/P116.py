@@ -98,7 +98,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["lightning", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.5.0", "torch"]
+# dependencies = ["lightning", "numpy", "polars", "pyarrow", "pyyaml>=6", "relflow>=0.6.0", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "representation"
@@ -131,12 +131,12 @@ ARMS = ("coordinates", "vector", "shuffled")
 
 class CoordinateModel(rf.Model):
     point = rf.Coordinates
-    distance = rf.Number(mask=True, objective="mse")
+    distance = rf.Number(predict=True, objective="mse")
 
 
 class VectorModel(rf.Model):
     point = rf.Vector(n_dim=2)
-    distance = rf.Number(mask=True, objective="mse")
+    distance = rf.Number(predict=True, objective="mse")
 
 
 def distance(latitude: np.ndarray, longitude: np.ndarray) -> np.ndarray:

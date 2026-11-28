@@ -26,14 +26,14 @@ jobs:
       contents: write
     steps:
       - name: Download coverage from the completed main run
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: coverage-attempt-${{ github.event.workflow_run.run_attempt }}
           path: report
           github-token: ${{ github.token }}
           run-id: ${{ github.event.workflow_run.id }}
       - name: Publish the coverage endpoint
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const { readFileSync } = require('node:fs');

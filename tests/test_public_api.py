@@ -30,7 +30,9 @@ def test_common_resources_are_available_from_package_root():
     assert relflow.Branch.__name__ == "Branch"
     assert relflow.Extension.__name__ == "Extension"
     assert tensorfields.Extension is relflow.Extension
-    assert relflow.Mask.model_fields["rate"].default is None
+    assert isinstance(relflow.reconstruct(rate=0.25), relflow.Reconstruction)
+    assert not hasattr(relflow, "Mask")
+    assert not hasattr(relflow, "MaskInput")
     assert relflow.Jitter.model_fields["add"].default == 0.0
     assert relflow.Jitter.model_fields["multiply"].default == 0.0
     assert relflow.Jitter.model_fields["normalize"].default is True
@@ -80,13 +82,11 @@ def test_common_resources_are_available_from_package_root():
 def test_period_is_the_public_calendar_request():
     from relflow.tensorfields.extensions import period
 
-    assert relflow.Period is period.Request is relflow.TENSORFIELDS["dateparts"].Request
-    assert not hasattr(relflow, "DateParts")
+    assert relflow.Period is period.Request is relflow.TENSORFIELDS["period"].Request
     assert "Periods" not in relflow.__all__
     namespace: dict[str, object] = {}
     exec("from relflow import *", namespace)
     assert namespace["Period"] is relflow.Period
-    assert "DateParts" not in namespace
 
 
 def test_tensorfield_source_construction_replaces_the_derive_role():

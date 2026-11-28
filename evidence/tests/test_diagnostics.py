@@ -52,7 +52,7 @@ def test_publication_belongs_only_to_the_formal_release_workflow():
     assert set(workflow["jobs"]) == {"publish"}
     job = workflow["jobs"]["publish"]
     assert "refs/heads/main" in job["if"]
-    checkout = next(step["with"] for step in job["steps"] if step.get("uses") == "actions/checkout@v4")
+    checkout = next(step["with"] for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["ref"] == "${{ inputs.source_sha }}"
     assert checkout["persist-credentials"] is False
     assert "READTHEDOCS_TOKEN" not in str(workflow)

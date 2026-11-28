@@ -1,0 +1,75 @@
+{
+  "train": [
+    {
+      "customer_id": "train-01",
+      "plan": "basic",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 12.0}],
+      "churn_90d": true
+    },
+    {
+      "customer_id": "train-02",
+      "plan": "plus",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 110.0}],
+      "churn_90d": false
+    },
+    {
+      "customer_id": "train-03",
+      "plan": "basic",
+      "monthly_usage": [
+        {"month": "2026-07-01", "minutes": 51.0},
+        {"month": "2026-08-01", "minutes": 8.0}
+      ],
+      "churn_90d": true
+    },
+    {
+      "customer_id": "train-04",
+      "plan": "plus",
+      "monthly_usage": [
+        {"month": "2026-07-01", "minutes": 90.0},
+        {"month": "2026-08-01", "minutes": 120.0}
+      ],
+      "churn_90d": false
+    },
+    {
+      "customer_id": "train-05",
+      "plan": "basic",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 74.0}],
+      "churn_90d": false
+    },
+    {
+      "customer_id": "train-06",
+      "plan": "plus",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 19.0}],
+      "churn_90d": true
+    }
+  ],
+  "validation": [
+    {
+      "customer_id": "validation-01",
+      "plan": "plus",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 78.0}],
+      "churn_90d": false
+    },
+    {
+      "customer_id": "validation-02",
+      "plan": "basic",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 14.0}],
+      "churn_90d": true
+    }
+  ],
+  "requests": [
+    {
+      "customer_id": "customer-01",
+      "plan": "basic",
+      "monthly_usage": [{"month": "2026-08-01", "minutes": 24.0}]
+    },
+    {
+      "customer_id": "customer-02",
+      "plan": "plus",
+      "monthly_usage": [
+        {"month": "2026-07-01", "minutes": 85.0},
+        {"month": "2026-08-01", "minutes": 96.0}
+      ]
+    }
+  ]
+}

@@ -81,6 +81,34 @@ def test_intentional_type_changes_survive():
     assert apply(table, [promote]).schema.field("count").type == pa.float64()
 
 
+def test_nulls_in_non_null_source_fields_keep_the_source_type():
+    score = pa.struct([pa.field("content", pa.float64(), nullable=False)])
+    events = pa.list_(pa.field("element", pa.int32(), nullable=False))
+    schema = pa.schema(
+        [pa.field("id", pa.int64(), nullable=False), pa.field("score", score), pa.field("events", events)]
+    )
+    table = pa.table({"id": [1, 2], "score": [{"content": 0.5}, {"content": 0.7}], "events": [[1], [2]]}, schema=schema)
+
+    @rf.postprocess
+    def forget(frame: pl.DataFrame) -> pl.DataFrame:
+        known = pl.col("id") == 1
+        return frame.with_columns(
+            id=pl.when(known).then(pl.col("id")),
+            score=pl.when(known).then(pl.col("score")),
+            events=pl.when(known).then(pl.col("events")).otherwise(pl.lit([None], dtype=pl.List(pl.Int32))),
+        )
+
+    result = apply(table, [forget])
+
+    assert result.to_pylist() == [
+        {"id": 1, "score": {"content": 0.5}, "events": [1]},
+        {"id": None, "score": None, "events": [None]},
+    ]
+    assert result.schema.field("id").nullable
+    assert result.schema.field("score").type == pa.struct([pa.field("content", pa.float64())])
+    assert result.schema.field("events").type == pa.list_(pa.field("element", pa.int32()))
+
+
 def test_preprocessor_output_returns_source_columns():
     events = pa.array([[{"x": 1}], []], type=pa.list_(pa.field("element", pa.struct([pa.field("x", pa.int64())]))))
     source = pa.table({"amount": [1.0, 2.0], "events": events, "name": pa.array(["a", "b"]).dictionary_encode()})

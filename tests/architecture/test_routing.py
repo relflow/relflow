@@ -182,13 +182,13 @@ def test_all_present_extension_matches_padded_geometry_and_preserves_copy_isolat
 
 def test_embedder_compacts_present_coordinates_and_restores_fixed_geometry():
     model = rf.Model(
-        value=rf.Number(mask=rf.Mask(query="skip", skip=True, dropout=False)),
+        value=rf.Number(query="record.value"),
         d_model=8,
         n_layers=1,
         n_heads=2,
     )
     inputs = model.encode(
-        pa.table({"value": [1.0, 2.0, 3.0], "skip": [False, True, False]}),
+        pa.table({"record": [{"value": 1.0}, None, {"value": 3.0}]}),
         strata=Strata.train,
     )
     field = inputs["/value"]
@@ -211,12 +211,14 @@ def test_embedder_compacts_present_coordinates_and_restores_fixed_geometry():
 
 def test_embedder_is_not_called_for_an_all_skipped_field():
     model = rf.Model(
-        value=rf.Number(mask=rf.Mask(skip=True, dropout=False)),
+        value=rf.Number(query="record.value"),
         d_model=8,
         n_layers=1,
         n_heads=2,
     )
-    field = model.encode(pa.table({"value": [1.0, 2.0]}), strata=Strata.train)["/value"]
+    field = model.encode(
+        pa.table({"record": pa.array([None, None], type=pa.struct([("value", pa.float64())]))}), strata=Strata.train
+    )["/value"]
     embedder = model.nodes["/value"].embedder
     calls = 0
 
@@ -238,14 +240,14 @@ def test_embedder_is_not_called_for_an_all_skipped_field():
 
 def test_runtime_keeps_mixed_skip_rows_out_of_branch_context():
     model = rf.Model(
-        value=rf.Number(mask=rf.Mask(query="skip", skip=True, dropout=False)),
+        value=rf.Number(query="record.value"),
         d_model=8,
         n_layers=1,
         n_heads=2,
         embed=True,
     )
     inputs = model.encode(
-        pa.table({"value": [1.0, 2.0], "skip": [False, True]}),
+        pa.table({"record": [{"value": 1.0}, None]}),
         strata=Strata.train,
     )
 
@@ -261,8 +263,8 @@ def test_runtime_keeps_mixed_skip_rows_out_of_branch_context():
 def test_peer_objective_selection_runs_the_same_decoder_and_anchors_local_backward(monkeypatch):
     model = rf.Model(
         context=rf.Number,
-        first=rf.Boolean(mask=rf.Mask(query="first_selected", dropout=False, reconstruct=True)),
-        second=rf.Boolean(mask=rf.Mask(query="second_selected", dropout=False, reconstruct=True)),
+        first=rf.Boolean(task=rf.reconstruct(query="first_selected")),
+        second=rf.Boolean(task=rf.reconstruct(query="second_selected")),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -310,7 +312,7 @@ def test_peer_objective_selection_runs_the_same_decoder_and_anchors_local_backwa
 def test_evaluation_loss_does_not_require_a_gradient_anchor(strata, step):
     model = rf.Model(
         context=rf.Number,
-        label=rf.Boolean(mask=True),
+        label=rf.Boolean(predict=True),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -336,7 +338,7 @@ def test_evaluation_loss_does_not_require_a_gradient_anchor(strata, step):
 def test_evaluation_returns_zero_when_only_a_peer_rank_has_targets(monkeypatch):
     model = rf.Model(
         context=rf.Number,
-        label=rf.Boolean(mask=rf.Mask(query="selected", dropout=False, reconstruct=True)),
+        label=rf.Boolean(task=rf.reconstruct(query="selected")),
         d_model=8,
         n_layers=1,
         n_heads=2,
@@ -366,7 +368,7 @@ def test_evaluation_returns_zero_when_only_a_peer_rank_has_targets(monkeypatch):
 def test_globally_empty_objective_skips_the_training_update(monkeypatch):
     model = rf.Model(
         context=rf.Number,
-        label=rf.Boolean(mask=rf.Mask(query="selected", dropout=False, reconstruct=True)),
+        label=rf.Boolean(task=rf.reconstruct(query="selected")),
         d_model=8,
         n_layers=1,
         n_heads=2,

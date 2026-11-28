@@ -7,76 +7,88 @@ import DataViews from '../../../components/DataViews.astro';
 import { scenarios } from '../../../data/concepts/scenarios';
 import { observationDatasets } from '../../../data/observations';
 
-Masking defines which values the encoder can see and which answers a loss
-should teach. That makes it useful for more than a permanently hidden target:
-you can reconstruct selected sensor readings, train several objectives from
-shared context, and then adapt that learned model to a different task.
+Use four schema options to declare what the model sees and learns.
 
-Applies to [relflow 0.5.0](https://github.com/relflow/relflow/tree/a1d0be3e373cf6c183e4926f1bfcbef845f2f883).
-Start with [Targets and masking](/concepts/targets/) for the supervised case
-and [Regularization](/advanced/regularization/) for input dropout and noise.
+| Option | Applies to | Behavior |
+| --- | --- | --- |
+| `predict: bool` | Leaf or child branch | Keep the answers out of the encoder on every split. Learn and score observed answers. At prediction, return an answer for each supplied position. A branch supervises all active descendant leaves. |
+| `hide: rf.HideInput` | Leaf or branch, including the root | Replace selected training inputs with a masked placeholder. Keep row positions. This option adds no objective and has no effect during validation, test, or prediction. |
+| `ablate: float` | Leaf or child branch | Drop the input and its targets during training. Draw once per record for a leaf or once per parent for a whole collection. |
+| `task` | Leaf or branch, including the root | Declare a learning task. `rf.reconstruct(...)` hides selected observations and uses their original values as answers. |
 
-## Separate selection, visibility, and supervision
-
-Every node stores a canonical tuple of `rf.Mask` policies. A policy first
-selects coordinates, then applies its visibility and reconstruction settings.
-
-| Setting | Meaning |
-| --- | --- |
-| `query` | Read one explicit, non-null Boolean per owner record to choose eligible coordinates. |
-| `rate` | Uniformly sample eligible coordinates at the supplied rate. It is a sampling probability, not a loss weight. |
-| `skip` | Omit selected coordinates from encoder participation rather than retaining masked placeholders. |
-| `dropout` | Treat the policy as training-only input augmentation. It defaults to the opposite of `reconstruct`. |
-| `reconstruct` | Use selected, observed answers as a reconstruction objective during training/evaluation; request their inference during applicable prediction policies. |
-
-`dropout=True` and `reconstruct=True` cannot be combined in one policy.
-Neural attention/feed-forward `dropout` is a separate node configuration.
-The [Mask declaration and normalization](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/structs/tree.py#L19)
-define these combinations.
+`task: rf.Reconstruction | tuple[rf.Reconstruction, ...] | None` accepts one
+reconstruction rule or a tuple. An observation supplies an answer if any rule
+selects it.
 
 ```python
-# Permanently hidden supervised answer; never embedded as input.
-failure_30d = rf.Boolean(mask=True)
+import relflow as rf
 
-# Training-only input masking, without another learning objective.
-load = rf.Number(mask=0.1)
+temperature_task: rf.Reconstruction = rf.reconstruct(rate=0.15)
 
-# Mask and reconstruct a sampled part of a supplied numeric field.
-temperature = rf.Number(
-    mask=rf.Mask(rate=0.15, reconstruct=True),
-    weight=0.25,
+model = rf.Model(
+    preset="small",
+    temperature=rf.Number(hide="sensor_offline", task=temperature_task),
+    inspections=rf.Branch(
+        predict=True,
+        passed=rf.Boolean,
+        repair_cost=rf.Number(ablate=0.1),
+    ),
 )
 ```
 
-`mask=True` normalizes to `Mask(skip=True, dropout=False,
-reconstruct=True)`. A float normalizes to a policy with that `rate` and the
-default `dropout=True`. Use `mask=False` to remove every policy. An explicit
-rate of zero is removed during normalization; a rate of one becomes an
-always-selected policy without a rate.
+During training, a true `sensor_offline` flag hides the temperature. The task
+independently samples temperatures to reconstruct at a rate of 15%. Each
+inspection supplies two answers. Dropping a repair cost during training
+keeps that inspection’s pass/fail answer and its row. At prediction time,
+`inspections=[{}, {}]` requests both answers for two inspections in source order.
+The [paired calibration experiment](/evidence/P128/) tests whether a branch
+learns both answers when one leaf loses half its training observations.
 
-## Know which policies run in each split
+A `hide` float is a probability from zero inclusive to one exclusive. A
+string reads a Boolean selector from the source. A tuple combines selections:
+`hide=("sensor_offline", 0.05)` hides values marked offline plus a sample of
+the other values. An empty tuple or `0.0` disables input masking. A branch
+shares one decision across a selected row's descendants. Its `ignore` option
+accepts a direct child name or a tuple of names. An ignored child branch keeps
+its subtree available, subject to its own policies.
 
-| Policy | Train | Validate / test | Predict |
-| --- | --- | --- | --- |
-| Input dropout, such as `mask=0.1` | Sample and hide inputs. | Disabled. | Disabled. |
-| Sampled reconstruction, such as `Mask(rate=0.15, reconstruct=True)` | Sample and reconstruct. | Sample and score reconstruction. | Rate-backed policy disabled. |
-| Always-hidden target, `mask=True` | Learn from hidden answers. | Score hidden answers. | Request the target, without needing its source field. |
-| Query reconstruction without a rate | Reconstruct selected coordinates. | Score selected coordinates. | Request selected coordinates; preserve the selector and required source structure. |
+```python
+# Keep the hour visible when a whole sensor reading is marked offline.
+sensor_readings = SensorReading(
+    length=168, overflow="tail", hide=("sensor_offline", 0.05), ignore="hour",
+)
 
-Validation/test sampling fixes its effective epoch while training sampling
-uses the current epoch. Draws also depend on seed, split, batch ordinal,
-address, and selection settings. Repeating the same batch plan repeats its
-masks; changing row order or batching can change them. A rate specifies a
-probability, not an exact number of selected records.
+# Sometimes a subscriber has no usable support history.
+support_tickets = SupportTicket(length=32, overflow="tail", ablate=0.1)
 
-Small batches, empty histories, or a query that selects nothing can leave a
-training batch without a participating reconstruction objective. Inspect
-eligibility and selected targets when diagnosing that case; a configured
-rate does not guarantee usable supervision in every batch.
+# Reconstruct runs of neighboring sensor rows while keeping their hours.
+sensor_pretraining = SensorReading(
+    length=168, overflow="tail",
+    task=rf.reconstruct(rate=0.15, span=4, ignore="hour"),
+)
+```
 
-The [activation and sampling rules](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/src/relflow/data/ragged.py#L618)
-and [configuration matrix tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_mask_policies.py#L30)
-cover all four splits.
+These examples use the maintenance and subscriber churn branch classes from
+the [model use cases](/concepts/models/#explore-a-use-case).
+The `sensor_offline` selector is a Boolean supplied on each sensor row.
+`ablate` takes a float from `0.0` to `1.0` inclusive. Use `1.0` to simulate
+an unavailable field or collection throughout training.
+The [history ablation experiment](/evidence/P130/) scores the same fitted model
+with a restored history, an empty history, and another record's history.
+
+With `task=rf.reconstruct()`, every observed value supplies a reconstruction
+answer and every selected position is requested at prediction time. A rate of
+`0.0` disables that rule. A rate of `1.0` selects every eligible position,
+including at prediction time, regardless of span. On a
+branch, every reached leaf needs a decoder and a loss. Exempt input-only
+children from reconstruction by naming them in `rf.reconstruct(ignore=...)`.
+
+Sampled validation and test selections repeat for a fixed seed, split, and
+batch plan. At prediction, a fractional rate requests no answers. Use
+`rf.reconstruct(query="needs_estimate")` to request specific positions.
+Training also uses the current epoch. Changing batching or row
+order can change the sample. Small batches, empty histories, and queries that
+select nothing can leave a batch without a reconstruction answer.
 
 ## Pretrain on context, then add the business target
 
@@ -105,11 +117,11 @@ class SensorReading(rf.Branch):
     hour = rf.Period("hour_of_day")
     vibration = rf.Number
     temperature = rf.Number(
-        mask=rf.Mask(rate=0.15, reconstruct=True),
+        task=rf.reconstruct(rate=0.15),
         weight=0.25,
     )
     load = rf.Number(
-        mask=rf.Mask(rate=0.15, reconstruct=True),
+        task=rf.reconstruct(rate=0.15),
         weight=0.25,
     )
 
@@ -148,8 +160,7 @@ if __name__ == "__main__":
 
 The two reconstruction addresses are `/sensor_readings/temperature` and
 `/sensor_readings/load`. Their known source values are retained as answers
-while selected encoder values are hidden. The default `skip=False` retains
-masked placeholders for those coordinates.
+while selected encoder values are hidden. Masked placeholders retain the positions of those readings.
 
 The validation objective here measures reconstruction of held-out sensor
 values. It does not measure the future failure task. Compare fine-tuning
@@ -180,12 +191,12 @@ for field in ("temperature", "load"):
     address = rf.Address("sensor_readings", field)
     model.update(
         rf.where("address") == address,
-        mask=False,
+        task=None,
         weight=1.0,
     )
 
 root = rf.where("address") == rf.Address()
-model.extend(root, failure_30d=rf.Boolean(mask=True))
+model.extend(root, failure_30d=rf.Boolean(predict=True))
 
 fine_tuning = rf.ArrowDataModule(
     train="maintenance/failure/train.parquet",
@@ -229,10 +240,7 @@ class SelectedReading(SensorReading):
     """A reading with explicit temperature reconstruction selection."""
 
     temperature = rf.Number(
-        mask=rf.Mask(
-            query="reconstruct_temperature",
-            reconstruct=True,
-        )
+        task=rf.reconstruct(query="reconstruct_temperature")
     )
 
 
@@ -242,31 +250,121 @@ class SelectedAsset(AssetPretraining):
     sensor_readings = SelectedReading(length=168, overflow="tail")
 ```
 
-The query runs against the mask owner's records: here, each retained sensor
+The query runs against the declaring node's records. Here, each retained sensor
 reading. It must return one structurally present Boolean per owner record,
 without nulls. A query is relflow's structural path syntax, not an arbitrary
 Python expression. Compute joins, ranks, time windows, or eligibility in a
 preprocessor or source pipeline, and provide the resulting Boolean column.
 
-Adding `rate=0.2` samples only among records where that query is true. Putting
-the policy on a branch instead applies each selected owner decision to its
-descendant fields together. Every descendant reached by reconstruction must
-support its own decoder and loss.
+A query and a rate inside **one** reconstruction declaration select their
+intersection. For example, `rf.reconstruct(query="sensor_offline", rate=0.2)`
+samples 20% of eligible offline readings. To select **either** condition,
+supply a tuple. This maintenance example selects every flagged temperature
+and a sample of all temperatures:
+
+```python
+temperature = rf.Number(
+    task=(
+        rf.reconstruct(query="sensor_offline"),
+        rf.reconstruct(rate=0.2),
+    )
+)
+```
+
+An overlapping reading supplies one answer at that field address. On a
+branch, each declaration shares its row decisions across descendants and
+applies its own `ignore` and `span` settings. At prediction time, the
+query-only declaration still requests its selected temperatures.
 
 For query-backed prediction, retain the selector and the queried source
 structure; place nulls in selected value positions when appropriate rather
 than assuming the entire field may disappear. Automatic omission of a source
-target is supported by unconditional reconstruction such as `mask=True`.
+target is supported by unconditional reconstruction such as `predict=True`.
 The [selector validation tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_dynamic_masking.py#L191)
 and [branch selection tests](https://github.com/relflow/relflow/blob/a1d0be3e373cf6c183e4926f1bfcbef845f2f883/tests/data/test_mask_policies.py#L208)
 cover these boundaries.
 
+## Redact unavailable context before encoding
+
+When a source flag marks an event as unavailable at the decision cutoff,
+apply the same preprocessor during training, evaluation and prediction.
+Replacing a flagged record with a null list element keeps the original
+length and row order. The fourth event stays at position 3 even if the
+second and third events are hidden.
+
+```python
+import polars as pl
+import relflow as rf
+
+
+@rf.preprocess
+def redact_events(frame: pl.DataFrame) -> pl.DataFrame:
+    event = pl.element()
+    visible = pl.when(~event.struct.field("hidden")).then(event)
+    return frame.with_columns(pl.col("events").list.eval(visible))
+
+
+data = rf.ArrowDataModule(train="events/train.parquet", preprocessor=redact_events)
+# Pass preprocess=redact_events to model.predict(...) for direct prediction.
+```
+
+For one field, clear only that value and keep its siblings. A null scalar is
+an observed missing value. If a training answer should still be scored, keep
+it in a target field or select it with `task=rf.reconstruct(query=...)`.
+The [event spacing experiment](/evidence/P127/) measures the difference between
+null slots and filtering rows out of the list.
+
+### Score pending claims in a mixed batch
+
+Suppose historical claims carry the eventual settled amount and a flag recording
+whether that amount was pending at the decision cutoff. Train on those records,
+then score incoming claims with the same flag. The request includes a nullable
+numeric `amount` column. Pending claims can have a null amount.
+
+```python
+import polars as pl
+import relflow as rf
+
+
+class ClaimReview(rf.Model):
+    """Estimate the settlement for claims still pending at the cutoff."""
+
+    billed = rf.Number
+    amount = rf.Number(
+        task=rf.reconstruct(query="pending_review"),
+    )
+
+
+if __name__ == "__main__":
+    model = ClaimReview(preset="small")
+    data = rf.ArrowDataModule(
+        train="claims/train.parquet",
+        validate="claims/validation.parquet",
+    )
+    model.fit(data, preset="small")
+
+    requests = pl.read_parquet("claims/requests.parquet")
+    result = model.predict(requests, retain=("claim_id",))
+    amount = pl.col("predictions").struct.field("amount")
+    estimates = result.filter(amount.struct.field("inferred")).select(
+        pl.col("inputs").struct.field("claim_id"),
+        amount.struct.field("content").alias("estimated_amount"),
+    )
+```
+
+For a pending claim, the model uses the billed amount as context and infers the
+settlement. For a settled claim, the settlement stays visible and `inferred`
+is false. A supervised `amount = rf.Number(predict=True)` instead requests an
+estimate for every claim and allows the entire amount column to be omitted.
+
 ## Combine objectives deliberately
 
-Several policies can be supplied as a tuple on one node. Each policy has
-its own selection and effects. Reconstruction selections combine at a
-field address; multiple selected coordinates or overlapping policies do
-not create independent objective names for that same field.
+A field may combine `hide` with a `task` objective. Training
+hides the union of their selections and scores the observed answers selected
+for reconstruction. Put `ignore` on the branch to exempt children from
+ordinary masking, or on `rf.reconstruct(...)` to exempt them from that
+pretraining objective. Each supervised or reconstructed field has one
+objective address.
 
 By default, relflow computes one extension-owned loss per participating
 reconstruction address, multiplies it by the field's positive `weight`,

@@ -164,7 +164,7 @@ export function parseSchema(
       if (namespace || (!definitions.has(type) && optionsLeaves.has(type))) {
         if (['Model', 'Branch', 'Struct'].includes(type))
           throw new Error(`Schema field ${path} needs a declared Branch class.`);
-        const target = [...options.matchAll(/\bmask\s*=\s*True\b/g)].some((match) =>
+        const target = [...options.matchAll(/\bpredict\s*=\s*True\b/g)].some((match) =>
           context.isCode(match.index),
         );
         return {

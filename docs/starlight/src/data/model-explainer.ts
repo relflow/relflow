@@ -135,7 +135,7 @@ export const explainerCases: ModelCase[] = scenarios.map((scenario) => {
     if (parentPath !== '/' && !parent) throw new Error(`${scenario.id}: additional target parent ${parentPath} does not exist.`);
     const children = parent ? parent.children : full;
     if (children.some((node) => node.name === name)) throw new Error(`${scenario.id}: additional target ${path} already exists.`);
-    children.push({ path, name, kind: 'field', type, owner: parent?.className || parsed.modelClass, declaration: `rf.${type}(mask=True)`, children: [], target: true, description, added: true, labelRequirement: lesson.labelRequirement });
+    children.push({ path, name, kind: 'field', type, owner: parent?.className || parsed.modelClass, declaration: `rf.${type}(predict=True)`, children: [], target: true, description, added: true, labelRequirement: lesson.labelRequirement });
     const entity = parent ? source.get(parent.path)?.entity : dataset.entities[0].id;
     // A branch's placement column belongs to its parent; follow its relation to the child entity.
     const destination = parent ? dataset.relations.find((relation) => relation.from === entity && relation.fromColumn === parent.name)?.to : entity;

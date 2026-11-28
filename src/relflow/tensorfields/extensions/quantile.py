@@ -130,6 +130,10 @@ class Synchronize(Callback):
             if isinstance(resource, Distribution):
                 resource.state.freeze()
 
+    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        # Lightning skips callback teardown when a loop raises.
+        self.teardown(trainer, pl_module, stage="exception")
+
 
 quantile: Extension = Extension(
     name="quantile",
@@ -270,7 +274,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
 
         content, state = encode(input, address=address)
         targets = TensorDict({}, batch_size=input.shape)
-        if address in schema.objectives:
+        if sources.needs_targets(schema):
             target_raw, target_state = encode(target, address=address)
             targets = TensorDict(
                 {

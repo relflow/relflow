@@ -104,7 +104,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -143,7 +143,7 @@ def records(*, rows: int, seed: int, novel: bool = False) -> Iterator[dict]:
 def build(p_unavailable: float) -> rf.Model:
     class PredictionModel(rf.Model):
         tags = rf.Set(p_unavailable=p_unavailable)
-        nonempty = rf.Number(mask=True, objective="mse")
+        nonempty = rf.Number(predict=True, objective="mse")
 
     model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     return model

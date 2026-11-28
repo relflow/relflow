@@ -7,7 +7,7 @@ from relflow.architecture import output
 
 
 def test_evaluation_prediction_reuses_the_plan_and_training_refreshes_it(monkeypatch):
-    model = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(mask=True)).eval()
+    model = rf.Model(preset="small", d_model=8, amount=rf.Number, label=rf.Boolean(predict=True)).eval()
     table = pa.table({"amount": [1.0, 2.0], "label": [True, False]})
     refreshes = []
     plan = output.plan
@@ -32,6 +32,6 @@ def test_evaluation_prediction_reuses_the_plan_and_training_refreshes_it(monkeyp
     assert refreshes[-1] is True
 
     model.eval()
-    model.extend(rf.where("address") == "/", flag=rf.Boolean(mask=True))
+    model.extend(rf.where("address") == "/", flag=rf.Boolean(predict=True))
     model.predict(table)
     assert model.output_plans[(model._contract_generation, ())] is not compiled

@@ -8,7 +8,7 @@ import torch
 import relflow as rf
 from relflow.data.ragged import coalesce
 from relflow.structs.enums import Strata, TensorKey, Tokens
-from relflow.tensorfields.extensions.number import TensorField
+from relflow.tensorfields.extensions.number import GlobalOnlineNormalizer, TensorField
 from tests.tensorfields.helpers import tensorize
 
 
@@ -17,7 +17,7 @@ def tensorfield(values, selected):
         d_model=8,
         n_heads=2,
         n_layers=1,
-        amount=rf.Number(mask=rf.Mask(query="selected", reconstruct=True)),
+        amount=rf.Number(task=rf.reconstruct(query="selected")),
     )
     selected = [selected] * len(values) if isinstance(selected, bool) else selected
     table = pa.table({"amount": values, "selected": selected})
@@ -132,3 +132,35 @@ def test_number_empty_and_all_null_values_still_use_float64_storage(values):
     assert field.content.dtype == field.targets[TensorKey.content].dtype == torch.float64
     assert field.content.shape == field.targets[TensorKey.content].shape == (len(values), 1)
     assert not field.content.any() and not field.targets[TensorKey.content].any()
+
+
+@pytest.mark.parametrize(
+    "cast",
+    [torch.nn.Module.half, torch.nn.Module.bfloat16, torch.nn.Module.float, lambda module: module.to(torch.bfloat16)],
+)
+def test_model_casts_keep_number_statistics_float64(cast):
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, amount=rf.Number, label=rf.Number(predict=True))
+    normalizers = [module for module in model.modules() if isinstance(module, GlobalOnlineNormalizer)]
+    for normalizer in normalizers:
+        # Neither float32 nor bfloat16 can hold this mean exactly.
+        normalizer.mean.fill_(1e9 + 0.25)
+        normalizer.var.fill_(0.0625)
+
+    cast(model)
+
+    assert len(normalizers) == 5
+    for normalizer in normalizers:
+        assert normalizer.mean.dtype == normalizer.var.dtype == torch.float64
+        assert (normalizer.mean.item(), normalizer.var.item()) == (1e9 + 0.25, 0.0625)
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not torch.backends.mps.is_available(), reason="MPS is unavailable")
+def test_number_statistics_narrow_only_while_on_mps():
+    normalizer = GlobalOnlineNormalizer()
+    normalizer.mean.fill_(1.5)
+
+    normalizer.to("mps")
+    assert (normalizer.mean.device.type, normalizer.mean.dtype) == ("mps", torch.float32)
+    normalizer.to("cpu")
+    assert (normalizer.mean.device.type, normalizer.mean.dtype, normalizer.mean.item()) == ("cpu", torch.float64, 1.5)

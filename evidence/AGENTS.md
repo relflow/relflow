@@ -32,6 +32,10 @@ The reporter hashes shared runtime Python files without importing them; sibling
 `Pxxx.py` experiments never enter another study's provenance. Static discovery
 and documentation builds must not import `policies.py`.
 
+Declare supervised targets with `predict=True` and reconstruction answers with
+`task=rf.reconstruct(...)` directly in each proof, keeping its query names and
+rates there.
+
 From the repository root, `make check` validates static docs and evidence tooling.
 Runtime tests under evidence/tests/runtime are explicit and require a separately
 supplied RelFlow wheel; use `uv run --project docs --with /path/to/matching-relflow.whl`
@@ -126,8 +130,8 @@ Docker socket into workers. Keep credentials outside worker containers.
 Shared hosted Docker operations belong in `runtime.py`; `worker.py` owns the
 container entrypoint. Historical readers verify archived reports without
 restoring obsolete execution backends.
-The active suite supports relflow >=0.5.0. Pre-0.5 event bases and authenticated
-rewritten pushes use the fixed 0.5 anchor in `releases.py`, with the original
+The active suite supports relflow >=0.6.0. Pre-0.6 event bases and authenticated
+rewritten pushes use the fixed 0.6 anchor in `releases.py`, with the original
 event base retained in `comparison.json` and the manifest. Do not add SDK
 compatibility shims, run old wheels, or change learning thresholds to bridge
 the breaking release. See [hosted.md](hosted.md) for selection and trust rules.
@@ -141,7 +145,7 @@ Release before publishing the package tag. Ordinary CI retains per-attempt
 reports and plots only as GitHub Actions artifacts. It creates no public
 Evidence releases, source commits, branches, or pull requests. Hosted branch/PR
 docs show the latest supported formal release's frozen results, or pending
-measurements until the first >=0.5.0 release. New release downloads use
+measurements until the first >=0.6.0 release. New release downloads use
 `relflow-<version>-evidence*` names; existing published names remain immutable.
 Keep generated publications and executed source bundles outside Git. Local builds without a selected
 publication show pending measurements. Hosted builds verify the public release

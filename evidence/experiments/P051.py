@@ -135,7 +135,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -173,14 +173,8 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 
 class Model(rf.Model):
-    x = rf.Number(
-        objective="mse",
-        mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query="hide_x", reconstruct=True)),
-    )
-    y = rf.Number(
-        objective="mse",
-        mask=(rf.Mask(rate=0.35, reconstruct=True), rf.Mask(query="hide_y", reconstruct=True)),
-    )
+    x = rf.Number(objective="mse", task=(rf.reconstruct(rate=0.35), rf.reconstruct(query="hide_x")))
+    y = rf.Number(objective="mse", task=(rf.reconstruct(rate=0.35), rf.reconstruct(query="hide_y")))
 
 
 def build() -> rf.Model:

@@ -124,7 +124,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -229,7 +229,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         class Model(rf.Model):
             signal = rf.Number(jitter=jitter)
             nuisance = rf.Vector(n_dim=8, jitter=jitter)
-            target = rf.Number(mask=True, objective="mse")
+            target = rf.Number(predict=True, objective="mse")
 
         model = Model(preset=CONTROL.name)
         updates = fit(model, pa.Table.from_pylist(train), pa.Table.from_pylist(validate), seed, steps, accelerator)

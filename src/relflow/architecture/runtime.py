@@ -346,7 +346,7 @@ def objective(
             continue
         if strata == Strata.train:
             anchors.extend(
-                value.sum() * 0.0
+                value.unsqueeze(0)[:0].sum()
                 for value in prediction.payload.values(include_nested=True, leaves_only=True)
                 if torch.is_tensor(value) and value.requires_grad
             )
@@ -367,7 +367,7 @@ def objective(
 
     if strata == Strata.train:
         if not anchors:
-            raise RuntimeError("a distributed reconstruction objective produced no gradient-bearing decoder output")
+            raise RuntimeError("a distributed training objective produced no gradient-bearing decoder output")
         anchor = torch.stack(anchors).sum()
     else:
         anchor = torch.zeros((), device=inputs.device)
@@ -500,7 +500,7 @@ def step(
             strata=strata.value,
             rank=module.global_rank,
             batch=batch_idx,
-        ).warning("no reconstruction objective was selected on any rank, skipping batch")
+        ).warning("skipping batch because no rank selected any targets")
         if strata == Strata.train:
             return None
         return Output(loss=torch.tensor(0.0, device=inputs.device))

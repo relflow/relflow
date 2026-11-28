@@ -147,7 +147,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -212,7 +212,7 @@ class Model(rf.Model):
     selected_group = rf.Enum(values=GROUPS, p_unavailable=0.0)
     operation = rf.Enum(values=OPERATIONS, p_unavailable=0.0)
     items = Item(length=6, reduction=None)
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

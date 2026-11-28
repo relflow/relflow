@@ -279,9 +279,9 @@ protocol, revisions, controls, seeds, budgets, and provenance.
   may supply timestamp sources from which target values are derived; explain
   that transformation in `answerNote` rather than inventing numeric source data.
   Ordinal uses keyword `values=(...)` and writes native labels or integer ranks.
-- The leaf type reference, schemas, and workflow contracts follow the public
-  source at `a1d0be3e373cf6c183e4926f1bfcbef845f2f883` on stage/0.5.0
-  (13 canonical types).
+- Keep the leaf reference, schemas, and workflow contracts aligned with the
+  public SDK in the checkout. Declare supervised targets with `predict=True`,
+  and use `task=rf.reconstruct(...)` for reconstruction examples.
   Compare source exports, registered extensions, pages, examples, and navigation
   together before declaring coverage complete. Use Period for calendar fields.
   Preserve the selected publication and its frozen measurement provenance.

@@ -16,17 +16,17 @@ from evidence.releases import filenames
 
 @pytest.fixture
 def released(tmp_path, monkeypatch):
-    (tmp_path / "pyproject.toml").write_text('[project]\nversion="0.5.0"\n')
+    (tmp_path / "pyproject.toml").write_text('[project]\nversion="0.6.0"\n')
     family = tmp_path / "evidence/experiments"
     family.mkdir(parents=True)
     (family / "P001.py").write_text(
         "# %% [markdown]\n# ---\n# evidence-id: P001\n# ---\nraise RuntimeError('do not execute')\n"
     )
     revision = "a" * 40
-    tag = "evidence-v0.5.0"
+    tag = "evidence-v0.6.0"
     selected = {
         "schema": 1,
-        "version": "0.5.0",
+        "version": "0.6.0",
         "revision": revision,
         "report": {"passed": True, "release": f"https://github.com/relflow/relflow/releases/tag/{tag}"},
         "results": {
@@ -48,15 +48,15 @@ def released(tmp_path, monkeypatch):
     reports = bundle.getvalue()
     selected["report"]["reports_sha256"] = hashlib.sha256(reports).hexdigest()
     content = json.dumps(selected).encode()
-    url = f"https://github.com/relflow/relflow/releases/download/{tag}/publication.json"
-    package = {"tag_name": "v0.5.0", "target_commitish": revision, "draft": False}
+    url = f"https://github.com/relflow/relflow/releases/download/{tag}/{filenames('0.6.0')['publication']}"
+    package = {"tag_name": "v0.6.0", "target_commitish": revision, "draft": False}
     report = {
         "tag_name": tag,
         "target_commitish": revision,
         "draft": False,
         "assets": [
             {
-                "name": "publication.json",
+                "name": filenames("0.6.0")["publication"],
                 "browser_download_url": url,
                 "size": len(content),
                 "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
@@ -64,15 +64,15 @@ def released(tmp_path, monkeypatch):
         ],
     }
     responses = {
-        "https://api.github.com/repos/relflow/relflow/releases/tags/v0.5.0": package,
+        "https://api.github.com/repos/relflow/relflow/releases/tags/v0.6.0": package,
         "https://api.github.com/repos/relflow/relflow/releases/latest": package,
         "https://api.github.com/repos/relflow/relflow/releases/tags/" + tag: report,
         url: content,
     }
-    reports_url = url.removesuffix("publication.json") + "evidence-reports.tar.gz"
+    reports_url = url.removesuffix(filenames("0.6.0")["publication"]) + filenames("0.6.0")["reports"]
     report["assets"].append(
         {
-            "name": "evidence-reports.tar.gz",
+            "name": filenames("0.6.0")["reports"],
             "browser_download_url": reports_url,
             "size": len(reports),
             "digest": "sha256:" + hashlib.sha256(reports).hexdigest(),
@@ -142,7 +142,7 @@ def test_invalid_release_material_never_replaces_the_snapshot(released, fault):
         asset["browser_download_url"] = "https://example.invalid/publication.json"
     else:
         if fault == "version":
-            selected["version"] = "0.5.1"
+            selected["version"] = "0.6.1"
         elif fault == "revision":
             selected["revision"] = "c" * 40
         elif fault == "report":
@@ -164,17 +164,17 @@ def test_invalid_release_material_never_replaces_the_snapshot(released, fault):
     assert not list((root / ".cache").rglob("*.json"))
 
 
-@pytest.mark.parametrize("checkout", ["0.5.0", "0.5.1", "0.6.0"])
+@pytest.mark.parametrize("checkout", ["0.6.0", "0.6.1", "0.7.0"])
 def test_preview_uses_latest_formal_release_independent_of_checkout_version(released, checkout):
     root, responses, _, _, _, _ = released
     (root / "pyproject.toml").write_text(f'[project]\nversion="{checkout}"\n')
-    responses["https://api.github.com/repos/relflow/relflow/releases/tags/v0.5.1"] = None
+    responses["https://api.github.com/repos/relflow/relflow/releases/tags/v0.6.1"] = None
     responses["https://api.github.com/repos/relflow/relflow/releases/latest"] = responses[
-        "https://api.github.com/repos/relflow/relflow/releases/tags/v0.5.0"
+        "https://api.github.com/repos/relflow/relflow/releases/tags/v0.6.0"
     ]
     selected = assets.fetch(root)
     assert selected is not None
-    assert json.loads(selected.read_text())["version"] == "0.5.0"
+    assert json.loads(selected.read_text())["version"] == "0.6.0"
 
 
 def test_unreleased_first_version_keeps_measurements_pending(released):
@@ -185,15 +185,15 @@ def test_unreleased_first_version_keeps_measurements_pending(released):
     assert not (root / ".cache").exists()
 
 
-def test_pre_05_release_does_not_supply_current_measurements(released):
+def test_pre_06_release_does_not_supply_current_measurements(released):
     root, responses, _, _, calls, _ = released
-    responses["https://api.github.com/repos/relflow/relflow/releases/latest"] = {"tag_name": "v0.4.7"}
+    responses["https://api.github.com/repos/relflow/relflow/releases/latest"] = {"tag_name": "v0.5.4"}
     assert assets.fetch(root) is None
     assert calls == ["https://api.github.com/repos/relflow/relflow/releases/latest"]
-    with pytest.raises(ValueError, match="requires relflow >=0.5.0"):
+    with pytest.raises(ValueError, match="requires relflow >=0.6.0"):
         assets.fetch(root, required=True)
-    with pytest.raises(ValueError, match="requires relflow >=0.5.0"):
-        assets.fetch(root, "0.4.7", required=True)
+    with pytest.raises(ValueError, match="requires relflow >=0.6.0"):
+        assets.fetch(root, "0.5.4", required=True)
     assert not (root / ".cache").exists()
 
 
@@ -212,6 +212,51 @@ def test_download_is_bounded_before_parsing(monkeypatch):
         assets.download("https://github.com/", limit=8)
 
 
+@pytest.mark.parametrize(("status", "headers", "delay"), [(502, {}, 1), (403, {"Retry-After": "2"}, 2)])
+def test_download_retries_transient_responses(monkeypatch, status, headers, delay):
+    sleeps = []
+    monkeypatch.setattr(assets.time, "sleep", sleeps.append)
+
+    def urlopen(request, **kwargs):
+        if not sleeps:
+            raise HTTPError(request.full_url, status, "temporary failure", headers, None)
+        return io.BytesIO(b"publication")
+
+    monkeypatch.setattr(assets, "urlopen", urlopen)
+    assert assets.download("https://api.github.com/repos/relflow/relflow/releases/latest") == b"publication"
+    assert sleeps == [delay]
+
+
+def test_download_fails_after_bounded_attempts(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(assets.time, "sleep", sleeps.append)
+
+    def unavailable(request, **kwargs):
+        raise HTTPError(request.full_url, 503, "still unavailable", {}, None)
+
+    monkeypatch.setattr(assets, "urlopen", unavailable)
+    with pytest.raises(HTTPError, match="503"):
+        assets.download("https://api.github.com/repos/relflow/relflow/releases/latest", missing=True)
+    assert sleeps == [1, 4]
+
+
+def test_download_authenticates_only_release_metadata_without_forwarding_credentials(monkeypatch):
+    requests = []
+    monkeypatch.setenv("RELFLOW_EVIDENCE_GITHUB_TOKEN", "fixture-token")
+
+    def urlopen(request, **kwargs):
+        requests.append(request)
+        return io.BytesIO(b"publication")
+
+    monkeypatch.setattr(assets, "urlopen", urlopen)
+    assets.download("https://api.github.com/repos/relflow/relflow/releases/latest")
+    assets.download("https://github.com/relflow/relflow/releases/download/evidence-v0.5.4/publication.json")
+    assets.download("https://www.relflow.ai/latest/evidence/selected.json")
+    assert requests[0].unredirected_hdrs["Authorization"] == "Bearer fixture-token"
+    assert all("Authorization" not in request.headers for request in requests)
+    assert all(not request.has_header("Authorization") for request in requests[1:])
+
+
 def test_canonical_sources_have_no_checked_in_measurements():
     root = Path(__file__).resolve().parents[1]
     assert not (root / "results.json").exists()
@@ -220,31 +265,8 @@ def test_canonical_sources_have_no_checked_in_measurements():
         assert not {"evidence-result", "evidence-report"} & metadata((root / entry["script"]).read_text()).keys()
 
 
-def test_versioned_names_are_used_without_renaming_historical_releases(released):
-    root, responses, selected, report, calls, old_url = released
-    name = filenames("0.5.0")["publication"]
-    url = old_url.removesuffix("publication.json") + name
-    report["assets"][0].update(name=name, browser_download_url=url)
-    responses[url] = responses.pop(old_url)
-    reports_asset = report["assets"][1]
-    old_reports = reports_asset["browser_download_url"]
-    reports_url = old_reports.removesuffix("evidence-reports.tar.gz") + filenames("0.5.0")["reports"]
-    reports_asset.update(name=filenames("0.5.0")["reports"], browser_download_url=reports_url)
-    responses[reports_url] = responses.pop(old_reports)
-    path = assets.fetch(root, "0.5.0", required=True)
-    assert json.loads(path.read_text()) == selected
-    assert url in calls and old_url not in calls
-
-
-def test_partial_versioned_inventory_cannot_fall_back_to_old_publication_name(released):
-    root, _, _, report, _, _ = released
-    report["assets"].append({"name": filenames("0.5.0")["reports"]})
-    with pytest.raises(ValueError, match="requires one relflow-0.5.0-evidence.json"):
-        assets.fetch(root, "0.5.0", required=True)
-
-
 def test_publication_requires_matching_plot_asset_before_downloading(tmp_path):
-    selected = {"version": "0.5.0", "report": {"plots": {"sha256": "a" * 64, "size": 10, "url": "wrong"}}}
+    selected = {"version": "0.6.0", "report": {"plots": {"sha256": "a" * 64, "size": 10, "url": "wrong"}}}
     with pytest.raises(ValueError, match="retained GitHub release asset"):
         assets.plots(tmp_path, selected, {"assets": []})
 
@@ -272,13 +294,13 @@ def test_released_plots_bind_to_frozen_source_instead_of_newer_checkout(tmp_path
             "P999": {"data": "P999.json", "assets": {}, "code_sha256": "unmeasured illustration"},
         },
     }
-    name = filenames("0.5.0")["plots"]
+    name = filenames("0.6.0")["plots"]
     spec = {
-        "url": f"https://github.com/relflow/relflow/releases/download/evidence-v0.5.0/{name}",
+        "url": f"https://github.com/relflow/relflow/releases/download/evidence-v0.6.0/{name}",
         "sha256": "a" * 64,
         "size": 10,
     }
-    selected = {"version": "0.5.0", "report": {"run_id": "gh-123-1", "plots": spec}, "results": {"P001": record}}
+    selected = {"version": "0.6.0", "report": {"run_id": "gh-123-1", "plots": spec}, "results": {"P001": record}}
     release = {
         "assets": [
             {

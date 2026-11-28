@@ -97,8 +97,8 @@
 # A whole sequence draws `offset ~ Uniform(-1, 1)` and
 # `increment ~ Uniform(-0.4, 0.4)`, then `value[t] = offset + t*increment`.
 # Neither latent parameter is exposed. Choose a prefix length uniformly from
-# 2, 3, and 4. The branch skips every suffix item; a leaf query requests only
-# the first hidden value. Whole sequences are independently generated for
+# 2, 3, and 4. A preprocessor retains each prefix value as context and creates
+# a supervised answer slot only for the first future value. Whole sequences are independently generated for
 # training (4,096), validation (512), and testing (1,024).
 #
 # ### Training and controls
@@ -125,7 +125,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -170,12 +170,24 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
         }
 
 
+@rf.preprocess
+def prepare(frame: pl.DataFrame) -> pl.DataFrame:
+    """Keep observed values and requested answers in their original row slots."""
+    row = pl.element()
+    value = pl.struct(value=row.struct.field("value"))
+    context = pl.when(~row.struct.field("future")).then(value)
+    answer = pl.when(row.struct.field("next")).then(value)
+    slots = pl.struct(context=context, answers=pl.concat_list(answer))
+    return frame.with_columns(pl.col("events").list.eval(slots))
+
+
 class Event(rf.Branch):
-    value = rf.Number(objective="mse", mask=rf.Mask(query="next", reconstruct=True))
+    value = rf.Number(query="context.value")
+    answers = rf.Branch(length=1, reduction=None, value=rf.Number(objective="mse", predict=True))
 
 
 class PredictionModel(rf.Model):
-    events = Event(length=LENGTH, reduction=None, mask=rf.Mask(query="future", skip=True, dropout=False))
+    events = Event(length=LENGTH, reduction=None)
 
 
 def build() -> rf.Model:
@@ -183,12 +195,20 @@ def build() -> rf.Model:
 
 
 def prediction(model: rf.Model, rows: list[dict]) -> tuple[np.ndarray, np.ndarray]:
-    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    output = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), preprocess=prepare))["predictions"].to_list()
     content = np.asarray(
-        [[item["value"]["content"] for item in row["events"]] for row in output], dtype=np.float64
+        [
+            [item["answers"][0]["value"]["content"] if item["answers"][0] else 0.0 for item in row["events"]]
+            for row in output
+        ],
+        dtype=np.float64,
     ).reshape(len(rows), LENGTH)
     inferred = np.asarray(
-        [[item["value"]["inferred"] for item in row["events"]] for row in output], dtype=bool
+        [
+            [bool(item["answers"][0] and item["answers"][0]["value"]["inferred"]) for item in row["events"]]
+            for row in output
+        ],
+        dtype=bool,
     ).reshape(len(rows), LENGTH)
     return content, inferred
 
@@ -217,6 +237,7 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
     lit.seed_everything(seed, workers=True)
     model = build()
     data = rf.SyntheticDataModule(
+        preprocessor=prepare,
         train=partial(records, rows=4096, seed=seed + 1),
         validate=partial(records, rows=512, seed=seed + 2),
         seed=seed,
@@ -292,15 +313,16 @@ def run(seed: int, steps: int | None, accelerator: str) -> tuple[dict, dict]:
         checks[f"prefix {cut}: next-value nRMSE below 0.35"] = measured["nrmse"] < 0.35
         checks[f"prefix {cut}: shuffled prefix nRMSE above 0.85"] = measured["shuffled_nrmse"] > 0.85
         checks[f"prefix {cut}: future cannot affect prediction"] = measured["future_value_drift"] < 1e-5
-        field = probe.encode(pa.Table.from_pylist(selected), strata="train")["/events/value"]
+        fields = probe.encode(pa.Table.from_pylist(selected), preprocess=prepare, strata="train")
         expected = np.broadcast_to(np.arange(LENGTH) == cut, inferred.shape)
         visible = np.broadcast_to(np.arange(LENGTH) < cut, inferred.shape)
         checks[f"prefix {cut}: exactly the next coordinate is requested"] = bool(np.array_equal(inferred, expected))
         checks[f"prefix {cut}: exactly the next coordinate is trained"] = bool(
-            np.array_equal(field.trainable.cpu().numpy().reshape(expected.shape), expected)
+            np.array_equal(fields["/events/answers/value"].trainable.cpu().numpy().reshape(expected.shape), expected)
         )
         checks[f"prefix {cut}: only prefix values are encoder inputs"] = bool(
-            np.array_equal(field.present.cpu().numpy().reshape(visible.shape), visible)
+            np.array_equal(fields["/events/value"].present.cpu().numpy().reshape(visible.shape), visible)
+            and not fields["/events/answers/value"].present.any()
         )
     generated = rollout(model, test)
     baseline = float(np.sqrt(np.mean((actual[:, 2:] - mean[2:]) ** 2)))

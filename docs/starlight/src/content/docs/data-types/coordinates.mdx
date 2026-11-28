@@ -21,7 +21,7 @@ source fields in that order:
 ```python
 class Stop(rf.Model):
     current = rf.Coordinates
-    destination = rf.Coordinates(query=("destination_lat", "destination_lon"), mask=True)
+    destination = rf.Coordinates(query=("destination_lat", "destination_lon"), predict=True)
 ```
 
 Latitude must be within `[-90, 90]` and longitude within `[-180, 180]`.
@@ -53,7 +53,7 @@ or elevation and is not a pedestrian route length.
 
 ### Predictions
 
-With `mask=True`, historical answers supply the target coordinates and
+With `predict=True`, historical answers supply the target coordinates and
 prediction requests can omit them. The result's `content` contains a
 latitude and longitude in degrees, together with `state` and `inferred`.
 The writer fills content with zeros when the most likely state is not valued.

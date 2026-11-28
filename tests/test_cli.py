@@ -45,7 +45,7 @@ def inputs(tmp_path):
                 type: number
               label:
                 type: boolean
-                mask: true
+                predict: true
         """)
     )
     frame = pl.DataFrame(
@@ -83,6 +83,27 @@ def test_inspect_resolves_the_python_schema_without_a_graph(inputs, monkeypatch)
     assert report["objectives"] == ["/events/label"]
     assert report["stored_tensors"] == 0
     assert {node["address"] for node in report["nodes"]} == {"/", "/events", "/events/amount", "/events/label"}
+
+
+def test_human_inspection_renders_leaf_queries(tmp_path, capsys):
+    model = tmp_path / "model.yaml"
+    model.write_text(
+        dedent("""\
+        d_model: 8
+        n_layers: 1
+        n_heads: 2
+        fields:
+          amount:
+            type: number
+            query: source.amount
+          label:
+            type: boolean
+            predict: true
+        """)
+    )
+
+    assert main(["inspect", str(model)]) == 0
+    assert "query=source.amount" in capsys.readouterr().out
 
 
 def test_checkpoint_inspection_does_not_construct_a_model(inputs, tmp_path, monkeypatch):

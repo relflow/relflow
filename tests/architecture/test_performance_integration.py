@@ -29,10 +29,10 @@ def test_ragged_text_and_input_only_fields_preserve_dense_objective_and_gradient
             length=None,
             note=rf.Text(model="local-test", max_length=4, cache=True),
             tags=rf.Set(p_unavailable=0.0),
-            occurred=rf.Period(dateparts=("day_of_week",)),
+            occurred=rf.Period(parts=("day_of_week",)),
             amount=rf.Number,
             risk=rf.Number(
-                mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True),
+                task=rf.reconstruct(query="selected"),
                 embed=embed,
             ),
         ),
@@ -121,7 +121,7 @@ def test_coordinatewise_extension_with_only_nested_output_can_train(monkeypatch)
             events=rf.Branch(
                 length=None,
                 value=rf.Number,
-                target=Request(mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True)),
+                target=Request(task=rf.reconstruct(query="selected")),
             ),
         )
         fields = model.encode(

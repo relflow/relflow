@@ -110,7 +110,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -183,7 +183,7 @@ def equal(first, second) -> bool:
 class PredictionModel(rf.Model):
     a = rf.Number
     b = rf.Number
-    y = rf.Number(mask=True, objective="mse")
+    y = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P049", seed=4901)

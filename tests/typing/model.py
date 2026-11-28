@@ -28,7 +28,9 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
         age=rf.Duration(query=("created_at", "observed_at"), granularity="hours"),
         since=rf.Duration(query="observed_at", start="2026-01-01", objective="huber"),
         visits=rf.Branch(length=8, gap=rf.Duration(query="observed_at", delta=True, granularity="seconds")),
-        label=rf.Category(mask=True),
+        events=rf.Branch(at=rf.Index, amount=rf.Number),
+        sessions=rf.Branch(started=rf.Index(query="opened_at", granularity="minutes"), amount=rf.Number),
+        label=rf.Category(predict=True),
     )
     assert_type(model.compile(encoders=True, pools=False), Classifier)
     assert_type(model.save("model.ckpt"), str)
@@ -36,7 +38,7 @@ def model_api(table: pa.Table, batch: TensorDict, loss: torch.Tensor) -> None:
     assert_type(Classifier.load("model.ckpt"), Classifier)
     assert_type(Classifier.from_yaml("model.yaml"), Classifier)
     assert_type(rf.Model.from_yaml(Path("model.yaml"), d_model=32, optimizer=rf.adamw(1e-3)), rf.Model)
-    assert_type(Classifier(preset="small", amount=rf.Number, label=rf.Category(mask=True)), Classifier)
+    assert_type(Classifier(preset="small", amount=rf.Number, label=rf.Category(predict=True)), Classifier)
     assert_type(Classifier(preset="small", amount=rf.Number, n_heads=2), Classifier)
     assert_type(Classifier(preset="medium", amount=rf.Number, reduction=None), Classifier)
     assert_type(Classifier(preset="medium", amount=rf.Number, attention=None), Classifier)
@@ -111,8 +113,10 @@ def schedulers(schema: rf.Schema, optimizer: torch.optim.Optimizer) -> None:
     )
 
 
-def wrapper(field: rf.TreeFieldInput, mask: rf.MaskInput, attention: rf.AttentionInput) -> rf.Model:
-    return rf.Model(d_model=32, n_layers=1, n_heads=4, field=field, mask=mask, attention=attention)
+def wrapper(
+    field: rf.TreeFieldInput, hide: rf.HideInput, attention: rf.AttentionInput, task: rf.Task | None
+) -> rf.Model:
+    return rf.Model(d_model=32, n_layers=1, n_heads=4, field=field, hide=hide, attention=attention, task=task)
 
 
 class CustomScheduler:
@@ -139,7 +143,7 @@ def lightning_scheduler(schema: rf.Schema, scheduler: LRSchedulerConfigType) -> 
 def batches(model: Classifier, data: rf.ArrowDataModule, table: pa.Table, batch_size: int | None) -> None:
     assert_type(model.batch_size, int)
     model.batch_size = 32
-    assert_type(model.fit(data, batch_size=batch_size, learning_rate=1e-3), Classifier)
+    assert_type(model.fit(data, batch_size=batch_size, accumulate_grad_batches=4, learning_rate=1e-3), Classifier)
     assert_type(model.validate(data, batch_size=batch_size), list[dict[str, float]])
     assert_type(model.test(data, batch_size=batch_size), list[dict[str, float]])
     assert_type(model.predict(table, batch_size=batch_size), pl.DataFrame)

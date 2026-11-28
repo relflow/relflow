@@ -197,7 +197,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -268,12 +268,12 @@ def records(*, rows: int, seed: int, permuted: bool = False) -> Iterator[dict]:
 
 
 def build() -> rf.Model:
-    mask = rf.Mask(rate=0.35, reconstruct=True)
+    pretrain = rf.reconstruct(rate=0.35)
 
     class Model(rf.Model):
-        merchant_pattern = rf.Enum(values=MERCHANTS, p_unavailable=0.0, mask=mask)
-        payment_rhythm = rf.Enum(values=RHYTHMS, p_unavailable=0.0, mask=mask)
-        cashflow = rf.Vector(n_dim=16, mask=mask)
+        merchant_pattern = rf.Enum(values=MERCHANTS, p_unavailable=0.0, task=pretrain)
+        payment_rhythm = rf.Enum(values=RHYTHMS, p_unavailable=0.0, task=pretrain)
+        cashflow = rf.Vector(n_dim=16, task=pretrain)
 
     model = Model(preset=CONTROL.name, embed=True, reduction=rf.Attention(n_outputs=1))
     return model

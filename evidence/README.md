@@ -28,7 +28,7 @@ The runner replaces the script's relflow requirement, preserving requested
 extras, and resolves all its dependencies together. It clears inherited Python
 import paths and records the wheel's SHA-256 in each result's provenance.
 Without `--wheel`, uv installs the published relflow package declared by the script.
-These class-based schemas require relflow 0.5.0 or later; use `--wheel` while
+These class-based schemas require relflow 0.6.0 or later; use `--wheel` while
 developing against the unreleased branch.
 Runtime tests still use the separate documentation environment shown above.
 A two-step run checks execution only. Each execution
@@ -87,7 +87,7 @@ from policies import CONTROL
 class Model(rf.Model):
     value = rf.Number
     history = rf.Branch(length=8, value=rf.Number)
-    target = rf.Boolean(mask=True)
+    target = rf.Boolean(predict=True)
 
 
 # Inside the experiment's execution function:
@@ -241,8 +241,8 @@ Every push to `main` or `stage/**` validates the complete paired suite against
 the pre-push revision. PRs and merge groups use their actual comparison base; manual runs
 use the current commit's first parent by default; `evidence_base=<full-sha>`
 selects an explicit ancestor for repeatable manual comparisons. The active suite
-requires relflow >=0.5.0. A pre-0.5 event base, or an authenticated forced push
-with rewritten history, selects the fixed 0.5 anchor described in
+requires relflow >=0.6.0. A pre-0.6 event base, or an authenticated forced push
+with rewritten history, selects the fixed 0.6 anchor described in
 [hosted.md](hosted.md). The report retains both the actual event base and the
 measured baseline in its comparison receipt. Routine
 reports remain Actions artifacts for 90 days, with tested input wheels and
@@ -255,15 +255,15 @@ checks, provenance, source/wheel digests, the runtime lock, and report integrity
 the publisher renders a review site from the selected records and freezes
 `evidence-v<version>` before the package's `v<version>` tag is published.
 
-New immutable Evidence releases use versioned downloads. For relflow 0.5.0:
+New immutable Evidence releases use versioned downloads. For relflow 0.6.0:
 
-- `relflow-0.5.0-evidence.json`: the frozen selection and original results.
-- `relflow-0.5.0-evidence-measurements.md`: the comparison table.
-- `relflow-0.5.0-evidence-reports.tar.gz`: records, logs, summary, and HTML report.
-- `relflow-0.5.0-evidence-inputs.tar.gz`: exact wheels and runtime requirements.
-- `relflow-0.5.0-evidence-plots.zip`: matched diagnostic plots, when available.
-- `relflow-0.5.0-evidence-provenance.json` and
-  `relflow-0.5.0-evidence-checksums.txt`: execution identity and integrity.
+- `relflow-0.6.0-evidence.json`: the frozen selection and original results.
+- `relflow-0.6.0-evidence-measurements.md`: the comparison table.
+- `relflow-0.6.0-evidence-reports.tar.gz`: records, logs, summary, and HTML report.
+- `relflow-0.6.0-evidence-inputs.tar.gz`: exact wheels and runtime requirements.
+- `relflow-0.6.0-evidence-plots.zip`: matched diagnostic plots, when available.
+- `relflow-0.6.0-evidence-provenance.json` and
+  `relflow-0.6.0-evidence-checksums.txt`: execution identity and integrity.
 
 Previously published names and bytes remain unchanged.
 Publication never edits experiment headers or the source README, commits a
@@ -278,7 +278,7 @@ Without a selection, local builds show pending measurements. Generated results,
 proof sources, and historical tutorial archives are not checked into Git.
 Hosted tag docs require their exact
 version's public release asset and source revision. Branch and PR builds use
-the latest formal release at version >=0.5.0, with its measured revision and
+the latest formal release at version >=0.6.0, with its measured revision and
 proof sources visible. Measurements remain pending until a supported release exists.
 CI never creates per-commit Evidence releases or requests docs rebuilds.
 No model import, cloud account, or additional API credential is required.

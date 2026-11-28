@@ -133,7 +133,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -266,7 +266,7 @@ class Item(rf.Branch):
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, reduction=None)
     selected_group = rf.Category(p_unavailable=0.0)
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P010", seed=3605)

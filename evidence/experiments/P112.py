@@ -109,7 +109,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -163,9 +163,9 @@ def records(
 
 
 class Model(rf.Model):
-    entity = rf.Group(n_groups=8, mask=rf.Mask(rate=0.1, reconstruct=True), p_unavailable=0.0)
+    entity = rf.Group(n_groups=8, task=rf.reconstruct(rate=0.1), p_unavailable=0.0)
     x = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 class CategoryModel(Model):
@@ -175,7 +175,7 @@ class CategoryModel(Model):
 class OracleModel(rf.Model):
     group = rf.Enum(values=tuple(f"group-{i}" for i in range(GROUPS)))
     x = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build(kind: str) -> rf.Model:

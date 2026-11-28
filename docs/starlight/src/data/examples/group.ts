@@ -31,7 +31,7 @@ class Payment(rf.Model):
     merchant = rf.Group(n_groups=12)
     amount = rf.Number
     channel = rf.Enum("web", "store")
-    disputed = rf.Boolean(mask=True)`,
+    disputed = rf.Boolean(predict=True)`,
     inputs: { merchant: 'merchant-17', amount: 84.5, channel: 'web' },
     answers: { disputed: false },
     output: { predictions: { disputed: prediction({ probability: 0.12 }) } },
@@ -82,7 +82,7 @@ class Customer(rf.Model):
     """A purchase history and future spending target."""
 
     purchases = Purchase(length=32, overflow="tail")
-    spend_next_30d = rf.Number(mask=True)`,
+    spend_next_30d = rf.Number(predict=True)`,
     inputs: {
       purchases: [
         { merchant: 'merchant-17', amount: 46, days_ago: 20 },
@@ -133,7 +133,7 @@ class Offer(rf.Branch):
     seller = rf.Group(n_groups=6)
     price = rf.Number
     delivery_days = rf.Number
-    purchased = rf.Boolean(mask=True)
+    purchased = rf.Boolean(predict=True)
 
 
 class OfferReview(rf.Model):

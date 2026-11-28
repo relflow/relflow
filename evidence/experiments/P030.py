@@ -108,7 +108,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -188,7 +188,7 @@ def rmse(actual: np.ndarray, predicted: np.ndarray | float) -> float:
 class Item(rf.Branch):
     quantity = rf.Number
     unit_price = rf.Number
-    subtotal = rf.Number(mask=True, objective="mse")
+    subtotal = rf.Number(predict=True, objective="mse")
 
 
 class Model(rf.Model):

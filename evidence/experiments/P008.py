@@ -120,7 +120,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -218,7 +218,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, attention=None, reduction=rf.Mean())
-    covariance = rf.Number(mask=True, objective="mse")
+    covariance = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P008", seed=3513)

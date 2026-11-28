@@ -123,7 +123,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -169,7 +169,7 @@ def records(*, rows: int, seed: int, shifted: bool = False) -> Iterator[dict]:
 class Model(rf.Model):
     x = rf.Number
     hint = rf.Category(p_unavailable=0.0)
-    label = rf.Category(p_unavailable=0.0, topk=[2], mask=True)
+    label = rf.Category(p_unavailable=0.0, topk=[2], predict=True)
 
 
 def build() -> rf.Model:

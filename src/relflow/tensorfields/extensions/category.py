@@ -70,7 +70,7 @@ class Request(RequestBase):
     ``topk`` adds accuracy metrics and prediction candidates; entries are
     sorted and deduplicated, and must exceed one. Candidates are limited to
     the discovered vocabulary when fewer than ``k`` labels are known.
-    ``mask=True`` declares a supervised classification target. Predictions
+    ``predict=True`` declares a supervised classification target. Predictions
     select populated vocabulary labels and exclude the unavailable sentinel.
     ``strip=True`` trims surrounding whitespace from string labels and
     ``cased=False`` lowercases them before vocabulary lookup, an escape hatch
@@ -261,7 +261,12 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             return torch.from_numpy(field.place(tokens, fill=0)), torch.from_numpy(states(field, nan))
 
         content, state_tensor = encode(input)
-        target_content, target_state = encode(target)
+        targets = TensorDict({}, batch_size=input.shape)
+        if sources.needs_targets(schema):
+            target_content, target_state = encode(target)
+            targets = TensorDict(
+                {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
+            )
         if strata == Strata.train:
             p_unavailable: float = cast(Request, schema.requests[address]).p_unavailable
             unavailable_index = -1
@@ -279,15 +284,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
             present=present,
             trainable=trainable,
             inferred=inferred,
-            targets=TensorDict(
-                {
-                    TensorKey.state: target_state,
-                    TensorKey.content: target_content,
-                }
-                if address in schema.objectives
-                else {},
-                batch_size=input.shape,
-            ),
+            targets=targets,
             batch_size=input.batch_size,
         )
         return result, observation, binding
@@ -464,22 +461,16 @@ def loss(
     state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
     state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
-    loss: torch.Tensor = module.track(
+    indices = trainable.nonzero(as_tuple=True)[0]
+    logits = state_inputs.index_select(0, indices)
+    states = state_targets.index_select(0, indices)
+    loss = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
-        value=(
-            torch.nn.functional.cross_entropy(
-                input=state_inputs,
-                target=state_targets,
-                reduction="none",
-            )
-            .masked_select(trainable)
-            .mean()
-        ),
+        value=torch.nn.functional.cross_entropy(logits, states),
     )
-
     module.track(
         (prediction.address, strata, Metric.accuracy, TensorKey.state),
-        value=state_inputs.argmax(dim=1).eq(state_targets).masked_select(trainable).float().mean(),
+        value=logits.argmax(dim=1).eq(states).float().mean(),
     )
     module.track(
         (prediction.address, strata, "vocabulary", "size"),

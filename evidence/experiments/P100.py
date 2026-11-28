@@ -127,7 +127,7 @@
 #     "numpy",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -176,14 +176,14 @@ def records(*, rows: int, seed: int, domain: str, novel: bool, arm: str) -> Iter
 def build(domain: str, arm: str) -> rf.Model:
     if arm == "ordinal":
         target = (
-            rf.Ordinal(values=LABELS, mask=True, objective="mse")
+            rf.Ordinal(values=LABELS, predict=True, objective="mse")
             if domain == "labels"
-            else rf.Ordinal(mask=True, objective="mse")
+            else rf.Ordinal(predict=True, objective="mse")
         )
     elif arm == "number":
-        target = rf.Number(mask=True, objective="mse")
+        target = rf.Number(predict=True, objective="mse")
     else:
-        target = rf.Category(mask=True)
+        target = rf.Category(predict=True)
 
     class Model(rf.Model):
         signal = rf.Number

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
@@ -12,7 +13,6 @@ from relflow.data.ragged import coalesce
 from relflow.structs.enums import Metric, Strata, TensorKey, Tokens
 from relflow.structs.experiment import Schema
 from relflow.structs.packages import Prediction
-from relflow.structs.tree import Mask
 from relflow.tensorfields.extensions.boolean import (
     BooleanCounter,
     Decoder,
@@ -30,14 +30,14 @@ from tests.tensorfields.helpers import tensorize
 ADDRESS = "/groups/items/enabled"
 
 
-def build_schema(*, threshold: float | list[float] = 0.5, mask: bool | Mask = False) -> Schema:
+def build_schema(*, threshold: float | list[float] = 0.5, predict: bool = False) -> Schema:
     return rf.Schema.from_tree(
         d_model=8,
         n_layers=1,
         n_heads=4,
         groups=rf.Branch(
             length=2,
-            items=rf.Branch(length=3, enabled=rf.Boolean(threshold=threshold, mask=mask)),
+            items=rf.Branch(length=3, enabled=rf.Boolean(threshold=threshold, predict=predict)),
         ),
     )
 
@@ -128,7 +128,7 @@ class TrackingModule:
 
 @pytest.mark.parametrize("strata", [Strata.train, Strata.validate])
 def test_boolean_loss_tracks_batch_scores_for_training_and_stateful_evaluation_metrics(strata):
-    schema = build_schema(threshold=[0.25, 0.75], mask=True)
+    schema = build_schema(threshold=[0.25, 0.75], predict=True)
     field = tensorfield(
         groups=[[[False, True]], [[True, False]]],
         schema=schema,
@@ -174,8 +174,28 @@ def test_boolean_loss_tracks_batch_scores_for_training_and_stateful_evaluation_m
         assert isinstance(tracked, torch.Tensor if strata == Strata.train else TorchMetric)
 
 
+def test_boolean_training_metric_states_do_not_retain_the_autograd_graph():
+    schema = build_schema(predict=True)
+    module = TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
+    field = tensorfield(groups=[[[False, True]], [[True, False]]], schema=schema, strata=Strata.train)
+    payload = {
+        TensorKey.state: torch.zeros(*field.state.shape, len(Tokens), requires_grad=True),
+        TensorKey.content: torch.zeros(*field.content.shape, 1, requires_grad=True),
+    }
+    prediction = Prediction(address=ADDRESS, payload=TensorDict(payload, batch_size=field.batch_size))
+
+    loss(module, prediction, field, Strata.train).backward()
+
+    for _, metric in module.nodes[ADDRESS].decoder.content_metrics(Strata.train):
+        for name in metric._defaults:
+            states = getattr(metric, name)
+            for state in states if isinstance(states, list) else [states]:
+                assert state.grad_fn is None, name
+    deepcopy(module.nodes[ADDRESS].decoder)
+
+
 def test_boolean_training_without_valued_targets_does_not_repeat_previous_batch_scores():
-    schema = build_schema(mask=True)
+    schema = build_schema(predict=True)
     module = TrackingModule(schema, Embedder(schema, ADDRESS), Decoder(schema, ADDRESS))
     for groups, missing in [([[[False, True]]], False), ([[[None]]], True)]:
         field = tensorfield(groups=groups, schema=schema, strata=Strata.train)
@@ -256,7 +276,7 @@ def test_boolean_thresholds_configure_unique_metrics_and_one_auc():
 
 
 def test_boolean_metrics_ignore_null_and_padded_targets():
-    schema = build_schema(mask=True)
+    schema = build_schema(predict=True)
     field = tensorfield(
         groups=[[[False, True, None]]],
         schema=schema,
@@ -291,7 +311,7 @@ def test_boolean_metrics_ignore_null_and_padded_targets():
 
 
 def test_boolean_non_valued_batch_only_trains_state_and_does_not_update_content_metrics():
-    schema = build_schema(threshold=[0.25, 0.75], mask=True)
+    schema = build_schema(threshold=[0.25, 0.75], predict=True)
     field = tensorfield(
         groups=[[[None]]],
         schema=schema,

@@ -6,16 +6,18 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import tarfile
 import tempfile
+import time
 from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from evidence.experiments.source import describe, registry, snapshot
-from evidence.releases import VERSION, inventory, supported
+from evidence.releases import VERSION, filenames, supported
 
 REPOSITORY = "relflow/relflow"
 SHA = re.compile(r"[0-9a-f]{40}")
@@ -25,16 +27,40 @@ PUBLICATION_LIMIT = 32 * 1024 * 1024
 
 def download(url: str, *, missing: bool = False, limit: int = METADATA_LIMIT) -> bytes | None:
     """Bound public asset reads and distinguish an unreleased version from an outage."""
-    try:
-        with urlopen(Request(url, headers={"User-Agent": "relflow-evidence-publication"}), timeout=30) as response:
-            content = response.read(limit + 1)
-    except HTTPError as error:
-        if missing and error.code == 404:
-            return None
-        raise
-    if len(content) > limit:
-        raise ValueError(f"Evidence publication response exceeds {limit} bytes: {url}")
-    return content
+    request = Request(url, headers={"User-Agent": "relflow-evidence-publication"})
+    token = os.environ.get("RELFLOW_EVIDENCE_GITHUB_TOKEN")
+    if token and url.startswith(f"https://api.github.com/repos/{REPOSITORY}/releases/"):
+        request.add_unredirected_header("Authorization", f"Bearer {token}")
+    for delay in (1, 4, None):
+        try:
+            with urlopen(request, timeout=30) as response:
+                content = response.read(limit + 1)
+        except HTTPError as error:
+            if missing and error.code == 404:
+                return None
+            headers = error.headers or {}
+            retry_after = headers.get("Retry-After", "")
+            reset = headers.get("X-RateLimit-Reset", "")
+            exhausted = headers.get("X-RateLimit-Remaining") == "0"
+            if delay is None:
+                raise
+            if error.code in {403, 429}:
+                if retry_after.isascii() and retry_after.isdigit():
+                    delay = max(delay, int(retry_after))
+                elif exhausted and reset.isascii() and reset.isdigit():
+                    delay = max(delay, int(reset) - time.time())
+                else:
+                    raise
+            elif error.code not in {500, 502, 503, 504}:
+                raise
+            if delay > 10:
+                raise
+            error.close()
+            time.sleep(delay)
+        else:
+            if len(content) > limit:
+                raise ValueError(f"Evidence publication response exceeds {limit} bytes: {url}")
+            return content
 
 
 def fetch(root: Path, version: str | None = None, *, required: bool = False) -> Path | None:
@@ -42,7 +68,7 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
     if version is not None and not VERSION.fullmatch(version):
         raise ValueError(f"Evidence publication requires a normalized package version, got {version!r}")
     if version is not None and not supported(version):
-        raise ValueError(f"Evidence publication requires relflow >=0.5.0, got {version}")
+        raise ValueError(f"Evidence publication requires relflow >=0.6.0, got {version}")
     endpoint = f"https://api.github.com/repos/{REPOSITORY}/releases/tags/"
     address = endpoint + "v" + version if version else f"https://api.github.com/repos/{REPOSITORY}/releases/latest"
     package = download(address, missing=not required)
@@ -56,8 +82,8 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
         version = latest[1:]
     if not supported(version):
         if required:
-            raise ValueError(f"Evidence publication requires relflow >=0.5.0, got {version}")
-        print("No relflow >=0.5.0 release is available; Evidence measurements remain pending")
+            raise ValueError(f"Evidence publication requires relflow >=0.6.0, got {version}")
+        print("No relflow >=0.6.0 release is available; Evidence measurements remain pending")
         return None
     released = json.loads(package)
     revision = released.get("target_commitish", "")
@@ -69,7 +95,7 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
     report = json.loads(retained)
     if report.get("draft") is not False or report.get("tag_name") != tag or report.get("target_commitish") != revision:
         raise ValueError(f"Evidence {tag} does not identify the published package source {revision}")
-    files = inventory(version, (asset["name"] for asset in report.get("assets", [])))
+    files = filenames(version)
     assets = [asset for asset in report.get("assets", []) if asset.get("name") == files["publication"]]
     if len(assets) != 1 or not re.fullmatch(r"sha256:[0-9a-f]{64}", assets[0].get("digest") or ""):
         raise ValueError(f"Evidence {tag} requires one {files['publication']} asset with a GitHub SHA256 digest")
@@ -119,7 +145,7 @@ def fetch(root: Path, version: str | None = None, *, required: bool = False) -> 
 
 def sources(selected: dict, release: dict, destination: Path) -> None:
     """Recover executed declarations from the digest-bound CI report, never from Git blobs."""
-    files = inventory(selected["version"], (asset["name"] for asset in release.get("assets", [])))
+    files = filenames(selected["version"])
     matches = [asset for asset in release.get("assets", []) if asset.get("name") == files["reports"]]
     expected = selected["report"].get("reports_sha256", "")
     url = f"https://github.com/{REPOSITORY}/releases/download/evidence-v{selected['version']}/{files['reports']}"
@@ -192,7 +218,7 @@ def plots(root: Path, selected: dict, release: dict) -> None:
     target.unlink(missing_ok=True)
     if spec is None:
         return
-    files = inventory(selected["version"], (asset["name"] for asset in release.get("assets", [])))
+    files = filenames(selected["version"])
     matches = [asset for asset in release.get("assets", []) if asset.get("name") == files["plots"]]
     if len(matches) != 1 or any(
         [

@@ -24,7 +24,7 @@ model.update(messages, length=96, overflow="tail")`,
       label: 'Add a target under the anonymous root', lang: 'python',
       code: `# model is an existing ChurnModel; no model loop is active.
 root = rf.where("address") == rf.Address()
-model.extend(root, downgraded_90d=rf.Boolean(mask=True))`,
+model.extend(root, downgraded_90d=rf.Boolean(predict=True))`,
       note: 'The next training data must supply downgraded_90d answers for the intended 90-day definition, alongside the existing inputs and churn_90d answers. Train the new target before using its predictions.',
     }],
     takeaway: 'An added output is a new learning task. Retaining compatible parts of the old model does not train its new prediction head.',

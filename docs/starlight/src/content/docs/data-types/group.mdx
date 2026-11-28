@@ -59,7 +59,7 @@ a decoded group probability as a trained identity assignment.
 Group can provide input context for Boolean or Number targets. Use `rf.Group.assignments` to inspect how known input identities
 are grouped.
 
-A reconstructing mask on Group trains only the field's state classification;
+A reconstruction objective on Group trains only the field's state classification;
 there is no built-in group or identity reconstruction objective. A decoded
 Group field exposes `group.value` and `group.probability`, without a vocabulary
 label. Its decoder's group head is not trained by that reconstruction loss, so

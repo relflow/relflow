@@ -127,7 +127,7 @@
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -164,7 +164,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 class PredictionModel(rf.Model):
     x = rf.Number
-    code = rf.Category(mask=rf.Mask(query="hide", reconstruct=True))
+    code = rf.Category(task=rf.reconstruct(query="hide"))
 
 
 def build() -> rf.Model:

@@ -125,7 +125,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -273,8 +273,8 @@ def fit(model: rf.Model, *, seed: int, split: int, budget: int, accelerator: str
 class PredictionModel(rf.Model):
     a = rf.Number
     b = rf.Number
-    u = rf.Number(mask=True, objective="mse")
-    v = rf.Number(mask=True, objective="mse")
+    u = rf.Number(predict=True, objective="mse")
+    v = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P048", seed=4801)

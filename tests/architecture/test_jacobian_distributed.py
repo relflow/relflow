@@ -161,16 +161,19 @@ def train_distributed(rank: int, directory: str, accumulation: int) -> None:
         torch.testing.assert_close(received[0], received[1], rtol=0, atol=1e-12)
         assert trainer.global_step == 4 // accumulation
 
-        # Exercise the real Arrow binding and DDP rewrapping path while both
-        # objective and input vocabularies grow between accumulated batches.
+        # Vocabulary growth rewraps DDP between batches. Different field draws
+        # on each rank also change the participating decoders inside an update.
+        meters = ("north", "south", "east", "west")
         candidate = rf.Model(
             preset="small",
             d_model=8,
             dropout=0.0,
             batch_size=2,
+            fields=dict.fromkeys(meters, rf.Number),
+            task=rf.reconstruct(fields=1, ignore=("context", "first", "second"), ablate=True),
             context=rf.Category(p_unavailable=0.0),
-            first=rf.Category(mask=True, p_unavailable=0.0),
-            second=rf.Boolean(mask=True),
+            first=rf.Category(predict=True, p_unavailable=0.0),
+            second=rf.Boolean(predict=True),
         )
         candidate.jacobian = True
         data = rf.ArrowDataModule(
@@ -180,16 +183,34 @@ def train_distributed(rank: int, directory: str, accumulation: int) -> None:
                     "context": [f"context-{i}" for i in range(24)],
                     "first": [f"label-{i}" for i in range(24)],
                     "second": [False, True] * 12,
+                    **dict.fromkeys(meters, list(range(24))),
                 }
             ),
+            seed=960 + rank,
             shuffle=False,
             num_workers=0,
             persistent_workers=False,
             pin_memory=False,
         )
         capacities, identities = [], []
+        sampled = []
 
         class Audit(lit.Callback):
+            def on_train_batch_start(self, trainer, pl_module, batch, batch_idx):
+                selected = torch.tensor([not batch.tensors["/" + name].targets.is_empty() for name in meters])
+                assert selected.sum() == 1
+                distributed.all_reduce(selected, op=distributed.ReduceOp.MAX)
+                sampled.append(selected)
+
+            def on_before_optimizer_step(self, trainer, pl_module, optimizer):
+                gradients = torch.tensor(
+                    [
+                        any(p.grad is not None for p in pl_module.nodes["/" + name].decoder.parameters())
+                        for name in meters
+                    ]
+                )
+                assert torch.equal(gradients, torch.stack(sampled[-accumulation:]).any(0))
+
             def on_after_backward(self, trainer, pl_module):
                 first = pl_module.nodes["/first"].decoder.linears
                 second = pl_module.nodes["/second"].decoder
@@ -230,6 +251,7 @@ def train_distributed(rank: int, directory: str, accumulation: int) -> None:
             fused=False,
         )
         assert candidate.trainer.global_step == 6 // accumulation
+        assert any(fields.sum() == 2 for fields in sampled)
         assert len(capacities) == 6 and capacities[-1] > capacities[0]
         assert len(set(identities)) > 1
         assert len(rf.Category.vocabulary(candidate, "/context")) == 24

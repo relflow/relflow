@@ -183,7 +183,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -283,7 +283,7 @@ def median(task: str, rows: list[dict]) -> np.ndarray:
 
 def build(task: str, inputs: str, target: str) -> rf.Model:
     scalar = rf.Quantile if inputs == "rank" else rf.Number
-    response = rf.Quantile(objective="mae", mask=True) if target == "rank" else rf.Number(mask=True)
+    response = rf.Quantile(objective="mae", predict=True) if target == "rank" else rf.Number(predict=True)
     if task in ("heavy", "moderate"):
 
         class Model(rf.Model):

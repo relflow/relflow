@@ -44,8 +44,8 @@ if TYPE_CHECKING:
     from relflow.structs.structure import Branch
 
 
-class DatePart(enum.StrEnum):
-    REGISTRY: ClassVar[dict["DatePart", Callable[..., tuple[np.ndarray, np.ndarray]]]]
+class Part(enum.StrEnum):
+    REGISTRY: ClassVar[dict["Part", Callable[..., tuple[np.ndarray, np.ndarray]]]]
     day_of_year = "day_of_year"
     week_of_year = "week_of_year"
     month_of_year = "month_of_year"
@@ -80,23 +80,23 @@ class DatePart(enum.StrEnum):
         return func(*args, **kwargs)
 
 
-def normalize_datepart_key(value: str) -> str:
+def normalize_part_key(value: str) -> str:
     value = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value.strip())
     value = re.sub(r"[^0-9A-Za-z]+", "_", value)
     return value.strip("_").casefold()
 
 
-def datepart_lookup() -> dict[str, DatePart]:
-    lookup: dict[str, DatePart] = {}
-    for datepart in DatePart:
-        normalized = normalize_datepart_key(datepart.value)
-        lookup[normalized] = datepart
-        lookup[normalized.replace("_", "")] = datepart
+def part_lookup() -> dict[str, Part]:
+    lookup: dict[str, Part] = {}
+    for part in Part:
+        normalized = normalize_part_key(part.value)
+        lookup[normalized] = part
+        lookup[normalized.replace("_", "")] = part
 
     return lookup
 
 
-@DatePart.day_of_month.register
+@Part.day_of_month.register
 def day_of_month(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 31
     month_start = arr.astype("datetime64[M]")
@@ -105,7 +105,7 @@ def day_of_month(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.day_of_year.register
+@Part.day_of_year.register
 def day_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 366
     year_start = arr.astype("datetime64[Y]")
@@ -114,7 +114,7 @@ def day_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.month_of_year.register
+@Part.month_of_year.register
 def month_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 12
     value = (arr.astype("datetime64[M]") - arr.astype("datetime64[Y]")).astype(int) + 1
@@ -122,16 +122,20 @@ def month_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.week_of_year.register
+@Part.week_of_year.register
 def week_of_year(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    max_value = 53
+    # Sunday-start weeks, as in day_of_week and week_of_month. The week holding
+    # January 1 is week 1, so a leap year starting on Saturday reaches week 54.
+    max_value = 54
     year_start = arr.astype("datetime64[Y]")
-    value = ((arr.astype("datetime64[W]") - year_start.astype("datetime64[W]")).astype(int) + 1).astype(int)
+    year_start_dow = (year_start.astype("datetime64[D]").astype(int) + 4) % 7
+    day_offset = (arr - year_start).astype("timedelta64[D]").astype(int)
+    value = ((day_offset + year_start_dow) // 7) + 1
     radians = 2 * np.pi * value / max_value
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.day_of_week.register
+@Part.day_of_week.register
 def day_of_week(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 7
     value = (arr.astype("datetime64[D]").astype(int) + 4) % 7
@@ -139,7 +143,7 @@ def day_of_week(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.week_of_month.register
+@Part.week_of_month.register
 def week_of_month(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 6
     month_start = arr.astype("datetime64[M]")
@@ -150,7 +154,7 @@ def week_of_month(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.hour_of_day.register
+@Part.hour_of_day.register
 def hour_of_day(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 24
     day_start = arr.astype("datetime64[D]")
@@ -159,7 +163,7 @@ def hour_of_day(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.minute_of_hour.register
+@Part.minute_of_hour.register
 def minute_of_hour(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 60
     hour_start = arr.astype("datetime64[h]")
@@ -168,7 +172,7 @@ def minute_of_hour(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-@DatePart.second_of_minute.register
+@Part.second_of_minute.register
 def second_of_minute(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     max_value = 60
     minute_start = arr.astype("datetime64[m]")
@@ -177,8 +181,7 @@ def second_of_minute(arr: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return (np.sin(radians), np.cos(radians))
 
 
-# Persisted schemas identify Period as dateparts.
-period: Extension = Extension(name="dateparts", types=(str | date | datetime,), callbacks=(Metrics,))
+period: Extension = Extension(name="period", types=(str | date | datetime,), callbacks=(Metrics,))
 
 
 class Arcs(Totals):
@@ -257,8 +260,8 @@ class Request(RequestBase):
     """Calendar components represented as cyclical sine/cosine pairs.
 
     ``Period("day_of_week", "hour_of_day")`` selects a nonempty, unique
-    sequence of ``DatePart`` members or names. Names normalize to a list of
-    enum members. The ``dateparts=`` keyword accepts the same selection.
+    sequence of ``Part`` members or names. Names normalize to a list of
+    enum members. The ``parts=`` keyword accepts the same selection.
     Inputs may be dates, datetimes, or strings, with optional ``pattern``
     specifying string parsing. Zone-aware timestamps describe their own wall
     clock; strings carrying an offset are read as UTC. ``jitter`` perturbs
@@ -267,8 +270,8 @@ class Request(RequestBase):
     exports a field embedding with ``embed=True``; no datetime is decoded.
     """
 
-    type: Literal["dateparts"] = "dateparts"
-    dateparts: list[DatePart]
+    type: Literal["period"] = "period"
+    parts: list[Part]
     pattern: Annotated[str | None, pydantic.Field(default=None)] = None
     jitter: Jitter = pydantic.Field(default_factory=Jitter)
 
@@ -276,64 +279,62 @@ class Request(RequestBase):
 
         def __init__(
             self,
-            *parts: DatePart | str,
-            dateparts: list[DatePart | str] | tuple[DatePart | str, ...] = ...,
+            *selected: Part | str,
+            parts: list[Part | str] | tuple[Part | str, ...] = ...,
             pattern: str | None = None,
             jitter: Jitter = ...,
-            type: Literal["dateparts"] = "dateparts",
+            type: Literal["period"] = "period",
             **options: Unpack[FieldOptions],
         ) -> None: ...
     else:
 
         def __init__(
             self,
-            *parts: DatePart | str,
-            dateparts: list[DatePart | str] | tuple[DatePart | str, ...] = cast(
-                list[DatePart | str] | tuple[DatePart | str, ...], OMITTED
-            ),
+            *selected: Part | str,
+            parts: list[Part | str] | tuple[Part | str, ...] = cast(list[Part | str] | tuple[Part | str, ...], OMITTED),
             **options: Any,
         ) -> None:
-            if parts and dateparts is not OMITTED:
-                raise TypeError("Period selects calendar parts positionally or with dateparts=; use one form")
-            super().__init__(dateparts=parts if dateparts is OMITTED else dateparts, **options)
+            if selected and parts is not OMITTED:
+                raise TypeError("Period selects calendar parts positionally or with parts=; use one form")
+            super().__init__(parts=selected if parts is OMITTED else parts, **options)
 
-    @pydantic.field_validator("dateparts", mode="before", check_fields=False)
+    @pydantic.field_validator("parts", mode="before", check_fields=False)
     @classmethod
-    def check_dateparts_input(cls, value: Any) -> Any:
+    def check_parts_input(cls, value: Any) -> Any:
         if not isinstance(value, (list, tuple)):
             return value
 
-        lookup = datepart_lookup()
-        canonical = [datepart.value for datepart in DatePart]
-        dateparts: list[DatePart] = []
+        lookup = part_lookup()
+        canonical = [part.value for part in Part]
+        parts: list[Part] = []
         for item in value:
-            if isinstance(item, DatePart):
-                dateparts.append(item)
+            if isinstance(item, Part):
+                parts.append(item)
                 continue
 
             if not isinstance(item, str):
-                raise ValueError(f"datepart values must be strings, got {type(item).__name__}")
+                raise ValueError(f"Period part values must be strings, got {type(item).__name__}")
 
-            key = normalize_datepart_key(item)
+            key = normalize_part_key(item)
             match = lookup.get(key) or lookup.get(key.replace("_", ""))
             if match is not None:
-                dateparts.append(match)
+                parts.append(match)
                 continue
 
             suggestions = difflib.get_close_matches(key, canonical, n=1)
             suggestion = f"; did you mean '{suggestions[0]}'?" if suggestions else ""
-            raise ValueError(f"unknown datepart '{item}'{suggestion}")
+            raise ValueError(f"unknown Period part '{item}'{suggestion}")
 
-        return dateparts
+        return parts
 
-    @pydantic.field_validator("dateparts", check_fields=False)
+    @pydantic.field_validator("parts", check_fields=False)
     @classmethod
-    def check_dateparts(cls, v):
+    def check_parts(cls, v):
         if not v:
-            raise ValueError("dateparts cannot be empty")
+            raise ValueError("Period parts cannot be empty")
 
         if not len(v) == len(set(v)):
-            raise ValueError("dateparts must be unique")
+            raise ValueError("Period parts must be unique")
 
         return v
 
@@ -398,17 +399,17 @@ class TensorField(TensorFieldBase[TensorDict]):
                         values = values.combine_chunks()
                     date_values = wall_clock(values).to_numpy(zero_copy_only=False).astype("datetime64[s]")
             except (pa.ArrowException, TypeError, ValueError) as error:
-                raise ValueError(f"dateparts field at '{address}' contains invalid date values") from error
+                raise ValueError(f"Period field at '{address}' contains invalid date values") from error
 
-            dateparts: dict[DatePart, torch.Tensor] = {}
-            for datepart in request.dateparts:
-                sin, cos = datepart(date_values)
+            encoded: dict[Part, torch.Tensor] = {}
+            for part in request.parts:
+                sin, cos = part(date_values)
                 embeddings = np.stack([sin, cos], axis=-1)
-                dateparts[datepart] = torch.from_numpy(field.place(embeddings, fill=0.0, value_shape=(2,))).to(
+                encoded[part] = torch.from_numpy(field.place(embeddings, fill=0.0, value_shape=(2,))).to(
                     dtype=torch.float
                 )
             # TensorDict accepts this narrower dictionary; its input type is invariant.
-            return TensorDict(dateparts, batch_size=field.shape)  # pyrefly: ignore [bad-argument-type]
+            return TensorDict(encoded, batch_size=field.shape)  # pyrefly: ignore [bad-argument-type]
 
         state = torch.from_numpy(input.dense)
 
@@ -423,7 +424,7 @@ class TensorField(TensorFieldBase[TensorDict]):
                     TensorKey.state: torch.from_numpy(target.dense),
                     TensorKey.content: encode(target),
                 }
-                if address in schema.objectives
+                if sources.needs_targets(schema)
                 else {},
                 batch_size=input.shape,
             ),
@@ -447,10 +448,10 @@ class Embedder(EmbedderBase):
             embedding_dim=schema.d_model,
         )
 
-        self.dateparts = torch.nn.ModuleDict()
+        self.parts = torch.nn.ModuleDict()
 
-        for datepart in request.dateparts:
-            self.dateparts[datepart] = torch.nn.Linear(in_features=2, out_features=schema.d_model)
+        for part in request.parts:
+            self.parts[part] = torch.nn.Linear(in_features=2, out_features=schema.d_model)
 
     @beartype
     def forward(self, inputs: TensorInput) -> Parcel:
@@ -461,9 +462,9 @@ class Embedder(EmbedderBase):
         valued = state.eq(Tokens.valued).unsqueeze(-1)
         embeddings: torch.Tensor = self.embeddings(state)
 
-        for datepart in self.dateparts:
-            projection = cast(torch.nn.Linear, self.dateparts[datepart])
-            content = cast(torch.Tensor, cast(TensorDict, inputs.content)[datepart]).reshape(D, 2)
+        for part in self.parts:
+            projection = cast(torch.nn.Linear, self.parts[part])
+            content = cast(torch.Tensor, cast(TensorDict, inputs.content)[part]).reshape(D, 2)
             if self.training:
                 eligible = valued & torch.isfinite(content)
                 content = self.jitter.apply(content, eligible)
@@ -490,18 +491,18 @@ class Decoder(DecoderBase):
             out_features=len(Tokens),
         )
 
-        self.dateparts = torch.nn.ModuleDict()
+        self.parts = torch.nn.ModuleDict()
 
         request = cast(Request, schema.requests[address])
-        for datepart in request.dateparts:
-            self.dateparts[datepart] = torch.nn.Linear(in_features=schema.d_model, out_features=2)
-        self.metrics = Scores(address, partial(Arcs, tuple(datepart.value for datepart in request.dateparts)))
+        for part in request.parts:
+            self.parts[part] = torch.nn.Linear(in_features=schema.d_model, out_features=2)
+        self.metrics = Scores(address, partial(Arcs, tuple(part.value for part in request.parts)))
 
     @beartype
     def decode(self, pooled: torch.Tensor) -> TensorDict:
         content: dict[str, torch.Tensor] = {}
-        for datepart in self.dateparts:
-            content[datepart] = self.dateparts[datepart](pooled)
+        for part in self.parts:
+            content[part] = self.parts[part](pooled)
 
         return TensorDict(
             source={
@@ -523,22 +524,18 @@ def loss(
 
     trainable = batch.trainable.reshape(numel)
 
-    loss: torch.Tensor = module.track(
+    inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(numel, -1)
+    targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(numel)
+    indices = trainable.nonzero(as_tuple=True)[0]
+    logits = inputs.index_select(0, indices)
+    states = targets.index_select(0, indices)
+    loss = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
-        value=(
-            torch.nn.functional.cross_entropy(
-                input=(inputs := cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(numel, -1)),
-                target=(targets := cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(numel)),
-                reduction="none",
-            )
-            .masked_select(mask=trainable)
-            .mean()
-        ),
+        value=torch.nn.functional.cross_entropy(logits, states),
     )
-
     module.track(
         (prediction.address, strata, Metric.accuracy, TensorKey.state),
-        value=inputs.argmax(dim=1).eq(targets).masked_select(trainable).float().mean(),
+        value=logits.argmax(dim=1).eq(states).float().mean(),
     )
 
     request: Request = cast(Request, module.schema.requests[prediction.address])
@@ -550,13 +547,11 @@ def loss(
     losses: list[torch.Tensor] = []
     angles: list[torch.Tensor] = []
 
-    for datepart in request.dateparts:
-        pred_raw = cast(torch.Tensor, cast(TensorDict, prediction.payload[TensorKey.content])[datepart]).reshape(
-            numel, 2
-        )[valued]
-        target = cast(torch.Tensor, cast(TensorDict, batch.targets[TensorKey.content])[datepart]).reshape(numel, 2)[
+    for part in request.parts:
+        pred_raw = cast(torch.Tensor, cast(TensorDict, prediction.payload[TensorKey.content])[part]).reshape(numel, 2)[
             valued
         ]
+        target = cast(torch.Tensor, cast(TensorDict, batch.targets[TensorKey.content])[part]).reshape(numel, 2)[valued]
 
         pred: torch.Tensor = pred_raw / pred_raw.norm(dim=-1, keepdim=True).clamp_min(1e-6)
         cosine: torch.Tensor = (pred * target).sum(dim=-1)
@@ -564,7 +559,7 @@ def loss(
         if cosine.numel():
             losses.append(
                 module.track(
-                    (prediction.address, strata, Metric.loss, TensorKey.content, datepart),
+                    (prediction.address, strata, Metric.loss, TensorKey.content, part),
                     value=(1.0 - cosine).mean(),
                 )
             )

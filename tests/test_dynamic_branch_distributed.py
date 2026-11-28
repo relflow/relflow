@@ -62,9 +62,9 @@ def distributed_lengths(rank, directory):
             reduction=None,
             amount=rf.Number,
             merchant=rf.Category(p_unavailable=0),
-            target=rf.Number(mask=True),
+            target=rf.Number(predict=True),
         ),
-        outcome=rf.Boolean(mask=True),
+        outcome=rf.Boolean(predict=True),
     )
     # Reserve vocabulary before DDP; this test isolates geometry from resource growth.
     model.encode(observations(1, True), strata="train")

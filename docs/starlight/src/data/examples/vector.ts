@@ -26,7 +26,7 @@ class SensorAssessment(rf.Model):
 
     signature = rf.Vector(n_dim=4)
     operating_hours = rf.Number
-    needs_inspection = rf.Boolean(mask=True)`,
+    needs_inspection = rf.Boolean(predict=True)`,
     inputs: { signature: [0.12, -0.4, 0.8, 0.03], operating_hours: 2400 },
     answers: { needs_inspection: true },
     output: { predictions: { needs_inspection: prediction({ probability: 0.87 }) } },
@@ -60,7 +60,7 @@ class PositionForecast(rf.Model):
     position_m = rf.Vector(n_dim=3)
     velocity_m_per_s = rf.Vector(n_dim=3)
     seconds_ahead = rf.Number
-    next_position_m = rf.Vector(n_dim=3, mask=True, objective="l1")`,
+    next_position_m = rf.Vector(n_dim=3, predict=True, objective="l1")`,
     inputs: { position_m: [10, 20, 5], velocity_m_per_s: [1, -0.5, 0], seconds_ahead: 2 },
     answers: { next_position_m: [12, 19, 5] },
     output: { predictions: { next_position_m: prediction([11.8, 19.2, 5.1]) } },
@@ -101,8 +101,8 @@ class Product(rf.Branch):
     sku = rf.Category
     on_hand = rf.Number
     last_3_days_units = rf.Vector(n_dim=3)
-    next_3_days_units = rf.Vector(n_dim=3, mask=True)
-    runs_out = rf.Boolean(mask=True)
+    next_3_days_units = rf.Vector(n_dim=3, predict=True)
+    runs_out = rf.Boolean(predict=True)
 
 
 class StockForecast(rf.Model):

@@ -112,7 +112,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -184,7 +184,7 @@ def probabilities(model: rf.Model, rows: list[dict]) -> np.ndarray:
 class PredictionModel(rf.Model):
     left_id = rf.Hash(n_hashes=4, n_bands=8)
     right_id = rf.Hash(n_hashes=4, n_bands=8)
-    equal = rf.Boolean(mask=True)
+    equal = rf.Boolean(predict=True)
 
 
 @experiment("P029", seed=3701)

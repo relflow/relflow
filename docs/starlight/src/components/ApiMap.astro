@@ -3,7 +3,7 @@ import { apiSections } from '../api/reference';
 
 const total = apiSections.reduce((sum, section) => sum + section.entries.length, 0);
 const workflow = [
-  { section: 'schema', title: 'Define the model', names: 'Model · Branch · Mask' },
+  { section: 'schema', title: 'Define the model', names: 'Model · Branch · reconstruct' },
   { section: 'data', title: 'Supply records', names: 'ArrowDataModule · preprocess' },
   { section: 'training', title: 'Learn from examples', names: 'fit · validate · test' },
   { section: 'prediction', title: 'Use the trained model', names: 'predict · save · load' },

@@ -111,7 +111,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -183,7 +183,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=LENGTH, overflow="error", n_layers=2, n_heads=4, reduction=None)
-    answer = rf.Number(mask=True)
+    answer = rf.Number(predict=True)
 
 
 @experiment("P023", seed=23)

@@ -12,11 +12,14 @@ from yaml.constructor import ConstructorError
 from yaml.nodes import MappingNode
 
 from relflow import presets
+from relflow.structs.declaration import check_root_policies
 from relflow.structs.enums import AttentionInput
 from relflow.structs.experiment import TreeFieldInput
 from relflow.structs.reduction import ReductionConfig
 from relflow.structs.structure import Branch
-from relflow.structs.tree import Mask, MaskInput, Rate
+from relflow.structs.tasks import TaskInput
+from relflow.structs.tree import HideInput, Rate, check_policy_options
+from relflow.structs.twigs import TWIGS
 from relflow.tensorfields.base import TENSORFIELDS
 
 if TYPE_CHECKING:
@@ -40,7 +43,9 @@ class Options(TypedDict, total=False):
     cross: bool
     reduction: ReductionConfig | None
     dropout: Rate | None
-    mask: MaskInput
+    hide: HideInput
+    task: TaskInput
+    ignore: str | tuple[str, ...]
     optimizer: OptimizerConfig | None
     scheduler: SchedulerConfig | None
 
@@ -93,14 +98,16 @@ def fields(value: Any, *, location: str = "fields", ancestors: tuple[int, ...] =
             payload["fields"] = list(
                 fields(payload.get("fields"), location=f"{child}.fields", ancestors=ancestors).values()
             )
+        elif isinstance(kind, str) and kind in TWIGS:
+            request = TWIGS[kind]
         elif isinstance(kind, str) and kind in TENSORFIELDS:
             request = TENSORFIELDS[kind].Request
         else:
-            raise ValueError(f"{child}: unknown field type {kind!r}; use 'branch' or a registered tensorfield type")
+            raise ValueError(
+                f"{child}: unknown field type {kind!r}; use 'branch', a twig type, or a registered tensorfield type"
+            )
         payload["name"] = name
         try:
-            if "mask" in payload:
-                payload["mask"] = Mask.restore(payload["mask"])
             result[name] = request.model_validate(payload)
         except (TypeError, ValueError) as error:
             raise ValueError(f"{child}: {error}") from error
@@ -112,6 +119,7 @@ def read(pathname: str | Path, overrides: Mapping[str, Any]) -> tuple[dict[str, 
     path = Path(pathname)
     unknown = overrides.keys() - Options.__annotations__.keys()
     if unknown:
+        check_root_policies(overrides)
         raise TypeError(f"model template {path}: unsupported Python override(s): {sorted(unknown)}")
 
     with path.open(encoding="utf-8") as source:
@@ -128,16 +136,21 @@ def read(pathname: str | Path, overrides: Mapping[str, Any]) -> tuple[dict[str, 
         allowed = (Options.__annotations__.keys() - {"optimizer", "scheduler"}) | {"preset", "fields"}
         unknown = payload.keys() - allowed
         if unknown:
+            check_root_policies(payload)
             raise ValueError(f"unknown model option(s): {sorted(unknown)}; declare child fields under 'fields'")
         options = dict(payload)
         profile = None
         if "preset" in options:
             name = options.pop("preset")
             profile = presets.get(name)
+        check_policy_options(overrides, branch=True)
         options.update(overrides)
         options["fields"] = fields(options.get("fields"))
-        if "mask" in options:
-            options["mask"] = Mask.restore(options["mask"])
+        if options.get("task") is not None:
+            options["task"] = pydantic.TypeAdapter(TaskInput).validate_python(options["task"])
+        for name in ("hide", "ignore"):
+            if isinstance(options.get(name), list):
+                options[name] = tuple(options[name])
         if "reduction" in options:
             options["reduction"] = pydantic.TypeAdapter(ReductionConfig | None).validate_python(options["reduction"])
         return options, profile

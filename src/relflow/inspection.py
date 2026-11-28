@@ -50,7 +50,7 @@ class Artifact:
             version = __version__
         else:
             state = CheckpointState.read(path)
-            schema = Schema.model_validate(state["schema"])
+            schema = CheckpointState.schema(state)
             profile = None if state.get("preset") is None else Preset.model_validate(state["preset"])
             batch_size, version = state["batch_size"], state["version"]
         return cls(path, schema, profile, batch_size, version, state)
@@ -69,7 +69,7 @@ class Artifact:
         return model
 
     def report(self) -> dict[str, Any]:
-        nodes = {**self.schema.branches, **self.schema.requests}
+        nodes = {**self.schema.branches, **self.schema.requests, **self.schema.twigs}
         tensors = (
             []
             if self.state is None
@@ -87,6 +87,10 @@ class Artifact:
             "nodes": [
                 {"address": str(address), **node.model_dump(mode="json", exclude={"fields"})}
                 for address, node in sorted(nodes.items(), key=lambda item: str(item[0]))
+            ],
+            "tasks": [
+                {"kind": binding.task.kind, "owners": list(binding.owners), "targets": list(binding.targets)}
+                for binding in self.schema.tasks
             ],
             "objectives": list(map(str, self.schema.objectives)),
             "predictions": list(map(str, self.schema.decodes)),

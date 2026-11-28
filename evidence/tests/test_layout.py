@@ -56,7 +56,7 @@ def test_every_experiment_declares_its_imported_dependencies_without_importing_m
         assert {"pyyaml", "torch", "relflow"} <= dependencies, f"{path}: reporter dependencies are explicit"
         assert "Path(__file__).resolve().parent" in source
         if "torchjd" in expected:
-            assert "relflow[torchjd]>=0.5.0" in declared["dependencies"]
+            assert "relflow[torchjd]>=0.6.0" in declared["dependencies"]
         if "transformers" in expected:
             extras = {
                 extra

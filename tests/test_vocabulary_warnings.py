@@ -34,9 +34,9 @@ def model():
         preset="small",
         d_model=8,
         batch_size=4,
-        category=rf.Category(mask=True, p_unavailable=1.0),
-        tags=rf.Set(mask=True, p_unavailable=1.0),
-        group=rf.Group(n_groups=2, mask=True, p_unavailable=1.0),
+        category=rf.Category(predict=True, p_unavailable=1.0),
+        tags=rf.Set(predict=True, p_unavailable=1.0),
+        group=rf.Group(n_groups=2, predict=True, p_unavailable=1.0),
     )
 
 

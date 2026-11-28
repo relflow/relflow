@@ -139,7 +139,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -177,22 +177,22 @@ ARMS = ("ordinal_labels", "ordinal_ranks", "number", "category", "shuffled")
 
 class LabelModel(rf.Model):
     level = rf.Ordinal(values=LABELS)
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 class RankModel(rf.Model):
     level = rf.Ordinal
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 class NumericModel(rf.Model):
     level = rf.Number
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 class CategoryModel(rf.Model):
     level = rf.Category
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 def records(*, rows: int, seed: int, condition: str) -> Iterator[dict]:

@@ -72,10 +72,17 @@ def licensing(root: Path = Path(".")) -> None:
                 raise ValueError(f"{notice}: licensing requires a regular file before building")
             files[name] = notice.read_bytes()
         notices(files, str(directory))
-    citation = root / "CITATION.bib"
-    licenses = re.findall(r"(?m)^\s*license\s*=\s*\{([^}]+)\}", citation.read_text())
-    if licenses != [LICENSE]:
-        raise ValueError(f"{citation}: citation license must be {LICENSE} before building; got {licenses!r}")
+    version = tomllib.loads((root / "pyproject.toml").read_text())["project"]["version"]
+    for name, pattern in (
+        ("CITATION.bib", r"(?m)^[ \t]*{}[ \t]*=[ \t]*\{{([^}}\r\n]+)\}}"),
+        ("CITATION.cff", r"(?m)^{}:[ \t]*([^#\r\n]+)"),
+    ):
+        citation = root / name
+        content = citation.read_text(encoding="utf-8")
+        for field, expected in (("license", LICENSE), ("version", version)):
+            received = [value.strip().strip("\"'") for value in re.findall(pattern.format(field), content)]
+            if received != [expected]:
+                raise ValueError(f"{citation}: citation {field} must be {expected} before building, got {received!r}")
     cargo = root / "native/Cargo.toml"
     if tomllib.loads(cargo.read_text())["package"].get("license") != LICENSE:
         raise ValueError(f"{cargo}: package.license must be {LICENSE} before building")
@@ -201,12 +208,15 @@ def github(repository: str, path: str, *, missing: bool = False, paginate: bool 
     command = ["gh", "api", f"repos/{repository}/{path}"]
     if paginate:
         command.extend(["--paginate", "--slurp"])
-    result = subprocess.run(command, capture_output=True, text=True)
-    if result.returncode:
+    for delay in (1, 4, None):
+        result = subprocess.run(command, capture_output=True, text=True)
+        if result.returncode == 0:
+            return json.loads(result.stdout)
         if missing and "HTTP 404" in result.stderr:
             return None
-        raise RuntimeError(f"GitHub read failed for {path}: {result.stderr.strip()}")
-    return json.loads(result.stdout)
+        if delay is None or not re.search(r"\bHTTP (500|502|503|504)\b", result.stderr):
+            raise RuntimeError(f"GitHub read failed for {path}: {result.stderr.strip()}")
+        time.sleep(delay)
 
 
 def tag_commit(repository: str, tag: str) -> str | None:
@@ -282,7 +292,7 @@ def checked_attempt(repository: str, receipt: dict, run: dict, attempt: int) -> 
 def checked_job(repository: str, receipt: dict, attempt: int, name: str) -> None:
     pages = github(
         repository,
-        f"actions/runs/{receipt['ci_run_id']}/attempts/{attempt}/jobs?per_page=100",
+        f"actions/runs/{receipt['ci_run_id']}/attempts/{attempt}/jobs?per_page=30",
         paginate=True,
     )
     jobs = [job for page in pages for job in page["jobs"] if job["name"] == name]

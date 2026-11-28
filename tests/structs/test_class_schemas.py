@@ -16,7 +16,7 @@ class Transaction(rf.Branch):
 class FraudDetector(rf.Model):
     account = rf.Hash
     transactions = Transaction(length=4, overflow="tail")
-    fraudulent = rf.Boolean(mask=True)
+    fraudulent = rf.Boolean(predict=True)
 
 
 def test_class_declarations_build_the_same_schema_as_constructor_fields():
@@ -27,12 +27,13 @@ def test_class_declarations_build_the_same_schema_as_constructor_fields():
         n_heads=2,
         account=rf.Hash,
         transactions=rf.Branch(length=4, overflow="tail", amount=rf.Number, merchant=rf.Category(topk=[2, 3])),
-        fraudulent=rf.Boolean(mask=True),
+        fraudulent=rf.Boolean(predict=True),
     )
 
     assert declared.schema.model_dump() == ordinary.schema.model_dump()
     assert type(declared.schema.branches["/transactions"]) is rf.Branch
-    assert declared.schema.reconstruct == ["/fraudulent"]
+    assert declared.schema.objectives == ["/fraudulent"]
+    assert declared.schema.reconstruct == []
     assert declared.schema.fields.name is None
     assert declared.schema.fields.length == 1
     assert list(Transaction.model_fields) == list(rf.Branch.model_fields)
@@ -48,7 +49,7 @@ def test_preset_factories_resolve_declared_children(profile):
         n_heads=2,
         account=rf.Hash,
         transactions=rf.Branch(length=4, overflow="tail", amount=rf.Number, merchant=rf.Category(topk=[2, 3])),
-        fraudulent=rf.Boolean(mask=True),
+        fraudulent=rf.Boolean(predict=True),
     )
 
     assert isinstance(model, FraudDetector)
@@ -73,7 +74,7 @@ def test_child_names_are_separate_from_configuration_and_runtime_attributes():
         predict = rf.Category
         nodes = rf.Category
         items = CollisionBranch(length=3, description="collection options")
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     model = CollisionModel(d_model=16, n_layers=1, n_heads=2, description="root options")
 
@@ -123,7 +124,7 @@ def test_repeated_bindings_and_model_instances_own_independent_nodes_and_state()
     class Comparison(rf.Model):
         recent = Transaction(length=2)
         historical = Transaction(length=8)
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     first = Comparison(d_model=16, n_layers=1, n_heads=2)
     second = Comparison(d_model=16, n_layers=1, n_heads=2)
@@ -150,7 +151,7 @@ def test_nested_declarations_lower_to_portable_branches():
 
     class NestedModel(rf.Model):
         baskets = Basket(length=2)
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     model = NestedModel(d_model=16, n_layers=1, n_heads=2)
     schema = rf.Schema.model_validate_json(model.schema.model_dump_json())
@@ -165,11 +166,11 @@ def test_nested_declarations_lower_to_portable_branches():
 def test_bare_branch_classes_match_empty_calls_and_preset_defaults(preset):
     class BareModel(rf.Model):
         transactions = Transaction
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     class CalledModel(rf.Model):
         transactions = Transaction()
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     options = {"d_model": 16, "n_layers": 1, "n_heads": 2}
     bare = BareModel(preset="small", **options) if preset else BareModel(**options)
@@ -184,7 +185,7 @@ def test_bare_branch_classes_match_empty_calls_and_preset_defaults(preset):
 def test_bare_branch_classes_bind_in_keywords_mappings_and_mutations():
     nested = rf.Branch(length=2, fields={"history": Transaction})
     model = rf.Model(
-        preset="small", d_model=16, histories=nested, transactions=Transaction, result=rf.Boolean(mask=True)
+        preset="small", d_model=16, histories=nested, transactions=Transaction, result=rf.Boolean(predict=True)
     )
     model.extend(rf.where("address") == "/", extra=Transaction)
 
@@ -206,7 +207,7 @@ def test_nested_bare_branches_are_independent_and_checkpoint_portable(tmp_path):
         first = ExtendedBasket
         second = ExtendedBasket
         bounded = Basket(length=3, overflow="tail")
-        result = rf.Boolean(mask=True)
+        result = rf.Boolean(predict=True)
 
     first = Comparison(d_model=16, n_layers=1, n_heads=2)
     second = Comparison(d_model=16, n_layers=1, n_heads=2)
@@ -235,6 +236,12 @@ def test_nested_bare_branches_are_independent_and_checkpoint_portable(tmp_path):
 def test_declarative_constructors_reject_child_definitions(construct):
     with pytest.raises(TypeError, match="constructor arguments configure the node"):
         construct()
+
+
+@pytest.mark.parametrize("option", [{"predict": True}, {"ablate": 0.5}])
+def test_declarative_model_explains_child_only_policies(option):
+    with pytest.raises(TypeError, match=f"Set {next(iter(option))} on a leaf or child branch"):
+        FraudDetector(preset="small", **option)
 
 
 def test_multiple_inheritance_requires_explicit_resolution_of_conflicting_children():
@@ -324,7 +331,7 @@ def test_yaml_schema_is_authoritative_for_a_declarative_subclass(tmp_path, prese
     path.write_text(
         dimensions
         + "d_model: 16\nn_layers: 1\nn_heads: 2\n"
-        + "fields:\n  different:\n    type: number\n    mask: true\n"
+        + "fields:\n  different:\n    type: number\n    predict: true\n"
     )
     optimizer = rf.adamw(learning_rate=1e-3)
     model = FraudDetector.from_yaml(path, batch_size=7, optimizer=optimizer)

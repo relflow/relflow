@@ -35,7 +35,7 @@ def test_inherited_number_encodes_predicts_and_keeps_field_and_model_state_separ
     extension = inherited()
     Measurement = extension.Request
     records = pa.table({"first": [1.0, 3.0], "second": [10.0, 30.0], "target": [2.0, 4.0]})
-    model = rf.Model(preset="small", d_model=8, first=Measurement, second=Measurement, target=Measurement(mask=True))
+    model = rf.Model(preset="small", d_model=8, first=Measurement, second=Measurement, target=Measurement(predict=True))
     other = rf.Model(preset="small", d_model=8, first=Measurement)
 
     fields = model.encode(records, strata="train")
@@ -232,7 +232,7 @@ def test_late_registered_third_party_components_build_a_chained_model(inherited)
                 parent.register(role, component)
 
         records = pa.table({"input": [1.0, 2.0], "target": [3.0, 4.0]})
-        model = rf.Model(preset="small", d_model=8, input=grandchild.Request, target=grandchild.Request(mask=True))
+        model = rf.Model(preset="small", d_model=8, input=grandchild.Request, target=grandchild.Request(predict=True))
         assert model.encode(records)["/input"].content.flatten().tolist() == [1.0, 2.0]
         assert len(model.predict(records)) == 2
         assert "target" in model.predict(records)["predictions"].struct.fields
@@ -322,7 +322,7 @@ def test_inherited_numeric_target_trains_with_the_child_loss(inherited, tmp_path
         return parent.loss(module, prediction, batch, strata)
 
     records = pa.table({"input": [1.0, 2.0, 3.0, 4.0], "target": [2.0, 4.0, 6.0, 8.0]})
-    model = rf.Model(preset="small", d_model=8, input=child.Request, target=child.Request(mask=True))
+    model = rf.Model(preset="small", d_model=8, input=child.Request, target=child.Request(predict=True))
     data = rf.ArrowDataModule(
         train=records, validate=records, num_workers=0, persistent_workers=False, pin_memory=False
     )

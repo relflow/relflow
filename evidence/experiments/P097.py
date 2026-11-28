@@ -108,7 +108,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -162,7 +162,7 @@ def records(*, rows: int, seed: int, count: int = 4, extrapolate: bool = False) 
 
 class Model(rf.Model):
     query = rf.Number
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 class ContextModel(Model):

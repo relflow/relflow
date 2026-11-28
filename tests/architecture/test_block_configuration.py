@@ -33,9 +33,11 @@ def configured(*, preset: str | None = None, ffnx: int = 8) -> rf.Model:
             reduction=rf.Attention(n_outputs=1, n_layers=1, n_heads=2, dropout=0.0),
             value=rf.Number,
             quantity=rf.Number,
-            target=rf.Number(mask=True, ffnx=2, objective="mse", pooling="query", n_heads=2, n_linear=1, dropout=0.0),
+            target=rf.Number(
+                predict=True, ffnx=2, objective="mse", pooling="query", n_heads=2, n_linear=1, dropout=0.0
+            ),
         ),
-        target=rf.Number(mask=True, ffnx=5, objective="mse", pooling="query", n_heads=2, n_linear=1, dropout=0.0),
+        target=rf.Number(predict=True, ffnx=5, objective="mse", pooling="query", n_heads=2, n_linear=1, dropout=0.0),
     )
     return rf.Model(**options) if preset is None else rf.Model(preset=preset, **options)
 
@@ -118,8 +120,8 @@ fields:
     fields:
       value: {type: number}
       quantity: {type: number}
-      target: {type: number, mask: true, ffnx: 2, objective: mse, pooling: query, n_heads: 2, n_linear: 1, dropout: 0.0}
-  target: {type: number, mask: true, ffnx: 5, objective: mse, pooling: query, n_heads: 2, n_linear: 1, dropout: 0.0}
+      target: {type: number, predict: true, ffnx: 2, objective: mse, pooling: query, n_heads: 2, n_linear: 1, dropout: 0.0}
+  target: {type: number, predict: true, ffnx: 5, objective: mse, pooling: query, n_heads: 2, n_linear: 1, dropout: 0.0}
 """,
         encoding="utf-8",
     )
@@ -185,7 +187,7 @@ def test_node_defaults_are_independent_and_option_collisions_use_fields():
         ffnx=6,
         fields={"ffnx": rf.Number},
         events=rf.Branch(length=2, fields={"ffnx": rf.Number}),
-        target=rf.Number(mask=True),
+        target=rf.Number(predict=True),
     )
     assert model.schema.fields.ffnx == 6
     assert model.schema.branches[rf.Address("events")].ffnx == 8
@@ -205,10 +207,10 @@ def test_custom_preset_defaults_and_explicit_node_widths_remain_local(monkeypatc
     rf.presets.register(profile)
     definition = rf.Branch(
         value=rf.Number,
-        target=rf.Number(mask=True, ffnx=7),
+        target=rf.Number(predict=True, ffnx=7),
         fixed=rf.Branch(ffnx=8, value=rf.Number(ffnx=8)),
     )
-    model = rf.Model(preset=profile.name, d_model=8, events=definition, target=rf.Number(mask=True))
+    model = rf.Model(preset=profile.name, d_model=8, events=definition, target=rf.Number(predict=True))
     assert definition.ffnx == 8 and "ffnx" not in definition.model_fields_set
     assert model.schema.fields.ffnx == 4
     assert model.schema.branches[rf.Address("events")].ffnx == 3
@@ -259,7 +261,7 @@ def test_extension_after_restore_uses_fixed_blocks_and_preserves_retained_weight
             reduction=rf.Attention(n_outputs=1),
             value=rf.Number,
             quantity=rf.Number,
-            target=rf.Number(mask=True, ffnx=6, objective="mse"),
+            target=rf.Number(predict=True, ffnx=6, objective="mse"),
         ),
     )
     restored.update(rf.where("address") == rf.Address("purchases"), n_layers=2, ffnx=7)

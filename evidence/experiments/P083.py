@@ -105,7 +105,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -181,7 +181,7 @@ class Day(rf.Branch):
 
 class Model(rf.Model):
     days = Day(length=None, overflow=None, reduction=rf.Attention())
-    answer = rf.Number(mask=True, objective="mse")
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

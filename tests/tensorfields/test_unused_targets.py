@@ -29,7 +29,7 @@ class Tokenizer:
         (rf.Category, "known", {"p_unavailable": 0.0}),
         (rf.Group, "known", {"n_groups": 3, "p_unavailable": 0.0}),
         (rf.Set, ["known"], {"p_unavailable": 0.0}),
-        (rf.Period, datetime(2026, 1, 1), {"dateparts": ["day_of_week"]}),
+        (rf.Period, datetime(2026, 1, 1), {"parts": ["day_of_week"]}),
         (rf.Hash, "identifier", {}),
         (rf.Text, "hello", {"model": "local-test", "max_length": 4, "cache": False}),
     ],
@@ -42,7 +42,7 @@ def test_targets_follow_objectives(field_type, value, options, objective, strata
         d_model=8,
         n_layers=1,
         n_heads=4,
-        value=field_type(mask=rf.Mask(dropout=False, reconstruct=True) if objective else False, **options),
+        value=field_type(task=rf.reconstruct() if objective else None, **options),
     )
     context = {"/value": OnlineVocabularyModel(size=8).state} if field_type in (rf.Category, rf.Group, rf.Set) else {}
     batch = encode(
@@ -67,12 +67,12 @@ def test_unused_targets_preserve_masked_pristine_validation(field_type, invalid)
         d_model=8,
         n_layers=1,
         n_heads=4,
-        value=field_type(mask=rf.Mask(rate=1.0, reconstruct=False)),
+        value=field_type(hide="hide"),
     )
     assert "/value" not in schema.objectives
     with pytest.raises((TypeError, ValueError), match="value"):
         encode(
-            pa.table({"value": [invalid]}),
+            pa.table({"value": [invalid], "hide": [True]}),
             schema=schema,
             strata=rf.Strata.train,
             interprocess_encoding_context={},

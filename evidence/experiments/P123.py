@@ -135,7 +135,7 @@ def cache_model(directory, questions, width):
             model=str(directory), max_length=2, encoder_pooling="mean", store=str(directory / "questions")
         )
         tile = rf.Image(model=str(directory), immutable=True, base=str(directory), store=str(directory / "tiles"))
-        answer = rf.Boolean(mask=True)
+        answer = rf.Boolean(predict=True)
 
     model = Model(preset=CONTROL.name)
 

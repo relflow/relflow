@@ -112,7 +112,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -187,7 +187,7 @@ def errors(actual: np.ndarray, predicted: np.ndarray, baseline: float) -> dict:
 class Model(rf.Model):
     x = rf.Number
     code = rf.Category(p_unavailable=0.0)
-    y = rf.Number(mask=True, objective="mse")
+    y = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P046", seed=4601)

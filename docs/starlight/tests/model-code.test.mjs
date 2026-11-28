@@ -9,19 +9,19 @@ const stages = [
   {
     id: 'start',
     schema:
-      'import relflow as rf\n\nclass Customer(rf.Model):\n    amount = rf.Number\n    returned = rf.Boolean(mask=True)',
+      'import relflow as rf\n\nclass Customer(rf.Model):\n    amount = rf.Number\n    returned = rf.Boolean(predict=True)',
     lines: { '/amount': 4, '/returned': 5 },
   },
   {
     id: 'context',
     schema:
-      'import relflow as rf\n\nclass Order(rf.Branch):\n    amount = rf.Number\n\nclass Customer(rf.Model):\n    amount = rf.Number\n    orders = Order(length=8)\n    returned = rf.Boolean(mask=True)',
+      'import relflow as rf\n\nclass Order(rf.Branch):\n    amount = rf.Number\n\nclass Customer(rf.Model):\n    amount = rf.Number\n    orders = Order(length=8)\n    returned = rf.Boolean(predict=True)',
     lines: { '/orders/amount': 4, '/amount': 7, '/orders': 8, '/returned': 9 },
   },
   {
     id: 'targets',
     schema:
-      'import relflow as rf\n\nclass Order(rf.Branch):\n    amount = rf.Number\n\nclass Customer(rf.Model):\n    amount = rf.Number\n    orders = Order(length=8)\n    returned = rf.Boolean(mask=True)\n    refund = rf.Number(mask=True)',
+      'import relflow as rf\n\nclass Order(rf.Branch):\n    amount = rf.Number\n\nclass Customer(rf.Model):\n    amount = rf.Number\n    orders = Order(length=8)\n    returned = rf.Boolean(predict=True)\n    refund = rf.Number(predict=True)',
     lines: { '/orders/amount': 4, '/amount': 7, '/orders': 8, '/returned': 9, '/refund': 10 },
   },
 ];

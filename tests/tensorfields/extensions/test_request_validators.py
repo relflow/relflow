@@ -42,14 +42,14 @@ def test_boolean_threshold_rejects_invalid_lists(threshold: list[float], match: 
 
 
 def test_period_rejects_duplicate_parts():
-    with pytest.raises(ValueError, match="dateparts must be unique"):
-        rf.Period(dateparts=["day_of_week", "day_of_week"])
+    with pytest.raises(ValueError, match="Period parts must be unique"):
+        rf.Period(parts=["day_of_week", "day_of_week"])
 
 
-def test_period_normalizes_friendly_datepart_names():
-    request = rf.Period(dateparts=["Day Of Week", "month-of-year", "HourOfDay"])
+def test_period_normalizes_friendly_part_names():
+    request = rf.Period(parts=["Day Of Week", "month-of-year", "HourOfDay"])
 
-    assert [datepart.value for datepart in request.dateparts] == [
+    assert [part.value for part in request.parts] == [
         "day_of_week",
         "month_of_year",
         "hour_of_day",
@@ -58,14 +58,14 @@ def test_period_normalizes_friendly_datepart_names():
 
 def test_period_unknown_name_suggests_canonical_value():
     with pytest.raises(ValueError, match="did you mean 'day_of_week'"):
-        rf.Period(dateparts=["day of wek"])
+        rf.Period(parts=["day of wek"])
 
 
 def test_period_pattern_rejects_invalid_tokens():
     with pytest.raises(ValueError, match="is not a valid format pattern"):
-        rf.Period(dateparts=["day_of_week"], pattern="%Q-%m-%d")
+        rf.Period(parts=["day_of_week"], pattern="%Q-%m-%d")
 
 
 def test_period_pattern_accepts_valid_format():
-    request = rf.Period(dateparts=["day_of_week", "month_of_year"], pattern="%Y-%m-%d")
+    request = rf.Period(parts=["day_of_week", "month_of_year"], pattern="%Y-%m-%d")
     assert request.pattern == "%Y-%m-%d"

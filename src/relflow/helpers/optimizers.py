@@ -12,7 +12,15 @@ OptimizerFactory = Callable[[torch.nn.Module], torch.optim.Optimizer]
 __all__ = ["OptimizerFactory", "adamw"]
 
 
+# Only linear and convolution matrices are decayed: embedding tables, learned
+# queries, and per-head gains are 2-D too, but shrinking them shifts lookups and
+# attention temperature rather than regularizing a projection.
+MATRICES = (torch.nn.Linear, torch.nn.Bilinear, torch.nn.modules.conv._ConvNd)
+
+
 def uses_weight_decay(
+    owner: torch.nn.Module,
+    local: str,
     name: str,
     parameter: Parameter,
     *,
@@ -20,13 +28,16 @@ def uses_weight_decay(
     decay_1d: bool,
     no_decay_name_fragments: tuple[str, ...],
 ) -> bool:
-    if not decay_bias and name.endswith(".bias"):
+    # Schema addresses are module keys starting with "/"; a field called
+    # "normal" must not opt its layers out of decay.
+    path = ".".join(part for part in name.lower().split(".") if not part.startswith("/"))
+    if any(fragment in path for fragment in no_decay_name_fragments):
         return False
-    if not decay_1d and parameter.ndim <= 1:
-        return False
-
-    lower_name = name.lower()
-    return not any(fragment in lower_name for fragment in no_decay_name_fragments)
+    if local == "bias":
+        return decay_bias
+    if parameter.ndim <= 1:
+        return decay_1d
+    return local == "weight" and isinstance(owner, MATRICES)
 
 
 def adamw(
@@ -45,9 +56,12 @@ def adamw(
     Ordinary fitting configures these options directly on ``Model.fit``.
 
     The factory collects trainable parameters when the model configures its
-    optimizer. Biases, one-dimensional parameters, and names containing
-    ``no_decay_name_fragments`` receive no weight decay by default. Set
-    ``fused=False`` for devices that do not support Torch's fused AdamW.
+    optimizer. Weight decay applies to the weight matrices of linear and
+    convolution layers. Biases follow ``decay_bias`` and other one-dimensional
+    parameters follow ``decay_1d``; embedding tables, learned queries, and
+    gains are never decayed. Names containing a ``no_decay_name_fragments``
+    entry outside schema addresses receive no decay. Set ``fused=False`` for
+    devices that do not support Torch's fused AdamW.
     """
 
     fragments = tuple(fragment.lower() for fragment in no_decay_name_fragments if fragment)
@@ -81,20 +95,24 @@ def build(
     decay_parameters: list[Parameter] = []
     no_decay_parameters: list[Parameter] = []
 
-    for name, parameter in module.named_parameters():
-        if not parameter.requires_grad:
-            continue
-
-        if uses_weight_decay(
-            name,
-            parameter,
-            decay_bias=decay_bias,
-            decay_1d=decay_1d,
-            no_decay_name_fragments=fragments,
-        ):
-            decay_parameters.append(parameter)
-        else:
-            no_decay_parameters.append(parameter)
+    seen: set[int] = set()
+    for path, owner in module.named_modules():
+        for local, parameter in owner.named_parameters(recurse=False):
+            if not parameter.requires_grad or id(parameter) in seen:
+                continue
+            seen.add(id(parameter))
+            if uses_weight_decay(
+                owner,
+                local,
+                f"{path}.{local}" if path else local,
+                parameter,
+                decay_bias=decay_bias,
+                decay_1d=decay_1d,
+                no_decay_name_fragments=fragments,
+            ):
+                decay_parameters.append(parameter)
+            else:
+                no_decay_parameters.append(parameter)
 
     parameter_groups: list[dict[str, Any]] = []
     if decay_parameters:

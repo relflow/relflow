@@ -177,14 +177,14 @@ test('literal string contents cannot create a target and branch placement option
 class Item(rf.Branch):
     """One supplied item."""
 
-    label = rf.Enum("mask=True", "ordinary")
+    label = rf.Enum("predict=True", "ordinary")
 
 
 class Example(rf.Model):
     """An observation with item context."""
 
     items = Item(length=8, overflow="tail")
-    result = rf.Boolean(mask=True)
+    result = rf.Boolean(predict=True)
 
 
 if __name__ == "__main__":

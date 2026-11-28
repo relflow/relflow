@@ -56,7 +56,9 @@ def test_first_null_is_not_a_numeric_target():
     model = rf.Model(
         preset="small",
         d_model=8,
-        transactions=rf.Branch(elapsed=rf.Duration(query="occurred_at", delta=True, granularity="seconds", mask=True)),
+        transactions=rf.Branch(
+            elapsed=rf.Duration(query="occurred_at", delta=True, granularity="seconds", predict=True)
+        ),
     )
     field = model.encode(SOURCE, strata="train")["/transactions/elapsed"]
     assert field.targets[rf.TensorKey.state].reshape(-1).tolist() == [N, V, V]
@@ -193,7 +195,7 @@ def test_delta_trains_and_predicts_with_worker_batches(tmp_path):
             length=2,
             overflow="tail",
             amount=rf.Number,
-            elapsed=rf.Duration(query="occurred_at", delta=True, granularity="seconds", mask=True),
+            elapsed=rf.Duration(query="occurred_at", delta=True, granularity="seconds", predict=True),
         ),
     )
     data = rf.ArrowDataModule(

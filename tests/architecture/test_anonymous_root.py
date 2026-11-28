@@ -54,7 +54,7 @@ def test_schema_serializes_only_child_names():
         n_heads=2,
         embed=True,
         query="payload",
-        mask=rf.Mask(query="selected", reconstruct=True),
+        task=rf.reconstruct(query="selected"),
         items=rf.Branch(length=2, value=rf.Number),
     )
     payload = schema.model_dump(mode="json", round_trip=True)
@@ -145,7 +145,7 @@ def test_root_query_prediction_envelope_and_checkpoint_round_trip(tmp_path):
         n_heads=2,
         query="payload",
         embed=True,
-        items=rf.Branch(length=2, value=rf.Number(mask=True)),
+        items=rf.Branch(length=2, value=rf.Number(predict=True)),
     )
     table = pa.Table.from_pylist([{"payload": {"items": [{"value": 3.0}, {"value": 5.0}]}}])
     expected = pa.table(model.predict(table))
@@ -199,7 +199,7 @@ def test_absolute_routing_preserves_forward_values_and_gradients(monkeypatch):
             embed=True,
             amount=rf.Number,
             items=rf.Branch(length=2, embed=True, value=rf.Number),
-            answer=rf.Number(mask=True),
+            answer=rf.Number(predict=True),
         ).eval()
         inputs = model.encode(
             pa.Table.from_pylist([{"amount": 2.0, "items": [{"value": 3.0}, {"value": 5.0}], "answer": 4.0}]),

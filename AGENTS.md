@@ -42,7 +42,7 @@ model = rf.Model(
     n_heads=4,
     amount=rf.Number,
     merchant=rf.Category,
-    label=rf.Category(mask=True),
+    label=rf.Category(predict=True),
 )
 ```
 
@@ -58,7 +58,7 @@ model = rf.Model(
         sku=rf.Category,
         quantity=rf.Number,
     ),
-    returned=rf.Category(mask=True),
+    returned=rf.Category(predict=True),
 )
 ```
 
@@ -113,7 +113,7 @@ model = rf.Model(
   `rf.Branch(length=8, fields={"length": rf.Number})`.
   `model.extend(predicate, risk_score=rf.Number)` follows the same rule.
 - Use bare tensorfield classes such as `rf.Category` when no options are needed;
-  call them only to configure fields, such as `rf.Category(mask=True)`.
+  call them only to configure fields, such as `rf.Category(predict=True)`.
 - Tensorfield options must be declared fields; pass them directly or unpack a
   mapping with `**options`. Use `description` for notes, and declare extension
   options on `RequestBase` subclasses. Undeclared options are rejected.
@@ -147,12 +147,24 @@ model = rf.Model(
   alongside leaf tensorfields, so cloning, device transfer, and row selection
   preserve lengths and structural holes. Do not infer geometry from leaf values
   or masks.
-- `mask=True` is shorthand for
-  `Mask(skip=True, dropout=False, reconstruct=True)`: the field is never
-  embedded and is decoded as a supervised reconstruction target.
-- Every node has one canonical `mask` tuple. A float is uniform train-only
-  masking; `Mask(query=...)` selects with an Arrow Boolean field; `skip=True`
-  prevents tensorization and embedding; `reconstruct=True` adds an objective.
+- `predict=True` on a leaf or child branch permanently hides and supervises
+  the leaf or all active descendant leaves. Prediction can omit answers.
+  Supply collection slots to request branch predictions in their original order.
+- `hide` accepts a float from zero inclusive to one exclusive, a Boolean
+  query path, or a tuple of these selectors. During training, any matching
+  selector hides the value. On a branch, all participating children share
+  each row decision. Use `ignore="name"` or a tuple to exempt direct children.
+- Use a preprocessor to redact unavailable context on every split. In an ordered
+  collection, replace hidden records with null slots to preserve later positions.
+- `ablate=0.2` drops a leaf per record or a child collection per parent with
+  20% probability during training. Dropped values supply neither inputs nor
+  targets. Leaf ablation preserves siblings and row positions.
+- `task=rf.reconstruct(rate=0.15)` hides selected observations and
+  uses them as answers. A query restricts eligible observations, and
+  `span` samples runs on an ordinary branch. A tuple of reconstruction
+  declarations selects an answer when any of its rules selects it. Validation repeats selections
+  given the same seed, input order and batching. `node.masks` exposes the
+  resolved policies for inspection.
 - `embed=True` emits an embedding in prediction output. It does not make the field a supervised target.
 - `ffnx` is a positive integer feed-forward multiplier, defaulting to `8` on
   each node. The model root, child branches, and tensorfield decoders configure
@@ -188,12 +200,25 @@ model = rf.Model(
   its Branch collection, in source order and before cropping; records without
   a predecessor have a null duration. Endpoints must agree
   on aware versus naive semantics.
-- `Period` is for calendar parts. Saved schemas identify it with `type: dateparts`.
+- `rf.Index` is a twig: a third node kind beside `Branch` and `Leaf`, declared
+  like a field (`at=rf.Index`, `rf.Index(query=..., granularity="hours")`) but
+  never embedded, masked, decoded, or written. It reads one integer, date, or
+  timestamp per record of its own Branch. That Branch's encoder and Attention
+  reduction rotate each record's tokens by its index, counted from the
+  collection's smallest value, instead of its ordinal; routed sequences and
+  decoders keep structural positions. Integers reject `granularity`; dates and
+  timestamps default to days. At most one Index per Branch, none at the root,
+  nulls rejected, and the Branch needs attention or a positional Attention
+  reduction. Positions travel as float32 `Geometry.positions`.
+- `Period` is for calendar parts, selected positionally or with `parts=`.
   Use `Duration` for elapsed time, or `Number` when it is already derived upstream.
   Zone-aware timestamps describe their own wall clock; strings carrying an offset
   are read as UTC. A `Vector` with a NaN or infinite element, and a float NaN label
   in `Category`, take the `other` state; a NaN `Set` member is dropped like a null.
-- `Text` caches automatically: workers send stable IDs; a bounded device
+- `Text` defaults to all-MiniLM-L6-v2 with masked mean pooling. New fields
+  scale each pooled input to unit RMS before jitter and projection. Frozen
+  reconstruction targets retain their original scale. CPU encoding uses fp32.
+  Workers send stable IDs for compact token records. A bounded device
   table and shared Rust Moka RAM cache retain hot entries, with SQLite as the
   durable cold tier. `store` selects a local directory, `memory` budgets RAM
   (default 64 MiB), and `resident` budgets device tables and replacement
@@ -228,8 +253,10 @@ model = rf.Model(
   and apply jitter there without creating another normalizer.
 - Tensorfield extensions declare canonical Arrow atom compatibility families with
   `Extension(types=...)`; custom Python atoms add extension-owned physical matchers
-  with `Extension(..., arrow={Type: matcher})`. Keep datatype contracts out of
-  `Request` and the shared ragged engine.
+  with `Extension(..., arrow={Type: matcher})`. Extensions receive one scalar
+  per record unless they declare `lists=True`, as `Set` and `Vector` do; the
+  shared boundary rejects list columns for the rest with the field address.
+  Keep datatype contracts out of `Request` and the shared ragged engine.
 - Register components by role, such as
   `@extension.register(rf.Component.Request)` or
   `extension.register(rf.Component.write, custom_writer)`. Python names are
@@ -514,10 +541,10 @@ asset before publishing the package tag. New public assets use versioned
 `relflow-<version>-evidence*` filenames. The Release workflow refreshes `latest`
 after publishing Evidence and the package. `latest` requires frozen Evidence
 for the checkout's package version. Other branch and PR docs use the latest
-formal release at version >=0.5.0, or show pending measurements until one exists.
+formal release at version >=0.6.0, or show pending measurements until one exists.
 Tag docs require their matching frozen selection. Active Evidence
 comparisons require a supported baseline under the policy in `evidence/releases.py`;
-retain the actual event base separately when the fixed 0.5 anchor is selected.
+retain the actual event base separately when the fixed 0.6 anchor is selected.
 Ordinary CI retains reports and plots as Actions artifacts and creates no
 per-commit Evidence releases, publication commits, or pull requests. Experiments
 keep definitions and prose, with measured results outside their source files.

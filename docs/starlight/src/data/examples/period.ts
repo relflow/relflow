@@ -26,7 +26,7 @@ class SupportRequest(rf.Model):
 
     received_at = rf.Period("day_of_week", "hour_of_day")
     minutes_since_previous_request = rf.Number
-    response_minutes = rf.Number(mask=True)`,
+    response_minutes = rf.Number(predict=True)`,
     inputs: { received_at: '2026-11-13T16:30:00Z', minutes_since_previous_request: 3 },
     answers: { response_minutes: 18 },
     output: { predictions: { response_minutes: prediction(20.4) } },
@@ -65,7 +65,7 @@ class ForecastDay(rf.Branch):
 
     date = rf.Period("month_of_year", "day_of_week")
     promotion = rf.Boolean
-    units_sold = rf.Number(mask=True)
+    units_sold = rf.Number(predict=True)
 
 
 class SalesForecast(rf.Model):
@@ -123,7 +123,7 @@ class Login(rf.Model):
     account_age_days = rf.Number
     minutes_since_last_login = rf.Number
     new_device = rf.Boolean
-    needs_check = rf.Boolean(mask=True)`,
+    needs_check = rf.Boolean(predict=True)`,
     inputs: {
       occurred_at: '2026-11-14T02:15:00Z',
       account_age_days: 420,

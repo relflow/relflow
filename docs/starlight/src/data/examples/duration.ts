@@ -18,7 +18,7 @@ class AccountReview(rf.Model):
         granularity="days",
     )
     recent_declines = rf.Number
-    needs_review = rf.Boolean(mask=True)`,
+    needs_review = rf.Boolean(predict=True)`,
     dataset: {
       id: 'account-age', label: 'Account review',
       observation: 'One account at an explicit review time.',
@@ -61,7 +61,7 @@ class Shipment(rf.Branch):
         query=("shipped_at", "../reviewed_at"),
         granularity="hours",
     )
-    delivery_hours_remaining = rf.Number(mask=True)
+    delivery_hours_remaining = rf.Number(predict=True)
 
 
 class ShipmentReview(rf.Model):
@@ -136,7 +136,7 @@ class RepairJob(rf.Model):
     resolution_hours = rf.Duration(
         query=("opened_at", "resolved_at"),
         granularity="hours",
-        mask=True,
+        predict=True,
     )`,
     dataset: {
       id: 'repair-target', label: 'Repair duration',
@@ -156,7 +156,7 @@ class RepairJob(rf.Model):
     },
     inputs: { asset_type: 'conveyor', urgency: 'urgent', affected_units: 2 },
     answers: { opened_at: '2026-11-13T09:00:00Z', resolved_at: '2026-11-13T15:30:00Z' },
-    answerNote: 'These training-only timestamps derive resolution_hours = 6.5. The mask hides that derived number from model inputs. Neither endpoint is declared as another input field; new requests omit both timestamps.',
+    answerNote: 'These training-only timestamps derive resolution_hours = 6.5. The target declaration keeps that derived number out of model inputs. Neither endpoint is declared as another input field; new requests omit both timestamps.',
     output: { predictions: { resolution_hours: prediction(6.2) } },
     outputNote: 'The Duration target returns numeric content in hours, with state and inferred. It does not return a resolution timestamp or an endpoint pair.',
     takeaway: 'Historical endpoints supply the training answer through the query. New jobs supply only the declared repair context; the fitted model estimates elapsed hours without knowing the completion time.',

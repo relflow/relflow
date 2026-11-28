@@ -199,7 +199,7 @@ def tensorize(
                 inferred=inferred,
                 targets=TensorDict(
                     {TensorKey.state: torch.from_numpy(targets.dense), TensorKey.content: encode(targets)}
-                    if address in schema.objectives
+                    if sources.needs_targets(schema)
                     else {},
                     batch_size=inputs.shape,
                 ),

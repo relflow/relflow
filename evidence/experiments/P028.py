@@ -122,7 +122,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -261,7 +261,7 @@ class RightRecord(rf.Branch):
 class PredictionModel(rf.Model):
     left = LeftRecord(length=MAX_LENGTH, n_layers=1, reduction=None)
     right = RightRecord(length=MAX_LENGTH, n_layers=1, reduction=None)
-    has_overlap = rf.Boolean(mask=True)
+    has_overlap = rf.Boolean(predict=True)
 
 
 @experiment("P028", seed=3711)

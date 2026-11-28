@@ -84,7 +84,7 @@ class Customer(rf.Model):
 
     days_since_signup = rf.Number
     orders = Order(length=32, overflow="tail")
-    returns_in_30d = rf.Boolean(mask=True)
+    returns_in_30d = rf.Boolean(predict=True)
 
 
 training_schema: pa.Schema = pa.schema([

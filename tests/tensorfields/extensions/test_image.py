@@ -169,7 +169,7 @@ def test_nested_fields_share_pristine_vectors_and_preserve_holes(vision, tmp_pat
         return rf.Image(model="tiny", base=str(tmp_path), **kw)
 
     model = rf.Model(
-        d_model=8, n_layers=1, n_heads=2, album=rf.Branch(photo=photo(embed=True)), answer=photo(mask=True)
+        d_model=8, n_layers=1, n_heads=2, album=rf.Branch(photo=photo(embed=True)), answer=photo(predict=True)
     )
     data = pl.DataFrame(
         {
@@ -288,7 +288,7 @@ def test_offline_dino_training_prediction_and_checkpoint_with_loader_worker(tmp_
     def photo(**options):
         return rf.Image(model=str(assets), store=str(tmp_path / "store"), **options)
 
-    model = rf.Model(d_model=8, n_layers=1, n_heads=2, photo=photo(embed=True), target=photo(mask=True))
+    model = rf.Model(d_model=8, n_layers=1, n_heads=2, photo=photo(embed=True), target=photo(predict=True))
     data = pl.DataFrame({"photo": paths, "target": list(reversed(paths))})
     embedder = model.nodes["/photo"].embedder
     before = embedder.linear[0].weight.detach().clone()

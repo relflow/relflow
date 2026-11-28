@@ -66,7 +66,7 @@
 # %%
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["relflow>=0.5.0", "pyyaml>=6", "torch"]
+# dependencies = ["relflow>=0.6.0", "pyyaml>=6", "torch"]
 #
 # [tool.relflow.evidence]
 # capability = "unreviewed"
@@ -89,7 +89,7 @@ from reporting import experiment, report
 # Small collections may be inline, such as items = rf.Branch(length=8, value=rf.Number).
 class Model(rf.Model):
     feature = rf.Number
-    target = rf.Number(mask=True)
+    target = rf.Number(predict=True)
 
 
 # Replace the illustrative fields above with the experiment's data contract.

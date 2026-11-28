@@ -22,7 +22,7 @@ raise RuntimeError("the documentation must never execute this package")
 '''
     )
     (source / "types.py").write_text(
-        '''from typing import Annotated, TypeAlias, overload
+        '''from typing import Annotated, ClassVar, TypeAlias, overload
 
 class Leaf:
     """Shared field documentation."""
@@ -40,6 +40,8 @@ class Numeric(Alias):
 
 class Derived(Numeric):
     offset: int = 8
+    active: ClassVar[None] = None
+    kind: ClassVar[str] = "derived"
     @property
     def logarithmic(self) -> bool:
         """Whether log scaling is active."""
@@ -77,8 +79,8 @@ def test_reference_resolves_reexports_and_typealias_bases_without_importing_sdk(
     assert number["text"] == "Numbers retain their source units."
     assert number["source"]["file"] == "src/relflow/types.py"
     assert number["documentationSource"]["line"] < number["source"]["line"]
-    assert fields["active"]["inherited"] is True
-    assert fields["active"]["default"] == "True"
+    assert "active" not in fields
+    assert fields["kind"]["default"] == "'derived'"
     assert fields["offset"]["default"] == "8"
     assert fields["offset"]["inherited"] is False
     assert fields["jitter"]["default"] == "ExplosiveFactory()"

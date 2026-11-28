@@ -37,7 +37,7 @@ def test_branch_multiplier_reaches_sequence_coordinate_and_pool_blocks_independe
         n_heads=4,
         ffnx=6,
         group=rf.Branch(length=4, ffnx=3, n_layers=2, left=rf.Number, right=rf.Number),
-        answer=rf.Boolean(mask=True),
+        answer=rf.Boolean(predict=True),
     )
     root = BranchEncoder(schema, rf.Address())
     group = BranchEncoder(schema, rf.Address("group"))

@@ -52,9 +52,10 @@ def test_nested_query_proof_selects_real_targets_not_padding():
         [[item["selected"] for item in row["items"]] + [False] * (proof.LENGTH - len(row["items"])) for row in rows]
     )
     assert any(len(row["items"]) < proof.LENGTH for row in rows)
-    field = proof.build().encode(pa.Table.from_pylist(rows), strata="train")["/items/value"]
-    np.testing.assert_array_equal(field.trainable.numpy().reshape(expected.shape), expected)
-    assert not field.present.numpy().reshape(expected.shape)[expected].any()
+    fields = proof.build().encode(pa.Table.from_pylist(rows), preprocess=proof.prepare, strata="train")
+    np.testing.assert_array_equal(fields["/items/answers/value"].trainable.numpy().reshape(expected.shape), expected)
+    assert not fields["/items/answers/value"].present.any()
+    assert not fields["/items/value"].present.numpy().reshape(expected.shape)[expected].any()
 
 
 def test_branch_proof_selectors_cover_all_visibility_patterns_and_compose():
@@ -66,7 +67,7 @@ def test_branch_proof_selectors_cover_all_visibility_patterns_and_compose():
         (True, False),
         (True, True),
     }
-    fields = proof.build().encode(pa.Table.from_pylist(rows), strata="train")
+    fields = proof.build().encode(pa.Table.from_pylist(rows), preprocess=proof.redact, strata="train")
     for name in ("reading", "backup"):
         expected = np.asarray(
             [
@@ -82,13 +83,15 @@ def test_prefix_proof_hides_every_future_and_trains_one_next_value():
     rows = list(proof.records(rows=32, seed=11))
     model = proof.build()
     source = pa.Table.from_pylist(rows)
-    field = model.encode(source, strata="train")["/events/value"]
+    fields = model.encode(source, preprocess=proof.prepare, strata="train")
     next_value = np.asarray([[event["next"] for event in row["events"]] for row in rows])
     visible = np.asarray([[not event["future"] for event in row["events"]] for row in rows])
     assert (next_value.sum(axis=1) == 1).all()
     assert set(visible.sum(axis=1)) == {2, 3, 4}
-    np.testing.assert_array_equal(field.trainable.numpy().reshape(next_value.shape), next_value)
-    np.testing.assert_array_equal(field.present.numpy().reshape(visible.shape), visible)
+    np.testing.assert_array_equal(
+        fields["/events/answers/value"].trainable.numpy().reshape(next_value.shape), next_value
+    )
+    np.testing.assert_array_equal(fields["/events/value"].present.numpy().reshape(visible.shape), visible)
 
 
 @pytest.mark.parametrize("name", ("P052", "P054"))
@@ -97,7 +100,7 @@ def test_repeated_prediction_reads_public_output_without_learning(name):
 
     proof = load(name)
     model = proof.build()
-    address = "/items/value" if name == "P052" else "/events/value"
+    address = "/items/answers/value" if name == "P052" else "/events/answers/value"
     before = rf.Number.normalization(model, address)
     content, inferred = proof.prediction(model, list(proof.records(rows=4, seed=11)))
     assert content.shape == inferred.shape == (4, proof.LENGTH)
@@ -143,13 +146,16 @@ def test_query_reader_keeps_scoring_alignment_when_public_collections_have_diffe
         },
     ]
     model = proof.build()
-    public = pl.DataFrame(model.predict(pa.Table.from_pylist(rows)))["predictions"].to_list()
+    public = pl.DataFrame(model.predict(pa.Table.from_pylist(rows), preprocess=proof.prepare))["predictions"].to_list()
     assert [len(row["items"]) for row in public] == [0, 1, 2]
     content, inferred = proof.prediction(model, rows)
     assert content.shape == inferred.shape == (len(rows), proof.LENGTH)
     np.testing.assert_array_equal(inferred[:, :2], [[False, False], [True, False], [False, True]])
     for index, row in enumerate(public):
         count = len(row["items"])
-        np.testing.assert_allclose(content[index, :count], [item["value"]["content"] for item in row["items"]])
+        np.testing.assert_allclose(
+            content[index, :count],
+            [item["answers"][0]["value"]["content"] if item["answers"][0] else 0.0 for item in row["items"]],
+        )
         np.testing.assert_array_equal(content[index, count:], 0.0)
         assert not inferred[index, count:].any()

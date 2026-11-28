@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import hashlib
 import math
-import zlib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial, partialmethod
@@ -605,9 +605,8 @@ class AdmittedRowsCallback(Callback):
             if embeddings is None or TensorKey.content.name not in embeddings:
                 continue
             weight = cast(torch.nn.Embedding, embeddings[TensorKey.content.name]).weight
-            seed = (zlib.crc32(str(address).encode()) * 1_000_003 + trainer.current_epoch * 65_536 + batch_idx) % (
-                2**63 - 1
-            )
+            payload = f"{address}:{trainer.current_epoch}:{batch_idx}".encode()
+            seed = int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
             start(weight, len(vocabulary.master), seed=seed)
 
 
@@ -683,10 +682,14 @@ class VocabularySyncCallback(Callback):
         on_test_start = partialmethod(warn, strata=Strata.test)
         on_predict_start = partialmethod(warn, strata=Strata.predict)
 
-    def on_fit_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        pl_module = cast("Model", pl_module)
-        for vocabulary in OnlineVocabularyModel.from_model(pl_module).values():
+    def teardown(self, trainer: Trainer, pl_module: LightningModule, stage: str) -> None:
+        """Return worker-shared vocabularies to local storage after every loop."""
+        for vocabulary in OnlineVocabularyModel.from_model(cast("Model", pl_module)).values():
             vocabulary.freeze()
+
+    def on_exception(self, trainer: Trainer, pl_module: LightningModule, exception: BaseException) -> None:
+        # Lightning skips callback teardown when a loop raises.
+        self.teardown(trainer, pl_module, stage="exception")
 
 
 __all__ = [

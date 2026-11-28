@@ -145,7 +145,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -189,7 +189,7 @@ def records(*, rows: int, seed: int, shift: float = 0.0) -> Iterator[dict]:
 
 class Model(rf.Model):
     amount = rf.Quantile
-    cost = rf.Quantile(objective="mse", mask=True)
+    cost = rf.Quantile(objective="mse", predict=True)
 
 
 def build() -> rf.Model:

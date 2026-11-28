@@ -21,7 +21,7 @@ REQUESTS = {"category": rf.Category, "set": rf.Set, "group": rf.Group}
 
 
 def build(kind, *, train_signal=False):
-    options = {"p_unavailable": 0.0, "mask": rf.Mask(query="supervise", reconstruct=True)}
+    options = {"p_unavailable": 0.0, "task": rf.reconstruct(query="supervise")}
     request = rf.Group(n_groups=3, **options) if kind == "group" else REQUESTS[kind](**options)
     return rf.Model(
         preset="small",
@@ -30,7 +30,7 @@ def build(kind, *, train_signal=False):
         reduction=rf.Mean(),
         batch_size=2,
         embed=True,
-        signal=rf.Number(mask=True) if train_signal else rf.Number,
+        signal=rf.Number(predict=True) if train_signal else rf.Number,
         value=request,
     )
 
@@ -375,7 +375,7 @@ def test_late_registered_category_subclass_uses_its_registered_bind_component():
         model = rf.Model(
             preset="small",
             d_model=8,
-            value=Request(p_unavailable=0.0, mask=True),
+            value=Request(p_unavailable=0.0, predict=True),
         )
         fields = model.encode(table("category", ["a", "b", "c"]), strata="train")
         assert_shapes(model, "category", 4)
@@ -721,6 +721,24 @@ def test_category_admission_preserves_predictions_until_the_label_is_learned():
     assert head.bias[2].item() == -20.0
 
 
+def test_admitted_row_starts_differ_across_epochs_however_long_an_epoch_runs():
+    from types import SimpleNamespace
+
+    from relflow.tensorfields.shared.vocabulary import AdmittedRowsCallback
+
+    model = rf.Model(preset="small", d_model=8, group=rf.Category, y=rf.Number(predict=True))
+    model.encode(pa.table({"group": ["A", "B"], "y": [1.0, 2.0]}), strata="train")
+    weight = model.nodes["/group"].embedder.embeddings["content"].weight
+    starts = []
+    for epoch, batch in ((0, 65_536 + 3), (1, 3)):
+        with torch.no_grad():
+            weight.zero_()
+        AdmittedRowsCallback().on_train_batch_start(SimpleNamespace(current_epoch=epoch), model, None, batch)
+        starts.append(weight[:2].detach().clone())
+
+    assert (starts[0] != 0).all() and not torch.equal(*starts)
+
+
 @pytest.mark.integration
 def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and_deterministic():
     from types import SimpleNamespace
@@ -731,7 +749,7 @@ def test_admitted_rows_stay_zero_until_a_training_batch_starts_them_distinct_and
 
     def build():
         lit.seed_everything(7)
-        return rf.Model(preset="small", d_model=8, group=rf.Category, y=rf.Number(mask=True))
+        return rf.Model(preset="small", d_model=8, group=rf.Category, y=rf.Number(predict=True))
 
     rows = pa.table({"group": ["A", "B", "C", "A"], "y": [1.0, 2.0, 3.0, 4.0]})
     # Admission with null targets touches the vocabulary alone; the target statistics are already set.

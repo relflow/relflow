@@ -10,7 +10,7 @@ const examples: Record<(typeof scenarios)[number]['id'], Omit<Concept['examples'
       code: `class RegularizedMessage(TicketMessage):
     """A message whose timing input may be hidden during training."""
 
-    minutes_since_previous = rf.Number(mask=rf.Mask(rate=0.1))
+    minutes_since_previous = rf.Number(hide=0.1)
 
 
 class RegularizedTicket(TicketModel):
@@ -21,13 +21,13 @@ class RegularizedTicket(TicketModel):
     )`,
       note: 'These classes extend the shared class declarations. A source must supply more than 64 messages for the retained window to vary. Bound that candidate pool separately.',
     }],
-    takeaway: 'Randomly hiding an input is a robustness choice. The inherited mask=True targets remain always hidden and supervised.',
+    takeaway: 'Randomly hiding an input is a robustness choice. The inherited predict=True targets remain always hidden and supervised.',
   },
   churn: {
     title: 'Perturb usage without changing the cancellation label',
     description: 'Keep the existing churn target and try small multiplicative noise on observed usage. Sample a contiguous usage window only when the supplied history exceeds its cap.',
     blocks: [{
-      label: 'Usage noise and an independently masked support history', lang: 'python',
+      label: 'Usage noise and optional support history', lang: 'python',
       code: `class RegularizedUsage(MonthlyUsage):
     """A usage month with training-only noise on continuous inputs."""
 
@@ -39,8 +39,8 @@ class RegularizedChurn(ChurnModel):
     """A subscriber modeled with varied usage and support context."""
 
     monthly_usage = RegularizedUsage(length=12, overflow="random")
-    support_tickets = SupportTicket(length=32, overflow="tail", mask=0.1)`,
-      note: 'normalize=False puts this multiplicative jitter on the raw numeric representation. The source values and churn_90d answers are unchanged; a float mask adds training-only input dropout.',
+    support_tickets = SupportTicket(length=32, overflow="tail", ablate=0.1)`,
+      note: 'normalize=False puts this multiplicative jitter on the raw numeric representation. The source values and churn_90d answers are unchanged; ablate=0.1 makes the entire support history inactive for a sampled subscriber during training.',
     }],
     takeaway: 'Usage noise, sampled months, and hidden support context are separate choices. Compare them on a held-out subscriber cohort.',
   },
@@ -76,7 +76,7 @@ class RegularizedDemand(DemandModel):
     """A credit account with training-only input perturbations."""
 
     balance = rf.Number(jitter=rf.Jitter(add=0.02))
-    missed_payments = rf.Number(mask=0.05)
+    missed_payments = rf.Number(hide=0.05)
 
 
 class RegularizedCredit(CreditModel):
@@ -153,15 +153,15 @@ export const regularization: Concept = {
     'The examples extend the original class schemas for a new training run. Their rates illustrate configuration choices; they are not measured recommendations. Compare changes against an unchanged baseline on held-out data.',
   ],
   principles: [
-    { title: 'Keep target hiding permanent', text: 'mask=True is the supervised-target contract: that field is never embedded and receives a reconstruction objective. A float mask or Mask(rate=...) instead adds training-only random input dropout by default. Replacing a target’s mask=True with a float changes its role.' },
+    { title: 'Declare targets and input masking independently', text: 'predict=True hides a supervised target on every split. The hide option accepts a probability or a Boolean source flag and hides selected inputs during training. A branch shares each masking decision across the children of a selected row.' },
     { title: 'Choose the boundary for noise', text: 'Jitter perturbs supported continuous training representations, while dropout configures neural attention/feed-forward regularization. Jitter uses standardized Number values by default; normalize=False selects its raw representation. Neither edits source records or target values.' },
     { title: 'Sample history without changing the question', text: 'A bounded history with overflow="random" uses a contiguous random training window and retains the tail for validation, test, and prediction. Supply more than the cap for sampling to vary and bound the candidate pool separately' },
   ],
   examples: scenarios.map(({ id }) => ({ caseId: id, ...examples[id] })),
-  takeaway: 'Target masks define the task. Input masking, jitter, dropout, and history sampling are optional training choices that need their own held-out comparison.',
+  takeaway: 'The supervised target defines the task. Input masking, jitter, dropout, and history sampling are optional training choices that need their own held-out comparison.',
   links: [
     { label: 'Advanced masking and pretraining', href: '/advanced/masking-and-pretraining/' },
-    { label: 'Mask configuration', href: '/api-map/#api-rf-mask' },
+    { label: 'Reconstruction selection', href: '/api-map/#api-rf-reconstruct' },
     { label: 'Jitter configuration', href: '/api-map/#api-rf-jitter' },
     { label: 'Number inputs and outputs', href: '/data-types/number/' },
     { label: 'Controlled learning experiments', href: '/evidence/' },

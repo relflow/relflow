@@ -137,7 +137,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -176,13 +176,13 @@ ARMS = ("duration", "number", "shuffled_gap", "shuffled_age")
 class DurationEvent(rf.Branch):
     age = rf.Duration(query=("../origin", "at"), granularity="hours")
     gap = rf.Duration(query="at", delta=True, granularity="hours")
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 class NumericEvent(rf.Branch):
     age = rf.Number(query="prepared_age")
     gap = rf.Number(query="prepared_gap")
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 class DurationModel(rf.Model):

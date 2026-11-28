@@ -118,7 +118,7 @@
 #     "numpy",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -189,7 +189,7 @@ def build(arm: str) -> rf.Model:
 
     class Model(rf.Model):
         elapsed = feature
-        target = rf.Number(mask=True, objective="mse")
+        target = rf.Number(predict=True, objective="mse")
 
     model = Model(preset=CONTROL.name)
     return model

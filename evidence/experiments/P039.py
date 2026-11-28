@@ -112,7 +112,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -172,7 +172,7 @@ class Transaction(rf.Branch):
 
 class PredictionModel(rf.Model):
     transactions = Transaction(length=6, n_layers=2, reduction=rf.Attention(n_layers=2))
-    global_total = rf.Number(mask=True, objective="mse")
+    global_total = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P039", seed=2600)

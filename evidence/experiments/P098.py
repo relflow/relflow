@@ -122,7 +122,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -185,8 +185,8 @@ class Source(rf.Branch):
 class Model(rf.Model):
     source = Source(length=8, overflow="error", reduction=None, n_layers=2)
     query_key = rf.Hash(n_hashes=4, n_bands=8)
-    found = rf.Boolean(mask=True)
-    answer = rf.Number(mask=True, objective="mse")
+    found = rf.Boolean(predict=True)
+    answer = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

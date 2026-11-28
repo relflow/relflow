@@ -122,7 +122,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -160,17 +160,17 @@ ARMS = ("duration", "translated", "static", "number", "shuffled")
 
 class DurationTarget(rf.Model):
     signal = rf.Number
-    target = rf.Duration(query=("started_at", "ended_at"), granularity="hours", mask=True, objective="mse")
+    target = rf.Duration(query=("started_at", "ended_at"), granularity="hours", predict=True, objective="mse")
 
 
 class StaticTarget(rf.Model):
     signal = rf.Number
-    target = rf.Duration(query="ended_at", start=ANCHOR, granularity="hours", mask=True, objective="mse")
+    target = rf.Duration(query="ended_at", start=ANCHOR, granularity="hours", predict=True, objective="mse")
 
 
 class NumericTarget(rf.Model):
     signal = rf.Number
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 def records(*, rows: int, seed: int) -> Iterator[dict]:

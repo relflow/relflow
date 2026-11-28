@@ -124,7 +124,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -254,7 +254,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, reduction=rf.Attention(n_layers=2))
-    weighted_mean = rf.Number(mask=True, objective="mse")
+    weighted_mean = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P016", seed=3313)

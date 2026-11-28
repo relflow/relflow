@@ -120,7 +120,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -193,7 +193,7 @@ class Item(rf.Branch):
 
 class PredictionModel(rf.Model):
     items = Item(length=ITEMS, n_layers=2, reduction=rf.Attention(n_layers=2))
-    variance = rf.Number(mask=True, objective="mse")
+    variance = rf.Number(predict=True, objective="mse")
 
 
 @experiment("P007", seed=3504)

@@ -132,7 +132,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -185,7 +185,7 @@ def records(*, rows: int, seed: int, common_first: bool = False) -> Iterator[dic
 
 class PredictionModel(rf.Model):
     code = rf.Category(p_unavailable=0.0)
-    target = rf.Number(mask=True, objective="mse")
+    target = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pyarrow.compute as pc
 import relflow as rf
 
@@ -67,14 +68,10 @@ def test_visibility_oracle_integrates_hidden_values_instead_of_leaking_them():
         assert {key: value for key, value in left.items() if key != "hide_signal"} == {
             key: value for key, value in right.items() if key != "hide_signal"
         }
-    model = rf.Model(
-        preset=CONTROL.name,
-        group=rf.Enum(values=proof.GROUPS),
-        signal=rf.Number(mask=rf.Mask(query="hide_signal", skip=True, dropout=False)),
-        target=rf.Boolean(mask=True),
-    )
+    model = proof.Model(preset=CONTROL.name)
     assert set(model.schema.requests) == {rf.Address("group"), rf.Address("signal"), rf.Address("target")}
-    assert model.schema.requests[rf.Address("signal")].mask[0].skip
+    batch = model.encode(pl.DataFrame(hidden + observed), preprocess=proof.redact, strata="predict")
+    assert batch["/signal"].present.flatten().tolist() == [False] * 3 + [True] * 3
 
 
 def test_jitter_stress_changes_only_observations_and_keeps_pristine_targets():

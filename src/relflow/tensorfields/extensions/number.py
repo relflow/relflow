@@ -109,7 +109,7 @@ class Numeric(RequestBase):
     source units. ``alpha=None`` uses cumulative statistics; a value in
     ``(0, 1)`` uses exponential updates. ``n_bands`` and ``offset`` bound
     Fourier exponents. ``jitter=rf.Jitter(...)`` perturbs training inputs once
-    in source units while retaining pristine targets. ``mask=True`` makes the
+    in source units while retaining pristine targets. ``predict=True`` makes the
     scalar a supervised, unembedded target.
     """
 
@@ -230,8 +230,6 @@ def encode(field: RaggedField, *, address: Address) -> tuple[torch.Tensor, torch
     Infinite values stay valued; the embedder clamps them and the loss skips them.
     """
     values = field.values.combine_chunks() if isinstance(field.values, pa.ChunkedArray) else field.values
-    if pa.types.is_list(values.type) or pa.types.is_large_list(values.type) or pa.types.is_fixed_size_list(values.type):
-        raise ValueError(f"number field at '{address}' expects scalar Arrow values, got {values.type}")
     try:
         encoded = pc.cast(values, pa.float64(), safe=True)
     except pa.ArrowInvalid as error:
@@ -278,7 +276,7 @@ class TensorField(TensorFieldBase[torch.Tensor]):
         present, trainable, inferred = masks(projection)
         content, state = encode(input, address=address)
         targets = TensorDict({}, batch_size=input.shape)
-        if address in schema.objectives:
+        if sources.needs_targets(schema):
             target_content, target_state = encode(target, address=address)
             targets = TensorDict(
                 {TensorKey.state: target_state, TensorKey.content: target_content}, batch_size=input.shape
@@ -341,13 +339,23 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         return torch.sqrt(self.var).clamp_min(self.epsilon * (self.mean.abs() + 1.0))
 
     def _apply(self, fn, recurse=True):
-        # MPS cannot hold float64: keep the statistics in float32 there.
+        # Casts such as model.to(torch.bfloat16) move the statistics with the
+        # module but never narrow them: they follow ``count`` to its device in
+        # that device's widest float. MPS cannot convert to float64 itself, so a
+        # tensor leaving it moves before widening and one arriving narrows first.
+        statistics = {name: cast(torch.Tensor, self._buffers[name]) for name in ("mean", "var")}
+        self._buffers.update(dict.fromkeys(statistics))
         try:
-            fn(self.mean)
-        except TypeError:
-            self.mean = self.mean.to(dtype=torch.float32)
-            self.var = self.var.to(dtype=torch.float32)
-        return super()._apply(fn, recurse)
+            super()._apply(fn, recurse)
+        finally:
+            device = self.count.device
+            for name, value in statistics.items():
+                dtype = wide(device)
+                if value.device.type == "mps":
+                    self._buffers[name] = value.to(device=device).to(dtype=dtype)
+                else:
+                    self._buffers[name] = value.to(dtype=dtype).to(device=device)
+        return self
 
     @torch.no_grad()
     def update(self, values: torch.Tensor):
@@ -424,7 +432,8 @@ class GlobalOnlineNormalizer(torch.nn.Module):
         if self.training and update:
             self.update(inputs[finite_mask])
 
-        normalized = (torch.atleast_1d(inputs) - self.mean) / self.scale
+        # Standardize in the statistics' float and return the caller's dtype.
+        normalized = ((torch.atleast_1d(inputs).to(self.mean.dtype) - self.mean) / self.scale).to(inputs.dtype)
         return torch.where(finite_mask, normalized.reshape_as(inputs), inputs)
 
 
@@ -646,18 +655,16 @@ def loss(
     trainable: torch.Tensor = batch.trainable.reshape(N)
     state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
-    loss: torch.Tensor = module.track(
+    indices = trainable.nonzero(as_tuple=True)[0]
+    logits = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
+    loss = module.track(
         (address, strata, Metric.loss, TensorKey.state),
-        value=(
-            torch.nn.functional.cross_entropy(
-                input=cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1),
-                target=state_targets,
-                weight=embedder.counter.weight,
-                reduction="none",
-            )
-            .masked_select(trainable)
-            .mean()
-        ),
+        value=torch.nn.functional.cross_entropy(
+            logits.index_select(0, indices),
+            state_targets.index_select(0, indices),
+            weight=embedder.counter.weight,
+            reduction="none",
+        ).mean(),
     )
 
     target: torch.Tensor = cast(torch.Tensor, batch.targets[TensorKey.content]).reshape(N)

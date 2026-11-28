@@ -26,9 +26,9 @@ def descent():
 
 
 def model(*, jacobian=False, second=True):
-    fields = {"context": rf.Number, "first": rf.Boolean(mask=True, weight=3.0)}
+    fields = {"context": rf.Number, "first": rf.Boolean(predict=True, weight=3.0)}
     if second:
-        fields["second"] = rf.Boolean(mask=True, weight=0.5)
+        fields["second"] = rf.Boolean(predict=True, weight=0.5)
     return rf.Model(
         **fields,
         jacobian=jacobian,
@@ -60,7 +60,7 @@ def gradients(losses, parameters):
 @pytest.mark.parametrize("policy", [False, True])
 @pytest.mark.parametrize("entry", ["tree", "schema", "preset", "yaml"])
 def test_construction_keeps_jacobian_as_runtime_policy(tmp_path, entry, policy):
-    fields = {"context": rf.Number, "first": rf.Boolean(mask=True)}
+    fields = {"context": rf.Number, "first": rf.Boolean(predict=True)}
     if entry == "tree":
         candidate = rf.Model(d_model=8, n_layers=1, n_heads=2, jacobian=policy, **fields)
     elif entry == "schema":
@@ -80,7 +80,7 @@ def test_construction_keeps_jacobian_as_runtime_policy(tmp_path, entry, policy):
                     type: number
                   first:
                     type: boolean
-                    mask: true
+                    predict: true
                 """
             )
         )
@@ -96,7 +96,9 @@ def test_construction_keeps_jacobian_as_runtime_policy(tmp_path, entry, policy):
 @pytest.mark.parametrize("policy", [False, True])
 @pytest.mark.parametrize("preset", ["small", "medium"])
 def test_preset_factories_forward_jacobian_without_persisting_it(preset, policy):
-    candidate = rf.Model(preset=preset, d_model=8, n_layers=1, n_heads=2, jacobian=policy, first=rf.Boolean(mask=True))
+    candidate = rf.Model(
+        preset=preset, d_model=8, n_layers=1, n_heads=2, jacobian=policy, first=rf.Boolean(predict=True)
+    )
 
     assert candidate.jacobian is policy
     assert "jacobian" not in candidate.preset.model_dump()
@@ -108,7 +110,7 @@ def test_preset_factories_forward_jacobian_without_persisting_it(preset, policy)
 @pytest.mark.parametrize("entry", ["yaml", "override"])
 def test_templates_reject_jacobian_training_flags(tmp_path, entry, policy):
     path = tmp_path / "model.yaml"
-    content = "preset: small\nd_model: 8\nfields: {first: {type: boolean, mask: true}}\n"
+    content = "preset: small\nd_model: 8\nfields: {first: {type: boolean, predict: true}}\n"
     if entry == "yaml":
         content += f"jacobian: {str(policy).lower()}\n"
     path.write_text(content)
@@ -136,7 +138,7 @@ def test_optional_dependency_is_only_required_for_enabled_training(tmp_path):
 
         table = pa.table({"context": [1.0, 2.0], "first": [True, False], "second": [False, True]})
         model = rf.Model(
-            context=rf.Number, first=rf.Boolean(mask=True), second=rf.Boolean(mask=True),
+            context=rf.Number, first=rf.Boolean(predict=True), second=rf.Boolean(predict=True),
             d_model=8, n_layers=1, n_heads=2, dropout=0.0,
         )
         assert model.jacobian is False
@@ -280,9 +282,9 @@ def test_sparse_nested_objectives_preserve_geometry_and_log_the_raw_loss_sum(des
         history=rf.Branch(
             length=8,
             value=rf.Number,
-            target=rf.Boolean(mask=rf.Mask(query="selected", skip=True, dropout=False, reconstruct=True), weight=3.0),
+            target=rf.Boolean(task=rf.reconstruct(query="selected"), weight=3.0),
         ),
-        answer=rf.Boolean(mask=True, weight=0.5),
+        answer=rf.Boolean(predict=True, weight=0.5),
     )
     candidate.jacobian = True
     source = pa.Table.from_pylist(
@@ -341,8 +343,8 @@ def test_training_grows_vocabulary_rows_without_stale_optimizer_geometry(descent
         dropout=0.0,
         batch_size=2,
         context=rf.Category(p_unavailable=0.0),
-        first=rf.Category(mask=True, p_unavailable=0.0),
-        second=rf.Boolean(mask=True),
+        first=rf.Category(predict=True, p_unavailable=0.0),
+        second=rf.Boolean(predict=True),
     )
     candidate.jacobian = True
     table = pa.table(

@@ -130,7 +130,7 @@
 #     "lightning",
 #     "numpy",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -196,7 +196,7 @@ def score(model: rf.Model, records: Callable[[], Iterator[dict]], accelerator: s
 
 class Model(rf.Model):
     measurement = rf.Number
-    target = rf.Boolean(mask=True)
+    target = rf.Boolean(predict=True)
 
 
 def fit(*, signal: bool, seed: int, steps: int | None, accelerator: str) -> rf.Model:

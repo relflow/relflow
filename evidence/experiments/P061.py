@@ -125,7 +125,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -171,7 +171,7 @@ def build(unavailable: float) -> rf.Model:
     class PredictionModel(rf.Model):
         x = rf.Number
         entity = rf.Category(p_unavailable=unavailable)
-        label = rf.Category(mask=True)
+        label = rf.Category(predict=True)
 
     model = PredictionModel(d_model=32, n_layers=1, n_heads=4, dropout=0.0)
     return model

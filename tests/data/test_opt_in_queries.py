@@ -73,8 +73,8 @@ def test_scalar_extension_rejects_list_valued_query_with_field_context():
     model = rf.Model(preset="small", d_model=8, items=rf.Branch(value=rf.Number(query="values[*]"), length=2))
 
     with pytest.raises(
-        ValueError,
-        match=r"number field at '/items/value' expects scalar Arrow values",
+        TypeError,
+        match=r"extension 'number' at address '/items/value' expects one scalar value per record",
     ):
         model.encode(
             table([{"items": [{"values": [1.0, 2.0]}]}]),

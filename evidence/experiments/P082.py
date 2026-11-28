@@ -206,7 +206,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -301,12 +301,12 @@ def condition(rows: list[dict], length: int, reverse: bool = False) -> list[dict
 
 
 def build() -> rf.Model:
-    mask = rf.Mask(rate=0.35, reconstruct=True)
+    pretrain = rf.reconstruct(rate=0.35)
 
     class Transaction(rf.Branch):
-        merchant = rf.Enum(values=MERCHANTS, p_unavailable=0.0, mask=mask)
-        amount = rf.Number(mask=mask)
-        interval_days = rf.Number(mask=mask)
+        merchant = rf.Enum(values=MERCHANTS, p_unavailable=0.0, task=pretrain)
+        amount = rf.Number(task=pretrain)
+        interval_days = rf.Number(task=pretrain)
         terminal = rf.Enum(values=TERMINALS, p_unavailable=0.0)
 
     class Model(rf.Model):

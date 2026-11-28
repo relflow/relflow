@@ -138,7 +138,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -191,7 +191,7 @@ def records(*, rows: int, seed: int, shuffled: bool = False, tail: bool = False)
 class Model(rf.Model):
     group = rf.Enum(values=GROUPS, p_unavailable=0.0)
     x = rf.Number
-    y = rf.Number(mask=True, objective="mse")
+    y = rf.Number(predict=True, objective="mse")
 
 
 def build() -> rf.Model:

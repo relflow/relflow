@@ -117,10 +117,11 @@ class ModelGraph:
             raise ValueError("reset matched no runtime nodes")
 
         for address in selected_by_address:
+            # Fresh modules start in training mode; follow the model's mode as rebuild does.
             module.nodes[address] = NodeModule(
                 schema=module.schema,
                 address=address,
-            )
+            ).train(module.training)
 
         module.example_input_array = cast(
             dict[str, EncodedInput | Strata],

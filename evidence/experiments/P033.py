@@ -111,7 +111,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -209,7 +209,7 @@ def implied_deviation(rows: list[dict]) -> np.ndarray:
 class Item(rf.Branch):
     value = rf.Number
     group = rf.Category(p_unavailable=0.0)
-    deviation = rf.Number(mask=True, objective="mse", n_linear=2)
+    deviation = rf.Number(predict=True, objective="mse", n_linear=2)
 
 
 class PredictionModel(rf.Model):

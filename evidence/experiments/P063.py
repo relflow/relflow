@@ -123,7 +123,7 @@
 #     "polars",
 #     "pyarrow",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -162,7 +162,7 @@ def records(*, rows: int, seed: int) -> Iterator[dict]:
 
 class PredictionModel(rf.Model):
     x = rf.Number
-    labels = rf.Set(p_unavailable=1.0, mask=True)
+    labels = rf.Set(p_unavailable=1.0, predict=True)
 
 
 def build(size: int) -> rf.Model:

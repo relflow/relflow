@@ -15,7 +15,7 @@ class ProcessingJob(rf.Model):
 
     payload_mb = rf.Quantile
     worker_count = rf.Number
-    duration_ms = rf.Quantile(mask=True)`,
+    duration_ms = rf.Quantile(predict=True)`,
     dataset: {
       id: 'processing', label: 'Processing job',
       observation: 'One queued processing job before it runs.',
@@ -51,7 +51,7 @@ class Claim(rf.Model):
     amount_usd = rf.Quantile
     incident_age_days = rf.Number
     coverage = rf.Category
-    needs_review = rf.Boolean(mask=True)`,
+    needs_review = rf.Boolean(predict=True)`,
     dataset: {
       id: 'claim-review', label: 'Claim review',
       observation: 'One claim considered for manual review.',
@@ -88,7 +88,7 @@ class Listing(rf.Branch):
     product_category = rf.Category
     condition = rf.Enum("good", "fair", "poor")
     asking_price_usd = rf.Quantile
-    sale_price_usd = rf.Quantile(mask=True)
+    sale_price_usd = rf.Quantile(predict=True)
 
 
 class ResaleBatch(rf.Model):

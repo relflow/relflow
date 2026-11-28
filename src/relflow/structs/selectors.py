@@ -10,8 +10,9 @@ import pydantic
 
 from relflow.structs.structure import Branch
 from relflow.structs.tree import Leaf, Node
+from relflow.structs.twigs import Twig
 
-SchemaField: TypeAlias = Branch | Leaf
+SchemaField: TypeAlias = Branch | Leaf | Twig
 
 
 class NodePredicate(pydantic.BaseModel):
@@ -27,7 +28,7 @@ class NodePredicate(pydantic.BaseModel):
             return value
 
         if isinstance(value, NodeAttribute):
-            return cls(func=lambda node: has_model_attribute(node, value.name) and value.get(node) is True)
+            return cls(func=value.flag)
 
         if not callable(value):
             raise TypeError("node predicates must be where(...) expressions or callables")
@@ -96,13 +97,28 @@ class NodeAttribute(pydantic.BaseModel):
         if self.name == "descendants":
             return tuple(str(child.address) for child in getattr(node, "descendants", ()))
         if self.name == "reconstruct":
+            from relflow.structs.experiment import Schema
+
+            root = node.root
             return (
                 isinstance(node, Leaf)
-                and node.active
-                and any(policy.reconstruct for owner in node.path for policy in getattr(owner, "mask", ()))
+                and isinstance(root, Schema)
+                and node.address in root.roles.reconstruction_targets
             )
 
         return getattr(node, self.name, default)
+
+    def flag(self, node: Node) -> bool:
+        """Read the boolean attribute that bare ``where(...)`` and ``~where(...)`` select on."""
+        if not has_model_attribute(node, self.name):
+            return False
+        value = self.get(node)
+        if value is None or isinstance(value, bool):
+            return bool(value)
+        raise TypeError(
+            f"where({self.name!r}) selects boolean attributes, but node '{node.address}' has "
+            f"{type(value).__name__} {value!r}; compare it with ==, is_in(...), contains(...), or is_not_null()"
+        )
 
     def exists(self) -> NodePredicate:
         return NodePredicate(func=lambda node: has_model_attribute(node, self.name))
@@ -114,7 +130,7 @@ class NodeAttribute(pydantic.BaseModel):
         return NodePredicate.from_selector(self) | other
 
     def __invert__(self) -> NodePredicate:
-        return NodePredicate(func=lambda node: not bool(self.get(node, False)))
+        return NodePredicate(func=lambda node: not self.flag(node))
 
     def __bool__(self) -> bool:
         raise TypeError("Use ~where(...) for negated predicates; Python 'not where(...)' cannot build a predicate")

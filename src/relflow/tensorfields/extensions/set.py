@@ -52,6 +52,7 @@ if TYPE_CHECKING:
 sets: Extension = Extension(
     name="set",
     types=(bool, int, float, str, bytes),
+    lists=True,
     callbacks=(VocabularySyncCallback, CounterUpdateCallback, Metrics, AdmittedRowsCallback),
 )
 
@@ -64,7 +65,7 @@ class Request(RequestBase):
     sets are valued; nulls have a separate state. Unknown members share a
     learned unavailable representation; their identities cannot be recovered.
     ``p_unavailable`` independently drops known positive input labels during
-    training without changing targets. ``mask=True`` makes the set a supervised reconstruction target.
+    training without changing targets. ``predict=True`` makes the set a supervised target.
     Predictions contain label/probability pairs for populated vocabulary
     entries. ``threshold`` in ``[0, 1]`` filters those pairs; ``None`` keeps
     all entries. This filter leaves the training loss and metrics unchanged.
@@ -252,7 +253,7 @@ class TensorField(TensorFieldBase[TensorDict]):
 
         state_tensor = torch.from_numpy(input.dense)
         content = encode(input)
-        target_content = encode(target) if address in schema.objectives else None
+        target_content = encode(target) if sources.needs_targets(schema) else None
         # Only objectives retain answers. When present, targets and inputs share
         # member width even when masking hides the complete input collection.
         if target_content is not None:
@@ -504,22 +505,16 @@ def loss(
     state_inputs = cast(torch.Tensor, prediction.payload[TensorKey.state]).reshape(N, -1)
     state_targets = cast(torch.Tensor, batch.targets[TensorKey.state]).reshape(N)
 
-    loss: torch.Tensor = module.track(
+    indices = trainable.nonzero(as_tuple=True)[0]
+    logits = state_inputs.index_select(0, indices)
+    states = state_targets.index_select(0, indices)
+    loss = module.track(
         (prediction.address, strata, Metric.loss, TensorKey.state),
-        value=(
-            torch.nn.functional.cross_entropy(
-                input=state_inputs,
-                target=state_targets,
-                reduction="none",
-            )
-            .masked_select(trainable)
-            .mean()
-        ),
+        value=torch.nn.functional.cross_entropy(logits, states),
     )
-
     module.track(
         (prediction.address, strata, Metric.accuracy, TensorKey.state),
-        value=state_inputs.argmax(dim=1).eq(state_targets).masked_select(trainable).float().mean(),
+        value=logits.argmax(dim=1).eq(states).float().mean(),
     )
 
     valued = trainable & state_targets.eq(Tokens.valued.value)

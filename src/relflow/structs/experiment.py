@@ -11,6 +11,7 @@ from typing import Annotated, Any, ClassVar, Literal, Self, TypeAlias, TypeVar, 
 import pydantic
 from anytree import LevelOrderGroupIter, PreOrderIter
 
+from relflow.structs.declaration import check_root_policies
 from relflow.structs.enums import AttentionInput, AttentionMode, Component, Overflow, Strata
 from relflow.structs.reduction import Attention, ReductionConfig
 from relflow.structs.selectors import (
@@ -22,8 +23,10 @@ from relflow.structs.selectors import (
     predicate,
     where,
 )
-from relflow.structs.structure import Branch, Mask, RequestTypes
-from relflow.structs.tree import Address, Leaf, MaskInput, Node, Rate
+from relflow.structs.structure import Branch, RequestTypes
+from relflow.structs.tasks import SUPERVISED, BoundTask, Reconstruction, Selection, TaskInput, selection, validate
+from relflow.structs.tree import Address, HideInput, Leaf, Node, Rate, check_policy_options
+from relflow.structs.twigs import Twig
 from relflow.tensorfields.base import TENSORFIELDS
 
 __all__ = [
@@ -37,39 +40,48 @@ __all__ = [
     "where",
 ]
 
-TreeFieldInput: TypeAlias = SchemaField | type[Leaf] | type[Branch]
+TreeFieldInput: TypeAlias = SchemaField | type[Leaf] | type[Branch] | type[Twig]
 Defaults: TypeAlias = Callable[[TreeFieldInput], Mapping[str, Any]]
 
 _MISSING = object()
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Roles:
     """Fixed output roles derived once for the current schema tree."""
 
     objectives: tuple[Address, ...]
     decodes: tuple[Address, ...]
     embed: tuple[Address, ...]
+    reconstruct: tuple[Address, ...]
+    fixed_targets: frozenset[Address]
+
+    @functools.cached_property
+    def reconstruction_targets(self) -> frozenset[Address]:
+        """Membership for reconstruction predicates composed with other selectors."""
+        return frozenset(self.reconstruct)
 
 
 def bind_tree_field(name: str, value: TreeFieldInput, *, defaults: Defaults | None = None) -> SchemaField:
     """Bind a fresh subtree without changing the reusable definition or its parent links."""
     if isinstance(value, type) and issubclass(value, Branch):
         value = value()
-    if isinstance(value, type) and issubclass(value, Leaf):
+    if isinstance(value, type) and issubclass(value, (Leaf, Twig)):
         payload = {} if defaults is None else dict(defaults(value))
         bound = value.model_validate({**payload, "name": name})
         if defaults is not None:
             object.__setattr__(bound, "__pydantic_fields_set__", set(type(bound).model_fields))
         return bound
-    if not isinstance(value, (Branch, Leaf)):
-        raise TypeError(f"tree field {name!r} must be a Branch or Leaf instance or class; got {type(value).__name__}")
+    if not isinstance(value, (Branch, Leaf, Twig)):
+        raise TypeError(
+            f"tree field {name!r} must be a Branch, Leaf, or Twig instance or class; got {type(value).__name__}"
+        )
 
-    excluded = {"name", "mask"}
+    excluded = {"name"}
     if isinstance(value, Branch):
         excluded.add("fields")
     payload = value.model_dump(mode="python", round_trip=True, exclude=excluded)
-    payload.update(name=name, mask=value.mask)
+    payload["name"] = name
     if defaults is not None:
         payload.update(
             {option: default for option, default in defaults(value).items() if option not in value.model_fields_set}
@@ -123,32 +135,15 @@ class Schema(Node):
 
     @pydantic.model_validator(mode="before")
     @classmethod
-    def check_masks(cls, data: Any) -> Any:
-        if not isinstance(data, Mapping):
+    def check_root_bounds(cls, data: Any) -> Any:
+        if not isinstance(data, Mapping) or not isinstance(data.get("fields"), Mapping):
             return data
-
-        values = dict(data)
-
-        def restore(node: Any) -> Any:
-            if not isinstance(node, Mapping):
-                return node
-            payload = dict(node)
-            if "mask" in payload:
-                payload["mask"] = Mask.restore(payload["mask"])
-            if isinstance(payload.get("fields"), (list, tuple)):
-                payload["fields"] = [restore(field) for field in payload["fields"]]
-            return payload
-
-        if "fields" in values:
-            values["fields"] = restore(values["fields"])
-            if isinstance(values["fields"], Mapping):
-                root = dict(values["fields"])
-                if root.get("length") is None:
-                    root["length"] = 1
-                if root.get("overflow") is None:
-                    root["overflow"] = Overflow.error
-                values["fields"] = root
-        return values
+        root = dict(data["fields"])
+        if root.get("length") is None:
+            root["length"] = 1
+        if root.get("overflow") is None:
+            root["overflow"] = Overflow.error
+        return {**data, "fields": root}
 
     @classmethod
     def from_tree(
@@ -166,7 +161,9 @@ class Schema(Node):
         cross: bool = False,
         reduction: ReductionConfig | None = Attention(),
         dropout: Rate | None = None,
-        mask: MaskInput = False,
+        hide: HideInput = (),
+        ignore: str | tuple[str, ...] = (),
+        task: TaskInput = None,
         **field_kwargs: TreeFieldInput,
     ) -> Self:
         """Build schema from tree fields."""
@@ -186,7 +183,9 @@ class Schema(Node):
                 ffnx=ffnx,
                 reduction=reduction,
                 dropout=dropout,
-                mask=mask,
+                hide=hide,
+                ignore=ignore,
+                task=task,
             ),
         )
 
@@ -205,27 +204,88 @@ class Schema(Node):
         return payload
 
     @functools.cached_property
-    def roles(self) -> Roles:
-        objectives: list[Address] = []
-        decodes: list[Address] = []
-        embeds: list[Address] = []
+    def tasks(self) -> tuple[BoundTask, ...]:
+        """Resolve declaration sites and active target leaves before building any model components."""
+        supervised_owners: list[Address] = []
+        supervised_targets: dict[Address, None] = {}
+        tasks: list[BoundTask] = []
         for node in PreOrderIter(self.fields):
-            if isinstance(node, Leaf) and not node.active:
+            # Twigs declare no tasks: they shape their branch and are never answers.
+            if isinstance(node, Twig):
                 continue
-            if getattr(node, "embed", False) is True:
-                embeds.append(node.address)
-            if not isinstance(node, Leaf):
-                continue
-            policies = [policy for owner in node.path for policy in getattr(owner, "mask", ()) if policy.reconstruct]
-            if policies:
-                objectives.append(node.address)
-            if any(policy.rate is None for policy in policies):
-                decodes.append(node.address)
-        return Roles(tuple(objectives), tuple(decodes), tuple(embeds))
+            for task in node.declared_tasks:
+                site = "root" if node is self.fields else "leaf" if isinstance(node, Leaf) else "branch"
+                task.validate_placement(site=site, address=node.address)
+                rule = selection(task)
+                if rule is None:
+                    continue
+                if isinstance(node, Leaf):
+                    targets = (node.address,) if node.active else ()
+                else:
+                    targets = tuple(
+                        leaf.address
+                        for child in node.fields
+                        if child.name not in rule.ignore
+                        for leaf in PreOrderIter(child)
+                        if isinstance(leaf, Leaf) and leaf.active
+                    )
+                if not targets:
+                    continue
+                if task is SUPERVISED:
+                    supervised_owners.append(node.address)
+                    supervised_targets.update(dict.fromkeys(targets))
+                else:
+                    tasks.append(BoundTask(task, (node.address,), targets))
+        if supervised_owners:
+            tasks.insert(0, BoundTask(SUPERVISED, tuple(supervised_owners), tuple(supervised_targets)))
+        result = tuple(tasks)
+        validate(result)
+        return result
+
+    @functools.cached_property
+    def field_pools(self) -> dict[tuple[Address, Selection], tuple[Address, ...]]:
+        """Eligible leaves in schema order for each declaration that samples whole fields."""
+        return {
+            (owner, rule): binding.targets
+            for binding in self.tasks
+            if (rule := selection(binding.task)) is not None and rule.fields is not None
+            for owner in binding.owners
+        }
+
+    @functools.cached_property
+    def roles(self) -> Roles:
+        objectives = {address for binding in self.tasks for address in binding.targets}
+        reconstruction = {
+            address for binding in self.tasks if isinstance(binding.task, Reconstruction) for address in binding.targets
+        }
+        fixed_targets = frozenset(
+            address
+            for binding in self.tasks
+            if (rule := selection(binding.task)) is not None and rule.fields is None
+            for address in binding.targets
+        )
+        decodes = {
+            address
+            for binding in self.tasks
+            if (rule := selection(binding.task)) is not None and not rule.sampled
+            for address in binding.targets
+        }
+        embeds = tuple(
+            node.address
+            for node in PreOrderIter(self.fields)
+            if node.embed and (not isinstance(node, Leaf) or node.active)
+        )
+        return Roles(
+            tuple(a for a in self.requests if a in objectives),
+            tuple(a for a in self.requests if a in decodes),
+            embeds,
+            tuple(a for a in self.requests if a in reconstruction),
+            fixed_targets,
+        )
 
     @property
     def reconstruct(self) -> list[Address]:
-        return list(self.roles.objectives)
+        return list(self.roles.reconstruct)
 
     @property
     def objectives(self) -> list[Address]:
@@ -246,6 +306,10 @@ class Schema(Node):
     @functools.cached_property
     def requests(self) -> dict[Address, RequestTypes]:
         return {node.address: node for node in self.descendants if isinstance(node, Leaf)}
+
+    @functools.cached_property
+    def twigs(self) -> dict[Address, Twig]:
+        return {node.address: node for node in self.descendants if isinstance(node, Twig)}
 
     @functools.cached_property
     def active_requests(self) -> dict[Address, RequestTypes]:
@@ -293,7 +357,9 @@ class Schema(Node):
         widths: dict[Address, int | None] = {}
         for address, branch in self.branches.items():
             parts = [
-                int(child.active) if isinstance(child, Leaf) else outputs[child.address] for child in branch.fields
+                int(child.active) if isinstance(child, Leaf) else outputs[child.address]
+                for child in branch.fields
+                if not isinstance(child, Twig)
             ]
             widths[address] = (
                 None
@@ -304,12 +370,6 @@ class Schema(Node):
 
     def overflows(self, address: Address) -> tuple[Overflow | None, ...]:
         return (Overflow.error, *self.requests[Address(str(address))].overflows)
-
-    def masks_for(self, address: Address) -> tuple[tuple[Address, Mask], ...]:
-        request = self.requests[Address(str(address))]
-        return tuple(
-            (node.address, policy) for node in request.path if isinstance(node, (Branch, Leaf)) for policy in node.mask
-        )
 
     def forward_for(self, strata: Strata | str) -> list[Address]:
         selected = self.decodes if Strata.normalize(strata) is Strata.predict else self.objectives
@@ -328,9 +388,12 @@ class Schema(Node):
 
     def clear_tree_caches(self) -> None:
         for name in (
+            "tasks",
+            "field_pools",
             "roles",
             "branches",
             "requests",
+            "twigs",
             "active_requests",
             "shapes",
             "branch_outputs",
@@ -377,6 +440,9 @@ class Schema(Node):
                         "override d_model or the reduction's n_heads"
                     )
 
+        for twig in self.twigs.values():
+            twig.post_bind_validate()
+
         decoded = {*self.objectives, *self.embed}
         for request in self.requests.values():
             request.post_bind_validate()
@@ -403,14 +469,10 @@ class Schema(Node):
 
         from relflow.tensorfields.base import TENSORFIELDS
 
+        objectives = set(self.roles.objectives)
         for address, request in self.active_requests.items():
-            owners = [
-                owner.address
-                for owner in request.path
-                if any(policy.reconstruct for policy in getattr(owner, "mask", ()))
-            ]
             required: list[Component] = []
-            if owners:
+            if address in objectives:
                 required.extend((Component.Decoder, Component.loss))
             elif request.embed:
                 required.append(Component.Decoder)
@@ -421,10 +483,16 @@ class Schema(Node):
                 continue
 
             names = ", ".join(missing)
-            if owners:
-                sources = ", ".join(repr(str(owner)) for owner in owners)
+            if address in objectives:
+                bindings = [binding for binding in self.tasks if address in binding.targets]
+                sources = ", ".join(
+                    f"{binding.task.kind} at '{owner}'"
+                    for binding in bindings
+                    for owner in binding.owners
+                    if owner == "/" or owner == address or str(address).startswith(str(owner) + "/")
+                )
                 raise ValueError(
-                    f"reconstruction mask at {sources} reaches leaf '{address}', but extension "
+                    f"task {sources} reaches leaf '{address}', but extension "
                     f"'{extension.name}' is missing required component(s): {names}; register both Decoder and loss"
                 )
             raise ValueError(
@@ -437,6 +505,11 @@ class Schema(Node):
         *predicates: NodeSelector,
         include_root: bool = True,
     ) -> list[Node]:
+        if len(predicates) == 1:
+            attribute = predicates[0]
+            if type(attribute) is NodeAttribute and attribute.name == "reconstruct":
+                requests = self.requests
+                return [requests[address] for address in self.roles.reconstruct]
         normalized = tuple(NodePredicate.from_selector(item) for item in predicates)
         return [
             node
@@ -456,7 +529,6 @@ class Schema(Node):
         """Mutate matching schema nodes."""
         if not values:
             raise ValueError("update requires at least one field value")
-
         nodes = self.select(*predicates, include_root=include_root)
         if not strict and nodes:
             missing = [name for name in values if not any(has_model_attribute(node, name) for node in nodes)]
@@ -476,11 +548,11 @@ class Schema(Node):
                 applicable_values = {name: value for name, value in values.items() if has_model_attribute(node, name)}
 
                 if validate and applicable_values:
-                    excluded = {"mask", *applicable_values}
+                    check_policy_options(applicable_values, branch=isinstance(node, Branch))
+                    excluded = set(applicable_values)
                     if isinstance(node, Branch):
                         excluded.add("fields")
                     payload = node.model_dump(mode="python", round_trip=True, exclude=excluded)
-                    payload["mask"] = cast(SchemaField, node).mask
                     if isinstance(node, Branch):
                         payload["fields"] = [bind_tree_field(cast(str, child.name), child) for child in node.fields]
                     payload.update(applicable_values)
@@ -604,13 +676,35 @@ class Schema(Node):
 
         for node in roots:
             parent = node.parent
+            if isinstance(parent, Branch) and (
+                node.name in parent.ignore
+                or any(
+                    (rule := selection(task)) is not None and node.name in rule.ignore for task in parent.declared_tasks
+                )
+            ):
+                raise ValueError(
+                    f"delete would remove ignored child '{node.address}'; update its parent's ignore names first"
+                )
+
+        parents: dict[int, tuple[Branch, list[SchemaField]]] = {}
+        for node in roots:
+            parent = node.parent
             if not isinstance(parent, Branch):
                 raise ValueError(f"delete cannot remove '{node.address}' because it has no branch parent")
-            parent.fields = [field for field in parent.fields if field is not node]
-            node.parent = None
+            parents[id(parent)] = (parent, parent.fields)
 
-        self.clear_tree_caches()
-        self.post_bind_validate()
+        try:
+            for parent, children in parents.values():
+                parent.fields = [child for child in children if id(child) not in selected_ids]
+                parent.children = tuple(parent.fields)
+            self.clear_tree_caches()
+            self.post_bind_validate()
+        except Exception:
+            for parent, children in parents.values():
+                parent.fields = children
+                parent.children = tuple(children)
+            self.clear_tree_caches()
+            raise
 
     @contextmanager
     def override(
@@ -622,6 +716,8 @@ class Schema(Node):
         **values: Any,
     ) -> Generator[None, None, None]:
         nodes = self.select(*predicates, include_root=include_root)
+        # ``update`` re-derives a Branch's overflow whenever its length changes,
+        # so restoring the length alone can leave an invalid pair behind.
         snapshot = [
             (
                 node,
@@ -630,7 +726,7 @@ class Schema(Node):
                 name in getattr(node, "model_fields_set", set()),
             )
             for node in nodes
-            for name in values
+            for name in ([*values, "overflow"] if isinstance(node, Branch) and "length" in values else values)
             if has_model_attribute(node, name)
         ]
 
@@ -676,6 +772,8 @@ def build(
     defaults: Defaults | None = None,
 ) -> S:
     """Bind named inputs once and validate their anonymous singleton root."""
+    check_root_policies(children)
+    check_policy_options(options, branch=True)
     bound = bind_fields(fields, children, defaults=defaults)
     if not bound:
         raise ValueError("from_tree requires at least one field")

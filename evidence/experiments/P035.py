@@ -108,7 +108,7 @@
 #     "numpy",
 #     "polars",
 #     "pyyaml>=6",
-#     "relflow>=0.5.0",
+#     "relflow>=0.6.0",
 #     "torch",
 # ]
 #
@@ -206,7 +206,7 @@ def permute_items(rows: list[dict], seed: int) -> tuple[list[dict], np.ndarray]:
 
 class Item(rf.Branch):
     value = rf.Number
-    deviation = rf.Number(mask=True, objective="mse", n_linear=2)
+    deviation = rf.Number(predict=True, objective="mse", n_linear=2)
 
 
 class PredictionModel(rf.Model):

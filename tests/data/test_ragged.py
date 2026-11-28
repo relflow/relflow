@@ -375,7 +375,7 @@ def test_coalesce_does_not_ingest_inactive_field_values():
 
 
 def test_predict_reconstruction_values_are_prepared_when_present():
-    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Hash(mask=True))
+    model = rf.Model(preset="small", d_model=8, value=rf.Number, label=rf.Hash(predict=True))
     source = table([{"value": 1.0, "label": {"not": "hashable"}}])
 
     with pytest.raises(TypeError, match="extension 'hash'.*does not accept Arrow type struct"):
@@ -415,7 +415,7 @@ def test_inactive_only_branch_does_not_ingest_same_named_source_value():
 
 
 def test_datetime_leaf_remains_arrow_backed():
-    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, created=rf.Period(dateparts=["day_of_year"]))
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, created=rf.Period(parts=["day_of_year"]))
     value = datetime.datetime(2025, 2, 3, 4, 5, 6)
     field = (
         coalesce(
@@ -432,7 +432,7 @@ def test_datetime_leaf_remains_arrow_backed():
 
 
 def test_period_tensorfield_encodes_arrow_timestamp_end_to_end():
-    model = rf.Model(preset="small", d_model=8, created=rf.Period(dateparts=["day_of_year", "hour_of_day"]))
+    model = rf.Model(preset="small", d_model=8, created=rf.Period(parts=["day_of_year", "hour_of_day"]))
     encoded = model.encode(
         table([{"created": datetime.datetime(2025, 2, 3, 4, 5, 6)}]),
         strata=Strata.train,
@@ -504,7 +504,7 @@ def test_root_combines_only_the_columns_the_schema_reads():
         n_layers=1,
         n_heads=2,
         d_model=8,
-        amount=rf.Number(mask=rf.Mask(query="eligible", reconstruct=True)),
+        amount=rf.Number(task=rf.reconstruct(query="eligible")),
         events=rf.Branch(value=rf.Number),
     )
     events = pa.array([[{"value": 1.0}], [], None], type=pa.list_(pa.struct([pa.field("value", pa.float64())])))
@@ -536,9 +536,7 @@ def test_root_combines_only_the_columns_the_schema_reads():
 
 
 def test_rate_masks_vary_by_batch_ordinal_and_reproduce():
-    schema = rf.Schema.from_tree(
-        n_layers=1, n_heads=2, d_model=8, amount=rf.Number(mask=rf.Mask(rate=0.5, reconstruct=True))
-    )
+    schema = rf.Schema.from_tree(n_layers=1, n_heads=2, d_model=8, amount=rf.Number(task=rf.reconstruct(rate=0.5)))
     table = pa.table({"amount": [float(value) for value in range(16)]})
 
     patterns = [

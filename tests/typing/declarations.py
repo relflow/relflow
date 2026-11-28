@@ -17,7 +17,7 @@ class NormalizedTransaction(Transaction):
 class FraudDetector(rf.Model):
     account = rf.Hash
     transactions = Transaction(length=64, overflow="tail")
-    fraudulent = rf.Boolean(mask=True)
+    fraudulent = rf.Boolean(predict=True)
 
 
 class UnboundedHistory(rf.Branch):
@@ -26,7 +26,7 @@ class UnboundedHistory(rf.Branch):
 
 class UnboundedFraud(rf.Model):
     history = UnboundedHistory
-    fraudulent = rf.Boolean(mask=True)
+    fraudulent = rf.Boolean(predict=True)
 
 
 def declared_api(schema: rf.Schema) -> None:
@@ -40,6 +40,6 @@ def declared_api(schema: rf.Schema) -> None:
     assert_type(FraudDetector(schema), FraudDetector)
     assert_type(FraudDetector.load("fraud.rf"), FraudDetector)
     assert_type(UnboundedFraud(preset="small"), UnboundedFraud)
-    assert_type(rf.Model(preset="small", history=Transaction, fraudulent=rf.Boolean(mask=True)), rf.Model)
-    rf.Model(d_model=16, n_layers=1, n_heads=2, fields={"history": UnboundedHistory}, target=rf.Boolean(mask=True))
+    assert_type(rf.Model(preset="small", history=Transaction, fraudulent=rf.Boolean(predict=True)), rf.Model)
+    rf.Model(d_model=16, n_layers=1, n_heads=2, fields={"history": UnboundedHistory}, target=rf.Boolean(predict=True))
     rf.Branch(length=2, fields={"history": Transaction})

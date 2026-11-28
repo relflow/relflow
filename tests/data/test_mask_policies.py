@@ -9,56 +9,32 @@ from relflow.data.ragged import coalesce
 
 
 @pytest.mark.parametrize(
-    ("query", "rate", "selection"),
+    ("options", "selection", "reconstruct", "skip", "sampled"),
     [
-        (None, None, "all"),
-        ("eligible", None, "query"),
-        (None, 0.5, "rate"),
-        ("eligible", 0.5, "query_rate"),
-    ],
-)
-@pytest.mark.parametrize("skip", [False, True])
-@pytest.mark.parametrize(
-    ("dropout", "reconstruct"),
-    [
-        (True, False),
-        (False, True),
-        (False, False),
+        ({"predict": True}, "all", True, True, False),
+        ({"hide": "eligible"}, "query", False, False, False),
+        ({"hide": 0.5}, "rate", False, False, True),
+        ({"hide": ("eligible", 0.5)}, "union", False, False, True),
+        ({"task": rf.reconstruct()}, "all", True, False, False),
+        ({"task": rf.reconstruct(query="eligible")}, "query", True, False, False),
+        ({"task": rf.reconstruct(rate=0.5)}, "rate", True, False, True),
+        ({"task": rf.reconstruct(query="eligible", rate=0.5)}, "intersection", True, False, True),
+        ({"task": rf.reconstruct(ablate=True)}, "all", True, True, False),
+        ({"task": rf.reconstruct(query="eligible", ablate=True)}, "query", True, True, False),
+        ({"task": rf.reconstruct(rate=0.5, ablate=True)}, "rate", True, True, True),
     ],
 )
 @pytest.mark.parametrize("strata", list(rf.Strata))
-def test_mask_configuration_matrix(
-    query: str | None,
-    rate: float | None,
-    selection: str,
-    skip: bool,
-    dropout: bool,
-    reconstruct: bool,
-    strata: rf.Strata,
-):
-    size = 256 if rate is not None else 8
+def test_mask_configuration_matrix(options, selection, reconstruct, skip, sampled, strata):
+    size = 256
     eligible = [index % 2 == 0 for index in range(size)]
-    source = pa.table(
-        {
-            "value": [float(index) for index in range(size)],
-            "eligible": eligible,
-        }
-    )
-    policy = rf.Mask(
-        query=query,
-        rate=rate,
-        skip=skip,
-        dropout=dropout,
-        reconstruct=reconstruct,
-    )
-
-    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, value=rf.Number(mask=policy))
+    source = pa.table({"value": [float(index) for index in range(size)], "eligible": eligible})
+    schema = rf.Schema.from_tree(d_model=8, n_layers=1, n_heads=2, value=rf.Number(**options))
     projection = coalesce(source, schema, strata, seed=19, epoch=3).fields["/value"].single()
     inputs, targets = projection.split()
 
-    active = strata == rf.Strata.train or (not dropout and (strata != rf.Strata.predict or rate is None))
+    active = strata == rf.Strata.train or (reconstruct and (strata != rf.Strata.predict or not sampled))
     chosen = (inputs.dense.reshape(-1) != rf.Tokens.valued).tolist()
-
     if not active:
         assert not any(chosen)
     elif selection == "all":
@@ -66,25 +42,45 @@ def test_mask_configuration_matrix(
     elif selection == "query":
         assert chosen == eligible
     elif selection == "rate":
-        assert any(chosen)
-        assert not all(chosen)
+        assert 0 < sum(chosen) < size
+    elif selection == "intersection":
+        assert 0 < sum(chosen) < sum(eligible)
+        assert not any(chosen[1::2])
     else:
-        assert any(chosen)
-        assert not any(value for value, allowed in zip(chosen, eligible, strict=True) if not allowed)
+        assert all(chosen[::2])
+        assert 0 < sum(chosen[1::2]) < size // 2
 
-    expected_target = [active and reconstruct and value for value in chosen]
-    if strata == rf.Strata.predict:
-        assert projection.trainable.tolist() == [False] * size
-        assert projection.inferred.tolist() == expected_target
-    else:
-        assert projection.trainable.tolist() == expected_target
-        assert projection.inferred.tolist() == [False] * size
+    expected = [active and reconstruct and value for value in chosen]
+    assert projection.trainable.tolist() == ([False] * size if strata == rf.Strata.predict else expected)
+    assert projection.inferred.tolist() == (expected if strata == rf.Strata.predict else [False] * size)
     assert targets.placement.to_pylist() == [index for index, value in enumerate(projection.trainable) if value]
+    assert projection.present.tolist() == ([not value for value in chosen] if skip else [True] * size)
 
-    if skip:
-        assert projection.present.tolist() == [not value for value in chosen]
-    else:
-        assert projection.present.all()
+
+def test_overlapping_reconstruction_rules_keep_one_answer_at_its_original_position():
+    model = rf.Model(
+        d_model=8,
+        n_heads=2,
+        n_layers=1,
+        events=rf.Branch(
+            value=rf.Number(task=(rf.reconstruct(query="hide_it"), rf.reconstruct(query="omit_it", ablate=True)))
+        ),
+    )
+    rows = [
+        {"value": 5, "hide_it": True, "omit_it": False},
+        None,
+        {"value": 8, "hide_it": True, "omit_it": True},
+        {"value": 9, "hide_it": False, "omit_it": True},
+    ]
+    source = pa.table({"events": [rows, [], None]})
+    inputs = model.encode(source, strata="train")
+    field = inputs["/events/value"]
+    assert field.present[0].flatten().tolist() == [True, False, False, False]
+    assert field.trainable[0].flatten().tolist() == [True, False, True, True]
+    assert field.targets["content"][field.trainable].tolist() == [5, 8, 9]
+    geom = inputs["/"]["/events"]
+    assert geom.lengths.flatten().tolist() == [4, 0, 0]
+    assert geom.slots[0].flatten().tolist() == [True, False, True, True]
 
 
 @rf.preprocess
@@ -97,13 +93,7 @@ def test_arrow_preprocessor_selector_and_partial_binding():
     configured = rf.Model(
         preset="small",
         d_model=8,
-        amount=rf.Number(
-            mask=rf.Mask(
-                query="mask_amount",
-                skip=True,
-                dropout=False,
-            )
-        ),
+        amount=rf.Number(task=rf.reconstruct(query="mask_amount")),
     )
     source = pa.table({"amount": [100.0, 2_000.0, None]})
 
@@ -113,12 +103,8 @@ def test_arrow_preprocessor_selector_and_partial_binding():
         strata="predict",
     )[rf.Address("/amount")]
 
-    assert field.present[:, 0].tolist() == [True, False, True]
-    assert field.state[:, 0].tolist() == [
-        rf.Tokens.valued,
-        rf.Tokens.padded,
-        rf.Tokens.null,
-    ]
+    assert field.present[:, 0].all()
+    assert field.state[:, 0].tolist() == [rf.Tokens.valued, rf.Tokens.masked, rf.Tokens.null]
 
 
 def test_arrow_preprocessor_attaches_to_data_module():
@@ -126,13 +112,7 @@ def test_arrow_preprocessor_attaches_to_data_module():
         preset="small",
         d_model=8,
         batch_size=3,
-        amount=rf.Number(
-            mask=rf.Mask(
-                query="mask_amount",
-                skip=True,
-                dropout=False,
-            )
-        ),
+        amount=rf.Number(task=rf.reconstruct(query="mask_amount")),
     )
     data = rf.ArrowDataModule(
         model=configured,
@@ -144,7 +124,8 @@ def test_arrow_preprocessor_attaches_to_data_module():
     encoded = next(iter(data.val_dataloader()))
     field = encoded.tensors[rf.Address("/amount")]
 
-    assert field.present[:, 0].tolist() == [True, False, True]
+    assert field.present[:, 0].all()
+    assert field.state[:, 0].tolist() == [rf.Tokens.valued, rf.Tokens.masked, rf.Tokens.null]
 
 
 @rf.preprocess
@@ -157,13 +138,7 @@ def test_stratum_aware_selector():
     configured = rf.Model(
         preset="small",
         d_model=8,
-        amount=rf.Number(
-            mask=rf.Mask(
-                query="mask_amount",
-                skip=True,
-                dropout=False,
-            )
-        ),
+        amount=rf.Number(task=rf.reconstruct(query="mask_amount")),
     )
     source = pa.table({"amount": [1.0, 2.0], "deny_amount": [True, False]})
 
@@ -171,7 +146,7 @@ def test_stratum_aware_selector():
     prediction = configured.encode(source, preprocess=prediction_policy, strata="predict")
 
     assert training[rf.Address("/amount")].present[:, 0].tolist() == [True, True]
-    assert prediction[rf.Address("/amount")].present[:, 0].tolist() == [False, True]
+    assert prediction[rf.Address("/amount")].state[:, 0].ne(rf.Tokens.masked).tolist() == [False, True]
 
 
 EVENTS = pa.large_list(
@@ -211,11 +186,7 @@ def test_arrow_selector_is_atomic_for_a_branch():
         d_model=8,
         events=rf.Branch(
             length=3,
-            mask=rf.Mask(
-                query="mask_event",
-                skip=True,
-                dropout=False,
-            ),
+            task=rf.reconstruct(query="mask_event"),
             kind=rf.Category,
             amount=rf.Number,
         ),
@@ -225,7 +196,7 @@ def test_arrow_selector_is_atomic_for_a_branch():
     amount = encoded[rf.Address("/events/amount")]
     kind = encoded[rf.Address("/events/kind")]
 
-    assert amount.present.tolist() == kind.present.tolist() == [[[True, False, True]]]
+    assert amount.inferred.tolist() == kind.inferred.tolist() == [[[False, True, False]]]
 
 
 def test_shared_selector_can_drive_different_leaf_effects():
@@ -235,14 +206,10 @@ def test_shared_selector_can_drive_different_leaf_effects():
         events=rf.Branch(
             length=3,
             kind=rf.Category(
-                mask=rf.Mask(query="mask_event", dropout=False),
+                hide="mask_event",
             ),
             amount=rf.Number(
-                mask=rf.Mask(
-                    query="mask_event",
-                    skip=True,
-                    dropout=False,
-                ),
+                task=rf.reconstruct(query="mask_event"),
             ),
         ),
     )
@@ -251,10 +218,10 @@ def test_shared_selector_can_drive_different_leaf_effects():
     amount = encoded[rf.Address("/events/amount")]
     kind = encoded[rf.Address("/events/kind")]
 
-    assert amount.present.tolist() == [[[True, False, True]]]
+    assert amount.inferred.tolist() == [[[False, True, False]]]
     assert kind.present.tolist() == [[[True, True, True]]]
-    assert amount.state.tolist() == [[[rf.Tokens.valued, rf.Tokens.padded, rf.Tokens.null]]]
-    assert kind.state.tolist() == [[[rf.Tokens.valued, rf.Tokens.masked, rf.Tokens.valued]]]
+    assert amount.state.tolist() == [[[rf.Tokens.valued, rf.Tokens.masked, rf.Tokens.null]]]
+    assert kind.state.tolist() == [[[rf.Tokens.valued, rf.Tokens.valued, rf.Tokens.valued]]]
 
 
 @rf.preprocess
@@ -269,13 +236,7 @@ def test_last_n_selector():
         d_model=8,
         events=rf.Branch(
             length=3,
-            amount=rf.Number(
-                mask=rf.Mask(
-                    query="mask_event",
-                    skip=True,
-                    dropout=False,
-                )
-            ),
+            amount=rf.Number(task=rf.reconstruct(query="mask_event")),
         ),
     )
 
@@ -285,7 +246,7 @@ def test_last_n_selector():
         strata="predict",
     )[rf.Address("/events/amount")]
 
-    assert field.present.tolist() == [[[True, False, False]]]
+    assert field.inferred.tolist() == [[[False, True, True]]]
 
 
 RISK_EVENTS = pa.large_list(
@@ -324,13 +285,7 @@ def test_exact_k_selector():
         d_model=8,
         events=rf.Branch(
             length=3,
-            amount=rf.Number(
-                mask=rf.Mask(
-                    query="mask_event",
-                    skip=True,
-                    dropout=False,
-                )
-            ),
+            amount=rf.Number(task=rf.reconstruct(query="mask_event")),
         ),
     )
 
@@ -340,7 +295,7 @@ def test_exact_k_selector():
         strata="predict",
     )[rf.Address("/events/amount")]
 
-    assert field.present.tolist() == [[[True, False, False]]]
+    assert field.inferred.tolist() == [[[False, True, True]]]
 
 
 @pytest.mark.parametrize(
@@ -361,13 +316,7 @@ def test_nested_selectors_preserve_all_null_schema(preprocess, datatype):
         d_model=8,
         events=rf.Branch(
             length=3,
-            amount=rf.Number(
-                mask=rf.Mask(
-                    query="mask_event",
-                    skip=True,
-                    dropout=False,
-                )
-            ),
+            amount=rf.Number(task=rf.reconstruct(query="mask_event")),
         ),
     )
 
@@ -414,11 +363,7 @@ def test_observation_selector_broadcasts_into_nested_records():
         d_model=8,
         events=rf.Branch(
             length=2,
-            mask=rf.Mask(
-                query="mask_event",
-                skip=True,
-                dropout=False,
-            ),
+            task=rf.reconstruct(query="mask_event"),
             amount=rf.Number,
         ),
     )
@@ -429,14 +374,14 @@ def test_observation_selector_broadcasts_into_nested_records():
         strata="predict",
     )[rf.Address("/events/amount")]
 
-    assert field.present.tolist() == [
+    assert field.inferred.tolist() == [
+        [[True, True]],
         [[False, False]],
-        [[True, False]],
     ]
 
 
 def test_train_only_query_is_not_required_during_prediction():
-    configured = rf.Model(preset="small", d_model=8, value=rf.Number(mask=rf.Mask(query="eligible")))
+    configured = rf.Model(preset="small", d_model=8, value=rf.Number(hide="eligible"))
 
     field = configured.encode(
         pa.table({"value": [1.0, 2.0]}),
@@ -451,7 +396,7 @@ def test_unconditionally_masked_query_target_can_be_absent_at_prediction():
         preset="small",
         d_model=8,
         feature=rf.Number,
-        label=rf.Boolean(query="labels.value", mask=True),
+        label=rf.Boolean(query="labels.value", predict=True),
     )
 
     source = pa.table({"feature": [1.0, 2.0]})

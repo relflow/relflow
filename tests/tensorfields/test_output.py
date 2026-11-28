@@ -203,7 +203,7 @@ def test_vocabulary_labels_are_large_strings_cached_by_revision():
     assert third.to_pylist() == ["1", "b'two'", "three"]
 
 
-@pytest.mark.parametrize("name", ["dateparts", "hash", "text"])
+@pytest.mark.parametrize("name", ["period", "hash", "text"])
 def test_embedding_only_extensions_declare_no_decoded_output(name: str):
     extension = TENSORFIELDS[name]
 
